@@ -95,16 +95,15 @@ def dev(
 ) -> None:
     """Serve sensor webhooks; published events drive workflow runs in-process."""
     m = load_manifest(manifest)
-    bus = InProcessEventBus()
-    # Constructing the runtime subscribes it to the bus (kept alive by those handlers).
-    InMemoryRuntime(
+    runtime = InMemoryRuntime(
         m,
         harness=ClaudeCodeHarness(m.registry.agents),
         sandboxes=LocalSandboxProvider(),
         secrets=EnvFileSecretsResolver(root),
-        bus=bus,
+        bus=InProcessEventBus(),
     )
-    sensor_host = FastAPISensorHost(bus)
+    # The host injects sensor events via trigger (publish + drain the cascade).
+    sensor_host = FastAPISensorHost(runtime.trigger)
     for sensor in m.sensors:
         if sensor.trigger.kind == "webhook" and sensor.trigger.path:
             sensor_host.register_webhook(sensor.trigger.path, _synthesizing_publisher(m, sensor))

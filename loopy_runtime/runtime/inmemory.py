@@ -46,6 +46,7 @@ class InMemoryRuntime:
         bus,
         retry=None,
         state=None,
+        max_iterations: int = 100_000,
     ):
         self.manifest = manifest
         self.harness = harness
@@ -54,11 +55,15 @@ class InMemoryRuntime:
         self.bus = bus
         self.retry = retry or ExponentialBackoffRetry()
         self.state = state or InMemoryStateStore()
+        # Backstop against an unbounded event loop. The *real* terminator is budgets
+        # (cumulative spend / window), enforced with durability; this just stops a
+        # runaway from spinning forever. Set high — legitimate loops run for many turns.
+        self.max_iterations = max_iterations
 
         self._run_seq = 0
         self._event_seq = 0
         self._runs: dict[RunId, RunStatus] = {}
-        self._run_ids: list[RunId] = []  # creation order, for trigger()'s return
+        self._queue: deque[tuple[str, Event]] = deque()  # pending (workflow, event) work
         # Observability for tests/CLI: global ordered logs across the cascade.
         self.execution_log: list[str] = []
         self.emitted_log: list[str] = []
@@ -72,11 +77,11 @@ class InMemoryRuntime:
 
     # ── Runtime Protocol ────────────────────────────────────────────────────────
     async def trigger(self, event: Event) -> RunId | None:
-        """Route `event` through the bus; return the first run it started (or None)."""
-        before = len(self._run_ids)
-        await self.bus.publish(event)
-        started = self._run_ids[before:]
-        return started[0] if started else None
+        """Route `event` through the bus, then drain the cascade iteratively (a flat
+        loop, not recursion — so loop-backs can't overflow the stack). Returns the
+        first run started (or None if nothing subscribes)."""
+        await self.bus.publish(event)  # handlers enqueue matching (workflow, event)
+        return await self._drain()
 
     async def tick(self, t, scheduled_at):  # pragma: no cover - cron is deferred (B7/B8)
         raise NotImplementedError("cron ticks land with durable timers (B7/B8)")
@@ -90,15 +95,31 @@ class InMemoryRuntime:
     # ── Internals ──────────────────────────────────────────────────────────────
     def _handler_for(self, wf_name: str) -> Callable[[Event], Awaitable[None]]:
         async def handler(event: Event) -> None:
-            await self._execute(wf_name, event)
+            self._queue.append((wf_name, event))  # enqueue; the drain loop runs it
 
         return handler
+
+    async def _drain(self) -> RunId | None:
+        """Run queued (workflow, event) work until the queue empties. Each run's emits
+        enqueue more work via the bus; depth stays flat (one run on the stack at a time)."""
+        first_run_id: RunId | None = None
+        iterations = 0
+        while self._queue:
+            iterations += 1
+            if iterations > self.max_iterations:
+                raise RuntimeError(
+                    f"cascade exceeded max_iterations ({self.max_iterations}) — "
+                    "possible unbounded event loop with no terminating budget"
+                )
+            wf_name, event = self._queue.popleft()
+            run_id = await self._execute(wf_name, event)
+            first_run_id = first_run_id or run_id
+        return first_run_id
 
     async def _execute(self, wf_name: str, event: Event) -> RunId:
         wf = self.manifest.workflows[wf_name]
         self._run_seq += 1
         run_id = f"{wf_name}-{self._run_seq}"
-        self._run_ids.append(run_id)
         await self.state.create_run(run_id, self.manifest.schema_version, event)
         await self.state.append(
             run_id, RunEvent("run_started", None, {"event": event.name}, _now())
