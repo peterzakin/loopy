@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopy.dev/manifest.schema.json",
+  "title": "Loopy manifest",
+  "description": "The compiled artifact a backend consumes (FRONTEND §9).",
+  "type": "object",
+  "required": ["schema_version", "registry", "workflows", "sensors", "lineage"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "compiled_at": { "type": "string" },
+    "loopy_version": { "type": "string" },
+    "registry": {
+      "type": "object",
+      "required": ["sandboxes", "agents", "events"],
+      "properties": {
+        "sandboxes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "provider": { "type": ["string", "null"] },
+              "image": { "type": "object" },
+              "network": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "agents": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["harness", "tools", "skills"],
+            "properties": {
+              "harness": { "type": "object" },
+              "sandbox": { "type": ["string", "null"] },
+              "tools": { "type": "array", "items": { "type": "string" } },
+              "skills": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "events": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["fields"],
+            "properties": { "fields": { "type": "object" } }
+          }
+        }
+      }
+    },
+    "workflows": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["entry", "steps"],
+        "properties": {
+          "entry": { "type": ["string", "null"] },
+          "steps": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["id", "after", "output", "emits", "body", "refs"],
+              "properties": {
+                "id": { "type": "string" },
+                "trigger": {
+                  "type": ["object", "null"],
+                  "properties": { "kind": { "enum": ["event", "cron"] } }
+                },
+                "after": { "type": "array", "items": { "type": "string" } },
+                "agent": { "type": ["string", "null"] },
+                "output": { "type": "object" },
+                "emits": { "type": "array", "items": { "type": "string" } },
+                "budget": { "type": ["object", "null"] },
+                "body": { "type": "string" },
+                "refs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["producer", "field", "raw"],
+                    "properties": {
+                      "producer": { "type": "string" },
+                      "field": { "type": "string" },
+                      "raw": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sensors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "trigger", "emits", "module", "fn"],
+        "properties": {
+          "name": { "type": "string" },
+          "trigger": {
+            "type": "object",
+            "properties": { "kind": { "enum": ["webhook", "poll"] } }
+          },
+          "emits": { "type": "string" },
+          "module": { "type": "string" },
+          "fn": { "type": "string" }
+        }
+      }
+    },
+    "lineage": {
+      "type": "object",
+      "required": ["events"],
+      "properties": {
+        "events": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["producers", "consumers"],
+            "properties": {
+              "producers": { "type": "array", "items": { "type": "string" } },
+              "consumers": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}

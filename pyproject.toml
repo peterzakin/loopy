@@ -1,0 +1,46 @@
+[project]
+name = "loopy-core"
+version = "0.1.0"
+description = "Loopy frontend: compile workflows into a validated manifest (the dbt-core of durable agent workflows)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6",
+    "ruamel.yaml>=0.18",
+    "python-frontmatter>=1.1",
+    "networkx>=3.2",
+    "croniter>=2.0",
+    "typer>=0.12",
+    "datamodel-code-generator>=0.25",
+    "jsonschema>=4.21",
+]
+
+[project.scripts]
+loopy = "loopy_core.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["loopy_core"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.flake8-bugbear]
+# Typer's CLI idiom: function calls in argument defaults are intentional.
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

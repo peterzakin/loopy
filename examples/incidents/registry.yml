@@ -1,0 +1,44 @@
+# The canonical Loopy example — incidents + autoresearch (README).
+# Seeded in M1 (registry only); workflows/sensors grow through M2–M4, full by M5.
+
+# Defaults — every agent inherits these; override a field only when needed.
+defaults:
+  agent:
+    sandbox: default
+    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
+
+# Sandbox — compute + egress. `image:` is the declarative build; `network:` the egress allowlist.
+sandboxes:
+  default:
+    provider: daytona
+    image: { debian_slim: "3.12", apt: [git], workdir: /home/daytona, user: daytona }
+    network: [github.com]
+
+# Agents — tools are plain capability names; numeric caps live in budget, not the tool name.
+agents:
+  Investigator: { skills: [triage, repro-authoring] }
+  Fixer: { harness: { model: claude-opus-4-8 }, tools: [open_pr], skills: [testing] }
+  Reviewer: { tools: [run_evals], skills: [rubrics/fix-quality] }
+  Releaser: { tools: [merge_pr, set_flags], skills: [rollout] }
+
+# Events — the bus contract. A step's `on:` may only name an event registered here.
+events:
+  # published by sensors
+  Incident:
+    fields:
+      source: enum[sentry, linear, datadog, pagerduty, slack]
+      issue_id: id
+      title: str
+      link: url
+  MetricThreshold:
+    fields: { goal_id: id }
+  # emitted by steps — cross-workflow seams + terminal announcements
+  WorkItem:
+    fields:
+      source: enum[sentry, linear, datadog, pagerduty, slack, cve]
+      link: url
+      root_cause: str
+      proposed_goal: str
+      repro: str
+  GoalShipped:
+    fields: { goal_id: id }
