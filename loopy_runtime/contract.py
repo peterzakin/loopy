@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Protocol, runtime_checkable
 
-from loopy_runtime.manifest_model import SandboxSpec, StepSpec
+from loopy_runtime.manifest_model import AgentSpec, SandboxSpec, StepSpec
 
 # ── Identifiers ────────────────────────────────────────────────────────────────
 RunId = str
@@ -80,6 +80,11 @@ class AgentHarness(Protocol):
     async def run(self, step: StepSpec, ctx: StepContext, sandbox: Sandbox) -> StepOutput:
         """Render step.body with ctx, run step.agent in `sandbox`, enforce budget, and
         return output validated against step.output. Raise on failure so RetryPolicy decides."""
+        ...
+
+    def required_keys(self, agent: AgentSpec) -> set[str]:
+        """Env keys this harness needs in the sandbox for `agent` (e.g. the model key).
+        The runtime asserts these are present before running; a stub returns an empty set."""
         ...
 
 

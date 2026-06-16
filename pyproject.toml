@@ -17,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 loopy = "loopy_core.cli:app"
+loopy-run = "loopy_runtime.cli:app"
 
 [dependency-groups]
 dev = [
