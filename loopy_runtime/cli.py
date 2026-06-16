@@ -20,7 +20,7 @@ from loopy_runtime.harness.claude_code import ClaudeCodeHarness
 from loopy_runtime.manifest_model import Manifest, SensorSpec, load_manifest
 from loopy_runtime.payloads import synthesize_fields
 from loopy_runtime.runtime.inmemory import InMemoryRuntime
-from loopy_runtime.sandbox.local import LocalSandboxProvider
+from loopy_runtime.sandbox.factory import make_sandbox_provider
 from loopy_runtime.secrets import EnvFileSecretsResolver
 from loopy_runtime.sensors.host import FastAPISensorHost
 from loopy_runtime.sensors.loader import load_webhook_sensor
@@ -44,17 +44,18 @@ def run(
     event: str = typer.Option(..., "--event", help="Triggering event name."),
     fields: str | None = typer.Option(None, "--fields", help="Event fields as a JSON object."),
     root: Path = typer.Option(Path("."), "--root", help="Project root (for env_file resolution)."),
+    sandbox: str = typer.Option("local", "--sandbox", help="Sandbox provider: local | daytona."),
 ) -> None:
     """Trigger `--event` against the manifest and run it to completion."""
     m = load_manifest(manifest)
-    runtime = InMemoryRuntime(
-        m,
-        harness=ClaudeCodeHarness(m.registry.agents, m.registry.events),
-        sandboxes=LocalSandboxProvider(),
-        secrets=EnvFileSecretsResolver(root),
-        bus=InProcessEventBus(),
-    )
     try:
+        runtime = InMemoryRuntime(
+            m,
+            harness=ClaudeCodeHarness(m.registry.agents, m.registry.events),
+            sandboxes=make_sandbox_provider(sandbox),
+            secrets=EnvFileSecretsResolver(root),
+            bus=InProcessEventBus(),
+        )
         run_id = asyncio.run(runtime.trigger(_load_event(event, fields)))
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         typer.echo(f"error: {exc}", err=True)
@@ -93,13 +94,14 @@ def dev(
     root: Path = typer.Option(Path("."), "--root", help="Project root (for env_file resolution)."),
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(8000, "--port"),
+    sandbox: str = typer.Option("local", "--sandbox", help="Sandbox provider: local | daytona."),
 ) -> None:
     """Serve sensor webhooks; published events drive workflow runs in-process."""
     m = load_manifest(manifest)
     runtime = InMemoryRuntime(
         m,
         harness=ClaudeCodeHarness(m.registry.agents, m.registry.events),
-        sandboxes=LocalSandboxProvider(),
+        sandboxes=make_sandbox_provider(sandbox),
         secrets=EnvFileSecretsResolver(root),
         bus=InProcessEventBus(),
     )
