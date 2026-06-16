@@ -1,0 +1,163 @@
+"""The backend contract (ARCHITECTURE §3.4): runtime value types + structural Protocols.
+
+These are the seams every backend piece plugs into. Frozen against the manifest so
+durable/networked/Daytona/Codex variants drop in behind the same interfaces. The
+`Runtime` orchestration must stay deterministic and effect-free — all nondeterminism
+lives behind `AgentHarness` / `EventBus` / `SandboxProvider`.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Any, Protocol, runtime_checkable
+
+from loopy_runtime.manifest_model import AgentSpec, SandboxSpec, StepSpec
+
+# ── Identifiers ────────────────────────────────────────────────────────────────
+RunId = str
+StepId = str
+EventName = str
+TriggerId = str
+
+
+# ── Runtime value types ─────────────────────────────────────────────────────────
+@dataclass(frozen=True)
+class Event:
+    """A runtime instance of a registered event."""
+
+    name: EventName
+    fields: Mapping[str, Any]
+    id: str
+    emitted_at: datetime
+
+
+@dataclass(frozen=True)
+class StepOutput:
+    fields: Mapping[str, Any]  # validated against step.output
+
+
+@dataclass(frozen=True)
+class StepContext:
+    """Passed to the harness for one step execution."""
+
+    run_id: RunId
+    step_id: StepId
+    event: Event  # the run's triggering event
+    upstream: Mapping[StepId, StepOutput]  # after: predecessors' outputs
+    idempotency_key: str
+
+
+@dataclass(frozen=True)
+class RunEvent:
+    """An entry in the event-sourced run history."""
+
+    kind: str  # run_started|step_scheduled|step_completed|step_failed|event_emitted|timer_fired
+    step_id: StepId | None
+    payload: Mapping[str, Any]
+    at: datetime
+
+
+@dataclass(frozen=True)
+class RunStatus:
+    run_id: RunId
+    state: str  # running|completed|failed
+    step_states: Mapping[StepId, str] = field(default_factory=dict)
+    emitted: tuple[EventName, ...] = ()
+
+
+@dataclass(frozen=True)
+class ExecResult:
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
+# ── AgentHarness ─ B4 ─────────────────────────────────────────────────────────────
+@runtime_checkable
+class AgentHarness(Protocol):
+    async def run(self, step: StepSpec, ctx: StepContext, sandbox: Sandbox) -> StepOutput:
+        """Render step.body with ctx, run step.agent in `sandbox`, enforce budget, and
+        return output validated against step.output. Raise on failure so RetryPolicy decides."""
+        ...
+
+    def required_keys(self, agent: AgentSpec) -> set[str]:
+        """Env keys this harness needs in the sandbox for `agent` (e.g. the model key).
+        The runtime asserts these are present before running; a stub returns an empty set."""
+        ...
+
+
+# ── SandboxProvider ─ B4 ────────────────────────────────────────────────────────────
+@runtime_checkable
+class Sandbox(Protocol):
+    id: str
+
+    async def exec(self, cmd: list[str]) -> ExecResult: ...
+    async def release(self) -> None: ...
+
+
+@runtime_checkable
+class SandboxProvider(Protocol):
+    async def acquire(self, spec: SandboxSpec, secrets: Mapping[str, str]) -> Sandbox:
+        """Provision compute + egress from the spec, with `secrets` injected as env."""
+        ...
+
+
+# ── SecretsResolver ─ §6 ───────────────────────────────────────────────────────────
+@runtime_checkable
+class SecretsResolver(Protocol):
+    def resolve(self, sandbox_name: str, spec: SandboxSpec) -> Mapping[str, str]:
+        """Resolve the sandbox's env_file(s) to an env map. Never recorded/logged."""
+        ...
+
+
+# ── StateStore ─ B8, B10, B11 ───────────────────────────────────────────────────────
+@runtime_checkable
+class StateStore(Protocol):
+    async def create_run(self, run_id: RunId, manifest_version: str, entry: Event) -> None: ...
+    async def append(self, run_id: RunId, ev: RunEvent) -> None: ...
+    async def history(self, run_id: RunId) -> list[RunEvent]: ...
+    async def record_output(self, run_id: RunId, step_id: StepId, out: StepOutput) -> None: ...
+    async def outputs(self, run_id: RunId) -> Mapping[StepId, StepOutput]: ...
+    async def get_watermark(self, t: TriggerId) -> datetime | None: ...
+    async def set_watermark(self, t: TriggerId, ts: datetime) -> None: ...
+    async def seen(self, key: str) -> bool: ...
+    async def mark_seen(self, key: str) -> None: ...
+
+
+# ── EventBus ─ B5 ─────────────────────────────────────────────────────────────────
+# `publish` is async and `Event` is a plain serializable value type so a networked
+# broker (Redis/NATS) is a drop-in behind this Protocol; in-proc is just the first impl.
+@runtime_checkable
+class EventBus(Protocol):
+    async def publish(self, event: Event) -> None: ...
+    def subscribe(self, name: EventName, handler: Callable[[Event], Awaitable[None]]) -> None: ...
+
+
+# ── SensorHost ─ B1 ingress ──────────────────────────────────────────────────────────
+SensorFn = Callable[..., Any]
+
+
+@runtime_checkable
+class SensorHost(Protocol):
+    def register_webhook(self, path: str, fn: SensorFn) -> None: ...
+    def register_poll(self, interval: timedelta, fn: SensorFn, t: TriggerId) -> None: ...
+    async def start(self) -> None: ...
+
+
+# ── RetryPolicy ─ B9 ──────────────────────────────────────────────────────────────────
+@runtime_checkable
+class RetryPolicy(Protocol):
+    def next_backoff(self, attempt: int, error: Exception) -> timedelta | None:
+        """Delay before retry, or None to give up."""
+        ...
+
+
+# ── Runtime ─ the engine: B1–B6 (B7/B10/B11 stubbed in v1) ───────────────────────────
+@runtime_checkable
+class Runtime(Protocol):
+    async def trigger(self, event: Event) -> RunId | None: ...
+    async def tick(self, t: TriggerId, scheduled_at: datetime) -> RunId | None: ...
+    async def resume(self, run_id: RunId) -> None: ...
+    async def status(self, run_id: RunId) -> RunStatus: ...

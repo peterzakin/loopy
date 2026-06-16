@@ -162,6 +162,9 @@
     },
     "sandboxes": {
       "default": {
+        "env_file": [
+          "secrets/default.env"
+        ],
         "image": {
           "apt": [
             "git"

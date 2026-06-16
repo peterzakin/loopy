@@ -21,6 +21,9 @@ class Sandbox(BaseModel):
     provider: str | None = None
     image: dict = Field(default_factory=dict)
     network: list[str] = Field(default_factory=list)
+    # Path(s) to env file(s) supplying this sandbox's secrets. A *reference* only —
+    # the compiler records it and never reads the file (values resolve at run time).
+    env_file: list[str] = Field(default_factory=list)
     span: Span
 
 

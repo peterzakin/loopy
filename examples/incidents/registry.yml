@@ -13,6 +13,7 @@ sandboxes:
     provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/daytona, user: daytona }
     network: [github.com]
+    env_file: secrets/default.env   # referenced, gitignored; resolved by the backend at run time
 
 # Agents — tools are plain capability names; numeric caps live in budget, not the tool name.
 agents:

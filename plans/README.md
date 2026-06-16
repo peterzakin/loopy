@@ -1,14 +1,50 @@
 # Plans
 
-Working plans for features and tasks, created with a coding agent before code is written.
+Working plans for features and tasks, drafted with a coding agent before code is written, then
+ticked off and annotated with decisions as the work proceeds.
 
-## Convention
-- Copy `TEMPLATE.md` to `YYYY-MM-DD-short-slug.md`, one file per task.
-- Draft it with the agent, then have the agent tick off steps and log decisions as it works.
-- Commit plans alongside the code they produce.
-- Delete or archive a plan once its work merges — unless it captures a lasting
-  architectural decision, in which case move the rationale somewhere durable
-  (e.g. a `docs/decisions/` ADR) so it isn't lost when the plan is pruned.
+## Layout
 
-Point your agent at this folder (e.g. from `CLAUDE.md`) so it reads the active plan
-at the start of a session.
+```
+plans/
+  TEMPLATE.md              # copy this to start a new plan
+  README.md                # this file
+  future/<epic>/           # plans whose work has NOT yet merged
+  past/<epic>/             # archived plans whose work HAS merged
+```
+
+- **Epics** group related plans (a coherent body of work). An epic is a kebab-case directory, e.g.
+  `backend-v1`, `loopy-core-frontend`. One milestone = one plan file inside its epic.
+- **Lifecycle is per-plan.** A plan starts in `future/<epic>/`. When its work merges to `main`, move
+  that one file to `past/<epic>/` (`git mv`). The **same epic name appears under both `future/` and
+  `past/`** while the epic is in flight — the directory name is what correlates them.
+- `future/` answers "what's left to do"; `past/` is the archive of shipped work.
+
+## Conventions
+
+- File naming: `YYYY-MM-DD-short-slug.md` (the date orders milestones within an epic).
+- Each plan carries a `**Status:**` line (`draft` / `active` / `done`) so progress *within* an
+  in-flight epic is visible without moving the file — the directory tracks merged/not, the field
+  tracks in-progress state.
+- Commit plans alongside the code they produce; move a plan to `past/` in the same PR (or the
+  follow-up) that merges its work.
+- **Lasting architectural decisions don't live only in archived plans.** When a plan captures a
+  durable decision, graduate the rationale into `ARCHITECTURE.md` / `FRONTEND.md` (or a
+  `docs/decisions/` ADR) so it survives independently of the archive.
+
+## Starting new work
+
+1. `mkdir -p plans/future/<epic>/` if the epic is new.
+2. Copy `TEMPLATE.md` to `plans/future/<epic>/YYYY-MM-DD-slug.md` and draft it with the agent.
+3. As you build, tick steps and log decisions in the plan.
+4. On merge, `git mv` the plan to `plans/past/<epic>/`.
+
+Point your agent at the active epic under `future/` (e.g. from `CLAUDE.md`) so it reads the live
+plan at the start of a session.
+
+## Current epics
+
+- _(none active — `future/` is empty)_
+- **`past/backend-v1/`** — the non-durable, in-memory backend (env_file addendum → contract →
+  in-memory engine). Shipped.
+- **`past/loopy-core-frontend/`** — the compile frontend (M0–M5). Shipped.
