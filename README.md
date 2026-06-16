@@ -155,19 +155,41 @@ A sensor **returns a registered event** — and returning *is* emitting: the eve
 bus and routes to whichever workflow subscribes with `on:`. Return `None` to emit nothing, or
 `yield` an `Iterator[Event]` to emit several.
 
-**Compile rule.** A sensor must annotate its return as an Event class generated from
-`registry.yml` (imported from `loopy.events`). A sensor with no return annotation, or one
-returning a type that isn't a registered event, fails to load — `loopy compile` errors before
-anything runs. That's what guarantees every event on the bus has a contract.
+**Compile rule.** A sensor must **declare** the event it emits via `emits=` (a registered event
+from `registry.yml`), in a form `loopy compile` can read statically — it never imports or runs
+your code. A sensor that declares no `emits`, names an unregistered event, or builds its
+declaration imperatively (so it can't be read statically) fails to load — `loopy compile` errors
+before anything runs. That's what guarantees every event on the bus has a contract. The return
+type (`-> Incident`) is optional: it's checked by *your* typechecker (mypy) against `loopy.events`,
+not by the compiler.
 
 ```python
 from loopy import sensor
-from loopy.events import Incident             # generated from registry.yml
+from loopy.events import Incident             # generated from registry.yml — optional, for your typechecker
 
-@sensor(webhook="/hooks/sentry")
-def sentry_issues(req) -> Incident:           # normalizes Sentry → Incident; omit the annotation and it won't compile
+@sensor(webhook="/hooks/sentry", emits="Incident")   # `emits` is the contract the compiler reads
+def sentry_issues(req) -> Incident:                  # return type optional; mypy checks the payload shape
     i = req.json["data"]["issue"]
     return Incident(source="sentry", issue_id=i["id"], title=i["title"], link=i["permalink"])
+```
+
+Sensors can be written in other languages too. Without free-function decorators (e.g. TypeScript),
+declare them in a single statically-analyzable `sensorRegistry` literal instead — same contract, a
+declared `emits` next to the trigger:
+
+```typescript
+import type { Incident } from "loopy/events";        // generated — optional, for tsc
+
+export const sensorRegistry = {
+  sentryIssues: {
+    webhook: "/hooks/sentry",
+    emits: "Incident",                                // the contract the compiler reads
+    handler: (req): Incident => ({
+      source: "sentry", issue_id: req.body.data.issue.id,
+      title: req.body.data.issue.title, link: req.body.data.issue.permalink,
+    }),
+  },
+};
 ```
 
 See `sensors/sensors.py` for the full example.

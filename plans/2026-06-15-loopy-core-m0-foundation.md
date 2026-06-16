@@ -34,7 +34,9 @@ exit code.
 - [ ] Package skeleton per §10 (`discovery.py`, `registry/`, `workflow/`, `template/`, `sensors/`,
       `events/`, `compile/`, `cli.py`) with import-clean stubs.
 - [ ] IR models (§2): `Sandbox`, `Harness`, `Agent`, `Event`, `Registry`; `Trigger`, `Budget`,
-      `Ref`, `Step`, `Workflow`. Pydantic v2. (`Trigger` carries a single `event`, not a list.)
+      `Ref`, `Step`, `Workflow`; `Sensor`, `SensorTrigger`. Pydantic v2. (`Trigger` carries a single
+      `event`, not a list; `SensorTrigger` is a distinct `webhook`|`poll` union — do not reuse
+      `Trigger`. M0 defines all IR nodes; M4 populates `Sensor`.)
 - [ ] `Span` model; helper to attach spans to nodes.
 - [ ] `compile/diagnostics.py`: `Diagnostic {severity, code, message, span, hint?}` + a collector
       that records and never raises; final "exit nonzero if any errors" helper.
@@ -45,7 +47,7 @@ exit code.
 
 ## Files likely to change
 - `loopy_core/**` — new package skeleton
-- `loopy_core/registry/model.py`, `loopy_core/workflow/model.py` — IR
+- `loopy_core/registry/model.py`, `loopy_core/workflow/model.py`, `loopy_core/sensors/model.py` — IR
 - `loopy_core/compile/diagnostics.py` — diagnostics + code constants
 - `loopy_core/compile/pipeline.py`, `loopy_core/cli.py` — orchestration + entrypoint
 

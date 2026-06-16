@@ -1,4 +1,4 @@
-# Loopy — Implementation Plan
+# Loopy — Architecture
 
 ## 0. Architecture principle
 
@@ -74,8 +74,9 @@ A versioned JSON document — the only thing a backend is allowed to depend on. 
   allowlist); event field contracts (typed maps).
 - **Lineage**: cross-workflow event seams (`Incident`, `WorkItem`, `MetricThreshold`,
   `GoalReopened`, `ResultRejected`) and within-workflow output edges.
-- **Sensors**: registered sensor metadata (route/poll config + the event type each emits). The
-  function *bodies* stay in Python (see §4.6).
+- **Sensors**: registered sensor metadata (route/poll config + the event each declares it emits).
+  The function *bodies* stay in their authoring language — Python today, other languages later;
+  the manifest is language-neutral and records only the descriptor (see §4.6).
 
 ---
 
@@ -279,9 +280,11 @@ Parse `registry.yml` into typed models (`Defaults`, `Sandbox`, `Agent`, `Event`)
 is the one reserved lowercase sandbox.
 
 ### 4.2 Event codegen → `loopy.events`
-Generate importable Event classes from the registry so sensors can annotate returns
-(`-> Incident`). Dynamic module backed by the loaded registry at runtime, plus `loopy compile`
-writing `.pyi` stubs for IDEs/typecheckers.
+Generate importable typed Event definitions from the registry so sensors get author-facing types
+and their own typechecker validates payload shapes. **Multi-target**, one per supported sensor
+language: Python (dynamic module backed by the loaded registry + `.pyi` stubs from `loopy compile`),
+TypeScript (`.d.ts`), more additively. Author-facing only — Core reads each sensor's declared
+`emits`, not these types (see §4.6).
 
 ### 4.3 Workflow loader + DAG
 Split each `.md` into YAML frontmatter + prose body → `Step`. Build the DAG: exactly one `on:`
@@ -300,9 +303,14 @@ return annotations are registered Event classes; template refs resolve to declar
 Emits the **manifest** (§2). This is the keystone — everything downstream trusts it.
 
 ### 4.6 Sensors (compile-time half)
-Validate the README rule: a sensor must annotate its return as a registered Event class or it
-fails to load. The function *bodies* run in the backend's `SensorHost` (§3.2) — sensors straddle
-the line: definitions are frontend-validated, execution is backend.
+Validate the README rule by **static inspection, never import**: a sensor must *declare* a
+registered event via `emits` (a decorator arg in Python, a `sensorRegistry` literal in TypeScript)
+in a form Core can read without executing code, or it fails to load. The declaration — not the
+return type — is the source of truth; the return annotation is optional sugar the author's own
+typechecker enforces. A **pluggable per-language inspector** reduces each sensor to a common
+descriptor (Python AST first); the function *bodies* run in the backend's `SensorHost` (§3.2),
+which executes whatever language the sensor is written in. Sensors straddle the line: declarations
+are frontend-validated, execution is backend.
 
 ---
 

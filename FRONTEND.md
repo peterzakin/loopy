@@ -63,6 +63,10 @@ class Step(BaseModel):
     agent: str; output: dict[str,dict]; emits: list[str]   # output values are JSON Schema fragments
     budget: Budget|None; body: str; refs: list[Ref]; span: Span
 class Workflow(BaseModel):  name: str; entry: str; steps: dict[str,Step]; dag: "nx.DiGraph"
+
+# sensors/model.py  (defined in M0, populated/validated in M4 — §7)
+class SensorTrigger(BaseModel): kind: Literal["webhook","poll"]; path: str|None; interval: str|None; span: Span  # distinct from Trigger
+class Sensor(BaseModel):        name: str; trigger: SensorTrigger; emits: str; module: str; fn: str; span: Span    # emits = declared registered event
 ```
 
 The IR is the single source the manifest is serialized from — keep it lossless w.r.t. anything a
@@ -173,24 +177,34 @@ resolves `{{ }}` at run time against recorded values.
 
 ## 7. Sensors (P7)
 
-- **AST-only — never import sensor modules.** Parse each `sensors/*.py` to an AST and inspect
-  `@sensor`-decorated functions statically. No user code executes at compile time, so the frontend
-  stays pure and offline; `loopy.events` is a pure *output* artifact, never a compile input. The
-  only fact the checker needs is the set of registered event names from P1.
-- The emitted event type must be **statically determinable and registered**, satisfiable two ways
-  (**accept both**):
-  - **annotated form** — a return annotation naming an Event (`-> Incident`, including
-    `Iterator[Incident]`) with an instance return; or
-  - **tuple form** — each `return`/`yield` emits `(Event, payload)`, the first element naming the
-    event. Immune to annotation aliasing, and lets sensors be authored before `loopy.events`
-    exists (the payload is a plain map validated against the event's schema at run time).
-
-  The checker tries the annotation first, then falls back to scanning `return`/`yield` expressions
-  for the tuple shape.
-- **S1** every `@sensor` function emits a statically determinable event type (via either form);
-  none found → diagnostic.
-- **S2** that event type is **registered** in `registry.yml`; otherwise the project fails to
-  compile (`LOOPY-E401`) — this is the README's hard rule.
+- **Static inspection only — never import or execute sensor modules.** Parse each sensor file
+  statically (Python → AST) and read each sensor's declared metadata. No user code runs at compile
+  time, so the frontend stays pure and offline; `loopy.events` is a pure *output* artifact, never a
+  compile input. The only fact the checker needs is the set of registered event names from P1.
+- **`emits` is declared, not inferred.** Each sensor declares the event it emits as a literal
+  alongside its trigger config (`webhook`/`poll`) — Core reads that literal directly. The return
+  type annotation (`-> Incident`) becomes **optional sugar checked by the author's own typechecker**
+  (mypy/tsc against `loopy.events`), not Core's source of truth. This is what keeps the inspector
+  language-agnostic: every language exposes the same contract — *a statically readable `emits` +
+  trigger* — so the per-language inspector locates a declaration rather than resolving a foreign
+  type system. (Decision §13 #4.)
+- **Two equivalent surfaces; pick the idiom per language** (both reduce to the same descriptor):
+  - **decorator form** — `@sensor(webhook="/hooks/sentry", emits="Incident")` (idiomatic in Python,
+    which has free-function decorators); or
+  - **registry-literal form** — a single named export (`sensorRegistry`) that is a **statically
+    analyzable object/array literal** of `{trigger, emits, handler}` entries (idiomatic in
+    TypeScript and other languages without free-function decorators).
+- **The hard constraint on both surfaces: the declaration must be a literal Core can read without
+  executing anything.** A registry populated imperatively (loops, `.push()`, spreads from computed
+  values) defeats static inspection → `LOOPY-E402` ("sensor declaration not statically analyzable"),
+  not silent omission.
+- **The per-language inspector is pluggable.** Each language ships an inspector that walks its
+  source to the common descriptor `{name, trigger(webhook|poll), emits, module, fn}`; the Python
+  AST inspector is the first implementation. Core depends only on the descriptor.
+- **S1** every sensor declares a statically readable `emits` (and trigger); missing or
+  non-statically-analyzable → `LOOPY-E402`.
+- **S2** that event is **registered** in `registry.yml`; otherwise the project fails to compile
+  (`LOOPY-E401`) — this is the README's hard rule.
 - **S3** webhook `path` unique across sensors; `poll` interval well-formed.
 - Record `{name, trigger(webhook|poll), emits, module, fn}` per sensor.
 
@@ -263,9 +277,13 @@ Notes:
 - A companion **`manifest.schema.json`** (JSON Schema) validates the emitted manifest in CI and
   documents the contract backends consume.
 
-**`loopy.events` codegen.** Emit a real module + `.pyi` stubs from the registry (via
-`datamodel-code-generator` or hand-emitted pydantic classes) so sensors can `from loopy.events
-import Incident` and typecheckers see the fields.
+**`loopy.events` codegen.** Emit typed event definitions from the registry so sensors can import
+them and the author's typechecker validates the payload shape. Codegen is **multi-target**, one
+target per supported sensor language: Python (a real module + `.pyi` stubs, via
+`datamodel-code-generator` or hand-emitted pydantic classes — `from loopy.events import Incident`);
+TypeScript (`.d.ts` types — `import type { Incident } from "loopy/events"`); further targets are
+additive. These types are author-facing convenience only; Core never consumes them (it reads the
+declared `emits` literal — §7).
 
 ---
 
@@ -278,7 +296,7 @@ loopy_core/
   registry/   model.py · loader.py · types.py
   workflow/   frontmatter.py · model.py · loader.py · dag.py
   template/   parser.py · resolver.py
-  sensors/    loader.py
+  sensors/    model.py · loader.py
   events/     codegen.py
   compile/    pipeline.py · diagnostics.py · manifest.py
   manifest.schema.json
@@ -325,10 +343,17 @@ runtime/agent/sandbox deps.
 3. **Union `on:` is not supported — DECIDED.** A step triggers on exactly one event; multi-source
    fan-in happens at the sensor layer (several sensors emit one normalized event, e.g. `Incident`).
    A first-class multi-trigger / source-group syntax may be revisited later.
-4. **Sensors are validated by AST inspection, not import — DECIDED.** No user code runs at compile
-   time (supersedes the earlier "controlled subprocess" approach). The emitted event type must be
-   statically determinable and registered; both an annotated `-> Event` return and a
-   `(Event, payload)` tuple emit are accepted (§7).
+4. **Sensors are validated by static inspection, never import — DECIDED.** No user code runs at
+   compile time (supersedes the earlier "controlled subprocess" approach). **The emitted event is
+   *declared*, not inferred from the return type:** each sensor states `emits` as a literal next to
+   its trigger config, and Core reads it from a statically analyzable form — a decorator
+   (`@sensor(emits="Incident")`, idiomatic in Python) or a named `sensorRegistry` object/array
+   literal (idiomatic in TypeScript). The return annotation is optional sugar the author's own
+   typechecker enforces. This supersedes the earlier annotation/tuple *inference* approach, which
+   was Python-type-system-specific and didn't generalize; declaration keeps the per-language
+   inspector a literal-read, not a foreign type resolver. A declaration Core can't read statically
+   (imperatively built registry) is an error (`E402`), not a silent omission. The surface differs
+   per language; the invariant — *a statically readable `emits` + trigger* — does not. (§7)
 5. **Manifest is deterministic/hashable**; `compiled_at` lives outside core. **DECIDED — accepted**
    (content-hashing enables incremental runs later).
 6. **Field types are JSON Schema; terse forms are sugar over it** (§3). **DECIDED — keep the sugar**
@@ -362,8 +387,8 @@ Some codes are shared where the same failure surfaces from more than one place (
 | **E303** | T2 | P6 | cron trigger field other than `scheduled_at` / `last_run` |
 | **E304** | T3 | P6 | `<step>` is not a **direct** `after:` predecessor |
 | **E305** | T3 | P6 | `<field>` not a top-level key of that step's `output:` schema |
-| **E401** | S2 | P7 | a sensor's emitted event isn't registered |
-| **E402** | S1 | P7 | no statically determinable emitted event (neither emit form resolves) |
+| **E401** | S2 | P7 | a sensor's declared `emits` event isn't registered |
+| **E402** | S1 | P7 | sensor `emits` missing or not statically analyzable (e.g. imperatively built registry) |
 | **E403** | S3 | P7 | duplicate webhook `path`, or malformed `poll` interval |
 | **E501** | X2 | P8 | step `agent:` doesn't resolve to a registered Agent |
 | **E502** | X2 | P8 | an agent's `sandbox` doesn't resolve |
