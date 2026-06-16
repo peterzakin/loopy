@@ -45,6 +45,7 @@ plan at the start of a session.
 ## Current epics
 
 - _(none active — `future/` is empty)_
+- **`past/daytona-sandbox/`** — DaytonaSandboxProvider behind the Sandbox Protocol. Shipped.
 - **`past/agent-emitted-events/`** — the agent produces emitted-event payloads (#3, E1) and real
   sensor execution (#2, E2). Shipped.
 - **`past/backend-v1/`** — the non-durable, in-memory backend (env_file addendum → contract →
