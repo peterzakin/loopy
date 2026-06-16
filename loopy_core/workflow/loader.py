@@ -19,6 +19,7 @@ from loopy_core.discovery import Inventory
 from loopy_core.registry.model import Registry
 from loopy_core.registry.types import desugar
 from loopy_core.span import Span, span_at
+from loopy_core.template.parser import extract_refs
 from loopy_core.workflow.dag import build_dag
 from loopy_core.workflow.frontmatter import ParsedDoc, parse_document
 from loopy_core.workflow.model import Budget, Step, Trigger, Workflow
@@ -98,6 +99,9 @@ def _build_step(
             latency=raw_budget.get("latency"),
         )
 
+    # P5 — extract template refs now (body start line is known here for accurate spans).
+    refs = extract_refs(doc.body, doc.body_start_line, file, diags)
+
     return Step(
         id=step_id,
         workflow=wf_name,
@@ -109,6 +113,7 @@ def _build_step(
         emits=_as_list(meta.get("emits")),
         budget=budget,
         body=doc.body,
+        refs=refs,
         span=span_at(file, 1),
     )
 

@@ -14,6 +14,7 @@ from loopy_core.compile.model import Lineage, Project
 from loopy_core.discovery import discover
 from loopy_core.registry.loader import load_registry
 from loopy_core.sensors.loader import load_sensors
+from loopy_core.template.resolver import resolve_refs
 from loopy_core.workflow.loader import load_workflows
 
 
@@ -33,8 +34,10 @@ def compile_project(root: str | Path) -> CompileResult:
     inv = discover(root)
     # P1–P2 — registry + type desugar
     registry = load_registry(inv, diags)
-    # P3–P6 — workflows: frontmatter, steps, DAG, template refs
+    # P3–P5 — workflows: frontmatter, steps, DAG, template-ref extraction
     workflows = load_workflows(inv, registry, diags)
+    # P6 — statically resolve template refs against events + after: predecessors
+    resolve_refs(workflows, registry, diags)
     # P7 — sensors
     sensors = load_sensors(inv, registry, diags)
 
