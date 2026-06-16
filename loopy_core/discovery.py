@@ -18,6 +18,9 @@ class Inventory:
     workflow_files: list[Path] = field(default_factory=list)
     skill_dirs: list[Path] = field(default_factory=list)
     sensor_files: list[Path] = field(default_factory=list)
+    # Resolvable skill names (relative paths of dirs under skills/ holding a SKILL.md),
+    # including namespaced names like "rubrics/fix-quality".
+    skill_names: set[str] = field(default_factory=set)
 
 
 def _sorted(paths) -> list[Path]:
@@ -35,9 +38,12 @@ def discover(root: str | Path) -> Inventory:
     workflow_files = _sorted(workflows_dir.glob("*/*.md")) if workflows_dir.is_dir() else []
 
     skills_dir = root / "skills"
-    skill_dirs = (
-        _sorted(p for p in skills_dir.iterdir() if p.is_dir()) if skills_dir.is_dir() else []
-    )
+    skill_dirs: list[Path] = []
+    skill_names: set[str] = set()
+    if skills_dir.is_dir():
+        skill_dirs = _sorted(p for p in skills_dir.iterdir() if p.is_dir())
+        for skill_md in skills_dir.rglob("SKILL.md"):
+            skill_names.add(skill_md.parent.relative_to(skills_dir).as_posix())
 
     sensors_dir = root / "sensors"
     sensor_files = (
@@ -56,4 +62,5 @@ def discover(root: str | Path) -> Inventory:
         workflow_files=workflow_files,
         skill_dirs=skill_dirs,
         sensor_files=sensor_files,
+        skill_names=skill_names,
     )

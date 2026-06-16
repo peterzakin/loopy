@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from loopy_core.compile.crosscheck import cross_check
 from loopy_core.compile.diagnostics import DiagnosticCollector
 from loopy_core.compile.model import Lineage, Project
 from loopy_core.discovery import discover
@@ -45,7 +46,10 @@ def compile_project(root: str | Path) -> CompileResult:
         registry=registry,
         workflows=workflows,
         sensors=sensors,
-        lineage=Lineage(),  # P8/P9 cross-cutting + lineage land in M5
+        lineage=Lineage(),  # populated by X5 in cross_check
     )
+
+    # P8 — whole-IR cross-cutting checks (X2/X3) + lineage (X5)
+    cross_check(project, inv, diags)
 
     return CompileResult(project=project, diagnostics=diags)
