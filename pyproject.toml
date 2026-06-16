@@ -1,9 +1,23 @@
 [project]
 name = "loopy-core"
 version = "0.1.0"
-description = "Loopy frontend: compile workflows into a validated manifest (the dbt-core of durable agent workflows)"
+description = "Loopy: author, compile, and run durable agent workflows (the dbt-core for agents)."
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Peter Zakin", email = "peter@upfront.com" }]
+keywords = ["workflows", "agents", "llm", "durable-execution", "compiler", "manifest"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Build Tools",
+    "Typing :: Typed",
+]
 dependencies = [
     "pydantic>=2.6",
     "ruamel.yaml>=0.18",
@@ -16,6 +30,11 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
 ]
+
+[project.urls]
+Homepage = "https://github.com/peterzakin/loopy"
+Repository = "https://github.com/peterzakin/loopy"
+Issues = "https://github.com/peterzakin/loopy/issues"
 
 [project.scripts]
 loopy = "loopy_cli:app"
