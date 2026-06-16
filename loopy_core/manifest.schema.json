@@ -20,7 +20,8 @@
             "properties": {
               "provider": { "type": ["string", "null"] },
               "image": { "type": "object" },
-              "network": { "type": "array", "items": { "type": "string" } }
+              "network": { "type": "array", "items": { "type": "string" } },
+              "env_file": { "type": "array", "items": { "type": "string" } }
             }
           }
         },

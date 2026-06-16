@@ -39,7 +39,12 @@ def _registry(registry: Registry) -> dict:
 
 
 def _sandbox(sb: Sandbox) -> dict:
-    return {"provider": sb.provider, "image": sb.image, "network": sb.network}
+    return {
+        "provider": sb.provider,
+        "image": sb.image,
+        "network": sb.network,
+        "env_file": sb.env_file,
+    }
 
 
 def _agent(ag: Agent) -> dict:

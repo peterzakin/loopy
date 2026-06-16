@@ -35,6 +35,15 @@ def _is_capitalized(name: str) -> bool:
     return bool(name[:1].isupper())
 
 
+def _as_str_list(value: object) -> list[str]:
+    """Normalize a scalar-or-list YAML value to a list of strings."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
 def load_registry(inv: Inventory, diags: DiagnosticCollector) -> Registry:
     if inv.registry_path is None:
         diags.error(
@@ -91,6 +100,7 @@ def _load_sandboxes(sb_map: Mapping, file: str) -> dict[str, Sandbox]:
             provider=body.get("provider"),
             image=dict(body.get("image") or {}),
             network=list(body.get("network") or []),
+            env_file=_as_str_list(body.get("env_file")),  # path reference only; not read here
             span=span_at(file, _line_of(sb_map, name)),
         )
     return out
