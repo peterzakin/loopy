@@ -46,17 +46,21 @@ class FakeDaytona:
 def test_acquire_builds_image_and_injects_secrets():
     fake = FakeDaytona()
     provider = DaytonaSandboxProvider(client=fake)
-    spec = SandboxSpec(image={"image": "python:3.12-slim"})
+    spec = SandboxSpec(image={"base": "python:3.12-slim"})
     asyncio.run(provider.acquire(spec, {"ANTHROPIC_API_KEY": "sk-test"}))
     params = fake.created[0]
-    assert params.image == "python:3.12-slim"
+    # image is now a built Daytona Image object (mapping is unit-tested separately).
+    assert params.image is not None
     assert params.env_vars == {"ANTHROPIC_API_KEY": "sk-test"}
 
 
-def test_acquire_defaults_image_when_unset():
+def test_acquire_from_snapshot_uses_snapshot_params():
     fake = FakeDaytona()
-    asyncio.run(DaytonaSandboxProvider(client=fake).acquire(SandboxSpec(), {}))
-    assert fake.created[0].image == "debian:12.9"
+    spec = SandboxSpec(image={"snapshot": "snap-1"})
+    asyncio.run(DaytonaSandboxProvider(client=fake).acquire(spec, {"K": "v"}))
+    params = fake.created[0]
+    assert getattr(params, "snapshot", None) == "snap-1"
+    assert params.env_vars == {"K": "v"}
 
 
 def test_exec_joins_argv_and_maps_result():

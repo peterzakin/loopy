@@ -14,8 +14,7 @@ from collections.abc import Mapping
 
 from loopy_runtime.contract import ExecResult
 from loopy_runtime.manifest_model import SandboxSpec
-
-_DEFAULT_IMAGE = "debian:12.9"
+from loopy_runtime.sandbox.daytona_image import apply_image_plan, plan_image
 
 
 class DaytonaSandbox:
@@ -50,15 +49,18 @@ class DaytonaSandboxProvider:
             self._client = AsyncDaytona()  # reads DAYTONA_API_KEY / DAYTONA_API_URL
         return self._client
 
-    @staticmethod
-    def _image(spec: SandboxSpec) -> str:
-        # v1: a base-image string. Full image-build mapping (apt packages, etc.) is deferred.
-        return spec.image.get("image", _DEFAULT_IMAGE) if spec.image else _DEFAULT_IMAGE
-
     def _create_params(self, spec: SandboxSpec, secrets: Mapping[str, str]):
-        from daytona import CreateSandboxFromImageParams
+        from daytona import (
+            CreateSandboxFromImageParams,
+            CreateSandboxFromSnapshotParams,
+            Image,
+        )
 
-        return CreateSandboxFromImageParams(image=self._image(spec), env_vars=dict(secrets))
+        build = plan_image(spec.image)
+        if build.snapshot is not None:
+            return CreateSandboxFromSnapshotParams(snapshot=build.snapshot, env_vars=dict(secrets))
+        image = apply_image_plan(build, Image)
+        return CreateSandboxFromImageParams(image=image, env_vars=dict(secrets))
 
     async def acquire(self, spec: SandboxSpec, secrets: Mapping[str, str]) -> DaytonaSandbox:
         client = self._ensure_client()
