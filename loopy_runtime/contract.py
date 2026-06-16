@@ -39,6 +39,15 @@ class StepOutput:
 
 
 @dataclass(frozen=True)
+class StepResult:
+    """What a harness returns for one step: the step output plus a payload per event
+    the step emits (decision #3 = B — the agent produces the emitted event's fields)."""
+
+    output: StepOutput
+    emits: Mapping[EventName, Mapping[str, Any]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class StepContext:
     """Passed to the harness for one step execution."""
 
@@ -77,9 +86,10 @@ class ExecResult:
 # ── AgentHarness ─ B4 ─────────────────────────────────────────────────────────────
 @runtime_checkable
 class AgentHarness(Protocol):
-    async def run(self, step: StepSpec, ctx: StepContext, sandbox: Sandbox) -> StepOutput:
-        """Render step.body with ctx, run step.agent in `sandbox`, enforce budget, and
-        return output validated against step.output. Raise on failure so RetryPolicy decides."""
+    async def run(self, step: StepSpec, ctx: StepContext, sandbox: Sandbox) -> StepResult:
+        """Render step.body with ctx, run step.agent in `sandbox`, enforce budget, and return a
+        StepResult: output validated against step.output, plus a payload per `emits:` event.
+        Raise on failure so RetryPolicy decides."""
         ...
 
     def required_keys(self, agent: AgentSpec) -> set[str]:

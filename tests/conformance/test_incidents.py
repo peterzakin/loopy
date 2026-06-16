@@ -26,7 +26,7 @@ def _runtime():
     m = load_manifest(GOLDEN)
     return InMemoryRuntime(
         m,
-        harness=StubAgentHarness(),
+        harness=StubAgentHarness(m.registry.events),
         sandboxes=LocalSandboxProvider(),
         secrets=StaticSecretsResolver({}),
         bus=InProcessEventBus(),
