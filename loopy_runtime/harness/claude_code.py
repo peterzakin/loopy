@@ -13,8 +13,8 @@ import json
 from collections.abc import Mapping
 
 from loopy_runtime.budget import BudgetEnforcer
-from loopy_runtime.contract import Sandbox, StepContext, StepOutput
-from loopy_runtime.manifest_model import AgentSpec, StepSpec
+from loopy_runtime.contract import Sandbox, StepContext, StepOutput, StepResult
+from loopy_runtime.manifest_model import AgentSpec, EventContract, StepSpec
 from loopy_runtime.providers import required_model_key
 from loopy_runtime.render import TemplateRenderer
 
@@ -24,8 +24,14 @@ class HarnessError(Exception):
 
 
 class ClaudeCodeHarness:
-    def __init__(self, agents: Mapping[str, AgentSpec], renderer: TemplateRenderer | None = None):
+    def __init__(
+        self,
+        agents: Mapping[str, AgentSpec],
+        events: Mapping[str, EventContract] | None = None,
+        renderer: TemplateRenderer | None = None,
+    ):
         self._agents = dict(agents)
+        self._events = dict(events or {})
         self._renderer = renderer or TemplateRenderer()
 
     def required_keys(self, agent: AgentSpec) -> set[str]:
@@ -40,13 +46,13 @@ class ClaudeCodeHarness:
         argv += ["--permission-mode", "bypassPermissions"]  # the sandbox is the boundary
         return argv
 
-    async def run(self, step: StepSpec, ctx: StepContext, sandbox: Sandbox) -> StepOutput:
+    async def run(self, step: StepSpec, ctx: StepContext, sandbox: Sandbox) -> StepResult:
         if step.agent is None or step.agent not in self._agents:
             raise HarnessError(f"step '{step.id}' has no resolvable agent")
         agent = self._agents[step.agent]
 
         body = self._renderer.render(step, ctx.event, ctx.upstream)
-        prompt = self._with_output_instruction(body, step)
+        prompt = body + self._instruction(step)
         argv = self.build_argv(step, agent, prompt)
 
         timeout = BudgetEnforcer.wall_clock_seconds(step.budget)
@@ -60,14 +66,27 @@ class ClaudeCodeHarness:
 
         envelope = self._parse_envelope(result.stdout, step)
         BudgetEnforcer.check_spend(step.budget, float(envelope.get("total_cost_usd", 0.0)))
-        return StepOutput(fields=self._parse_output(envelope.get("result", ""), step))
 
-    @staticmethod
-    def _with_output_instruction(body: str, step: StepSpec) -> str:
-        if not step.output:
-            return body
-        keys = ", ".join(sorted(step.output))
-        return f"{body}\n\nReturn ONLY a JSON object with these keys: {keys}."
+        parsed = self._parse_result(envelope.get("result", ""), step)
+        return StepResult(
+            output=StepOutput(fields=self._extract_output(parsed, step)),
+            emits=self._extract_emits(parsed, step),
+        )
+
+    def _instruction(self, step: StepSpec) -> str:
+        """Ask for a JSON object with `output` keys and an `emits` payload per emitted event."""
+        if not step.output and not step.emits:
+            return ""
+        parts = []
+        if step.output:
+            parts.append(f'"output" with keys {sorted(step.output)}')
+        for event_name in step.emits:
+            fields = sorted(self._events[event_name].fields) if event_name in self._events else []
+            parts.append(f'"emits.{event_name}" with keys {fields}')
+        return (
+            '\n\nReturn ONLY a JSON object {"output": {...}, "emits": {"<Event>": {...}}} '
+            f"providing {'; '.join(parts)}."
+        )
 
     @staticmethod
     def _parse_envelope(stdout: str, step: StepSpec) -> dict:
@@ -80,14 +99,40 @@ class ClaudeCodeHarness:
         return envelope
 
     @staticmethod
-    def _parse_output(result_text: str, step: StepSpec) -> dict:
-        if not step.output:
+    def _parse_result(result_text: str, step: StepSpec) -> dict:
+        if not step.output and not step.emits:
             return {}
         try:
             parsed = json.loads(result_text)
         except json.JSONDecodeError as exc:
-            raise HarnessError(f"step '{step.id}': result was not JSON matching output:") from exc
-        missing = set(step.output) - set(parsed) if isinstance(parsed, dict) else set(step.output)
+            raise HarnessError(f"step '{step.id}': result was not JSON") from exc
+        if not isinstance(parsed, dict):
+            raise HarnessError(f"step '{step.id}': result JSON was not an object")
+        return parsed
+
+    @staticmethod
+    def _extract_output(parsed: dict, step: StepSpec) -> dict:
+        if not step.output:
+            return {}
+        obj = parsed.get("output")
+        missing = set(step.output) - set(obj) if isinstance(obj, dict) else set(step.output)
         if missing:
             raise HarnessError(f"step '{step.id}': output missing keys {sorted(missing)}")
-        return {key: parsed[key] for key in step.output}
+        return {key: obj[key] for key in step.output}
+
+    def _extract_emits(self, parsed: dict, step: StepSpec) -> dict[str, dict]:
+        emits_obj = parsed.get("emits") if isinstance(parsed.get("emits"), dict) else {}
+        out: dict[str, dict] = {}
+        for event_name in step.emits:
+            payload = emits_obj.get(event_name)
+            if not isinstance(payload, dict):
+                raise HarnessError(f"step '{step.id}': no payload for emits '{event_name}'")
+            contract = self._events.get(event_name)
+            if contract is not None:
+                missing = set(contract.fields) - set(payload)
+                if missing:
+                    raise HarnessError(
+                        f"step '{step.id}': emit '{event_name}' missing {sorted(missing)}"
+                    )
+            out[event_name] = payload
+        return out

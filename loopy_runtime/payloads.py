@@ -1,9 +1,8 @@
 """Deterministic value synthesis from JSON Schema fragments.
 
-Used by the runtime to build emitted-event payloads from the event contract, and by
-the test `StubAgentHarness` to build step outputs. **v1 simplification:** emitted-event
-fields are synthesized from the registry contract (with real step-output values where
-field names match); a future refinement lets the agent produce the payload directly.
+Used by the test `StubAgentHarness` (output + emit payloads) and the `loopy dev`
+webhook stub. The runtime no longer synthesizes emitted payloads — per decision #3=B
+the agent produces them; this is only for offline/deterministic stand-ins.
 """
 
 from __future__ import annotations

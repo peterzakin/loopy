@@ -48,7 +48,7 @@ def run(
     m = load_manifest(manifest)
     runtime = InMemoryRuntime(
         m,
-        harness=ClaudeCodeHarness(m.registry.agents),
+        harness=ClaudeCodeHarness(m.registry.agents, m.registry.events),
         sandboxes=LocalSandboxProvider(),
         secrets=EnvFileSecretsResolver(root),
         bus=InProcessEventBus(),
@@ -97,7 +97,7 @@ def dev(
     m = load_manifest(manifest)
     runtime = InMemoryRuntime(
         m,
-        harness=ClaudeCodeHarness(m.registry.agents),
+        harness=ClaudeCodeHarness(m.registry.agents, m.registry.events),
         sandboxes=LocalSandboxProvider(),
         secrets=EnvFileSecretsResolver(root),
         bus=InProcessEventBus(),

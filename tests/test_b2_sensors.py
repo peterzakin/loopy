@@ -66,7 +66,7 @@ def test_webhook_drives_full_cascade():
     m = load_manifest(GOLDEN)
     runtime = InMemoryRuntime(
         m,
-        harness=StubAgentHarness(),
+        harness=StubAgentHarness(m.registry.events),
         sandboxes=LocalSandboxProvider(),
         secrets=StaticSecretsResolver({}),
         bus=InProcessEventBus(),

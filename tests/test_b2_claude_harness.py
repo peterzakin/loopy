@@ -15,7 +15,13 @@ import pytest
 from loopy_runtime.budget import BudgetExceeded
 from loopy_runtime.contract import Event, ExecResult, StepContext
 from loopy_runtime.harness.claude_code import ClaudeCodeHarness, HarnessError
-from loopy_runtime.manifest_model import AgentSpec, BudgetSpec, HarnessSpec, StepSpec
+from loopy_runtime.manifest_model import (
+    AgentSpec,
+    BudgetSpec,
+    EventContract,
+    HarnessSpec,
+    StepSpec,
+)
 
 
 class CaptureSandbox:
@@ -65,10 +71,35 @@ def test_build_argv_has_expected_flags():
 
 def test_run_parses_typed_output():
     step = StepSpec(id="w/s", agent="Fixer", output={"goal": {"type": "string"}}, body="b")
-    sandbox = CaptureSandbox({"result": json.dumps({"goal": "ship it"}), "total_cost_usd": 0.01})
-    out = asyncio.run(_harness().run(step, _ctx(), sandbox))
-    assert out.fields == {"goal": "ship it"}
-    assert sandbox.argv[0] == "claude"
+    envelope = {
+        "result": json.dumps({"output": {"goal": "ship it"}, "emits": {}}),
+        "total_cost_usd": 0.01,
+    }
+    result = asyncio.run(_harness().run(step, _ctx(), CaptureSandbox(envelope)))
+    assert result.output.fields == {"goal": "ship it"}
+    assert result.emits == {}
+
+
+def test_run_produces_agent_emit_payload():
+    # The agent generates the emitted event's fields (decision #3 = B).
+    step = StepSpec(id="w/s", agent="Fixer", emits=["WorkItem"], body="b")
+    events = {"WorkItem": EventContract(fields={"link": {"type": "string"}})}
+    harness = ClaudeCodeHarness({"Fixer": AGENT}, events)
+    envelope = {
+        "result": json.dumps({"output": {}, "emits": {"WorkItem": {"link": "https://pr/1"}}}),
+        "total_cost_usd": 0.0,
+    }
+    result = asyncio.run(harness.run(step, _ctx(), CaptureSandbox(envelope)))
+    assert result.emits == {"WorkItem": {"link": "https://pr/1"}}
+
+
+def test_run_errors_when_emit_payload_missing():
+    step = StepSpec(id="w/s", agent="Fixer", emits=["WorkItem"], body="b")
+    events = {"WorkItem": EventContract(fields={"link": {"type": "string"}})}
+    harness = ClaudeCodeHarness({"Fixer": AGENT}, events)
+    envelope = {"result": json.dumps({"output": {}, "emits": {}}), "total_cost_usd": 0.0}
+    with pytest.raises(HarnessError):
+        asyncio.run(harness.run(step, _ctx(), CaptureSandbox(envelope)))
 
 
 def test_run_requires_model_key_declared():

@@ -8,12 +8,28 @@ from datetime import UTC, datetime
 import pytest
 
 from loopy_runtime.bus.inproc import InProcessEventBus
-from loopy_runtime.contract import Event
+from loopy_runtime.contract import Event, StepOutput, StepResult
 from loopy_runtime.manifest_model import Manifest
 from loopy_runtime.runtime.inmemory import InMemoryRuntime
 from loopy_runtime.sandbox.local import LocalSandboxProvider
 from loopy_runtime.secrets import StaticSecretsResolver
 from tests.stub_harness import StubAgentHarness
+
+
+class RecordingHarness:
+    """Captures each step's incoming event and emits caller-supplied payloads."""
+
+    def __init__(self, emit_payloads: dict[str, dict]):
+        self.emit_payloads = emit_payloads
+        self.seen: dict[str, dict] = {}
+
+    def required_keys(self, agent):
+        return set()
+
+    async def run(self, step, ctx, sandbox):
+        self.seen[step.id] = dict(ctx.event.fields)
+        emits = {ev: self.emit_payloads.get(ev, {}) for ev in step.emits}
+        return StepResult(output=StepOutput({}), emits=emits)
 
 
 def _step(step_id: str, event: str) -> dict:
@@ -33,7 +49,7 @@ def _step(step_id: str, event: str) -> dict:
 def _runtime(manifest: Manifest) -> InMemoryRuntime:
     return InMemoryRuntime(
         manifest,
-        harness=StubAgentHarness(),
+        harness=StubAgentHarness(manifest.registry.events),
         sandboxes=LocalSandboxProvider(),
         secrets=StaticSecretsResolver({}),
         bus=InProcessEventBus(),
@@ -104,7 +120,7 @@ def test_unbounded_loop_hits_iteration_cap_not_stack_overflow():
     )
     rt = InMemoryRuntime(
         manifest,
-        harness=StubAgentHarness(),
+        harness=StubAgentHarness(manifest.registry.events),
         sandboxes=LocalSandboxProvider(),
         secrets=StaticSecretsResolver({}),
         bus=InProcessEventBus(),
@@ -112,3 +128,54 @@ def test_unbounded_loop_hits_iteration_cap_not_stack_overflow():
     )
     with pytest.raises(RuntimeError, match="max_iterations"):
         asyncio.run(rt.trigger(Event(name="Tick", fields={}, id="t", emitted_at=datetime.now(UTC))))
+
+
+def test_agent_produced_payload_flows_to_downstream_event():
+    # produce emits Mid with an agent-chosen value; consume (a separate workflow on Mid)
+    # must SEE that value in its triggering event — not a synthesized stub.
+    produce = {
+        "id": "produce/p",
+        "trigger": {"kind": "event", "event": "Start"},
+        "after": [],
+        "agent": None,
+        "output": {},
+        "emits": ["Mid"],
+        "budget": None,
+        "body": "",
+        "refs": [],
+    }
+    consume = {
+        **produce,
+        "id": "consume/c",
+        "trigger": {"kind": "event", "event": "Mid"},
+        "emits": [],
+    }
+    manifest = Manifest.model_validate(
+        {
+            "schema_version": "1",
+            "registry": {
+                "sandboxes": {},
+                "agents": {},
+                "events": {
+                    "Start": {"fields": {}},
+                    "Mid": {"fields": {"note": {"type": "string"}}},
+                },
+            },
+            "workflows": {
+                "produce": {"entry": "p", "steps": {"p": produce}},
+                "consume": {"entry": "c", "steps": {"c": consume}},
+            },
+            "sensors": [],
+            "lineage": {"events": {}},
+        }
+    )
+    harness = RecordingHarness({"Mid": {"note": "AGENT_VALUE"}})
+    rt = InMemoryRuntime(
+        manifest,
+        harness=harness,
+        sandboxes=LocalSandboxProvider(),
+        secrets=StaticSecretsResolver({}),
+        bus=InProcessEventBus(),
+    )
+    asyncio.run(rt.trigger(Event(name="Start", fields={}, id="t", emitted_at=datetime.now(UTC))))
+    assert harness.seen["consume/c"] == {"note": "AGENT_VALUE"}

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 
 from loopy_runtime.budget import BudgetExceeded
@@ -24,9 +24,9 @@ from loopy_runtime.contract import (
     RunStatus,
     StepContext,
     StepOutput,
+    StepResult,
 )
 from loopy_runtime.manifest_model import Manifest, SandboxSpec, StepSpec, WorkflowSpec
-from loopy_runtime.payloads import synthesize_fields
 from loopy_runtime.retry import ExponentialBackoffRetry
 from loopy_runtime.state.inmemory import InMemoryStateStore
 
@@ -138,20 +138,25 @@ class InMemoryRuntime:
                 upstream={p: outputs[p] for p in step.after if p in outputs},
                 idempotency_key=f"{run_id}:{step.id}",
             )
-            output = await self._run_step(step, ctx)
-            outputs[local_name] = output
+            result = await self._run_step(step, ctx)
+            outputs[local_name] = result.output
             step_states[local_name] = "completed"
             self.execution_log.append(step.id)
-            await self.state.record_output(run_id, local_name, output)
+            await self.state.record_output(run_id, local_name, result.output)
             await self.state.append(run_id, RunEvent("step_completed", step.id, {}, _now()))
 
             for event_name in step.emits:
+                payload = result.emits.get(event_name)
+                if payload is None:
+                    raise RuntimeError(
+                        f"step '{step.id}' declares emits '{event_name}' but produced no payload"
+                    )
                 emitted.append(event_name)
                 self.emitted_log.append(event_name)
                 await self.state.append(
                     run_id, RunEvent("event_emitted", step.id, {"event": event_name}, _now())
                 )
-                await self.bus.publish(self._build_emitted(event_name, output))
+                await self.bus.publish(self._build_emitted(event_name, payload))
 
         await self.state.append(run_id, RunEvent("run_completed", None, {}, _now()))
         self._runs[run_id] = RunStatus(
@@ -162,7 +167,7 @@ class InMemoryRuntime:
         )
         return run_id
 
-    async def _run_step(self, step: StepSpec, ctx: StepContext) -> StepOutput:
+    async def _run_step(self, step: StepSpec, ctx: StepContext) -> StepResult:
         agent = self.manifest.registry.agents.get(step.agent) if step.agent else None
         sandbox_name = (agent.sandbox if agent and agent.sandbox else "default") or "default"
         spec = self.manifest.registry.sandboxes.get(sandbox_name) or SandboxSpec()
@@ -195,15 +200,20 @@ class InMemoryRuntime:
         finally:
             await sandbox.release()
 
-    def _build_emitted(self, event_name: str, source: StepOutput) -> Event:
+    def _build_emitted(self, event_name: str, payload: Mapping[str, object]) -> Event:
+        # The agent produced this payload (decision #3 = B); validate it against the
+        # registered contract's top-level fields.
         contract = self.manifest.registry.events.get(event_name)
-        fields = (
-            synthesize_fields(contract.fields, source.fields) if contract else dict(source.fields)
-        )
+        if contract is not None:
+            missing = set(contract.fields) - set(payload)
+            if missing:
+                raise RuntimeError(
+                    f"emitted event '{event_name}' is missing fields {sorted(missing)}"
+                )
         self._event_seq += 1
         return Event(
             name=event_name,
-            fields=fields,
+            fields=dict(payload),
             id=f"evt-{self._event_seq}",
             emitted_at=_now(),
         )
