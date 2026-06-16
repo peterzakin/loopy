@@ -1,9 +1,10 @@
 """InMemoryRuntime (B1–B6) — non-durable, single-process engine.
 
 Walks the `after:` DAG, renders templates, runs each step's agent in a sandbox,
-records outputs, and publishes `emits:` to the bus (which triggers subscribed
-workflows — the cross-workflow cascade, incl. loop-backs). The DAG-walk is
-effect-free: the only effects are the harness, the bus, and the sandbox.
+records outputs + an event-sourced history, and publishes `emits:` to the bus
+(which triggers subscribed workflows — the cross-workflow cascade, incl. loop-backs
+and event fan-out). The DAG-walk is effect-free: the only effects are the harness,
+the bus, and the sandbox.
 
 Out of scope (v1): durable timers, crash-recoverable `resume`, version pinning.
 """
@@ -12,11 +13,13 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 from loopy_runtime.budget import BudgetExceeded
 from loopy_runtime.contract import (
     Event,
+    RunEvent,
     RunId,
     RunStatus,
     StepContext,
@@ -26,6 +29,10 @@ from loopy_runtime.manifest_model import Manifest, SandboxSpec, StepSpec, Workfl
 from loopy_runtime.payloads import synthesize_fields
 from loopy_runtime.retry import ExponentialBackoffRetry
 from loopy_runtime.state.inmemory import InMemoryStateStore
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
 
 
 class InMemoryRuntime:
@@ -51,19 +58,25 @@ class InMemoryRuntime:
         self._run_seq = 0
         self._event_seq = 0
         self._runs: dict[RunId, RunStatus] = {}
+        self._run_ids: list[RunId] = []  # creation order, for trigger()'s return
         # Observability for tests/CLI: global ordered logs across the cascade.
         self.execution_log: list[str] = []
         self.emitted_log: list[str] = []
 
-        # Subscribe each event-kind workflow entry so emits trigger downstream runs.
-        for wf in manifest.workflows.values():
+        # Subscribe a handler PER workflow so an event with multiple `on:` consumers
+        # fans out to all of them (not just the first).
+        for wf_name, wf in manifest.workflows.items():
             entry = wf.steps.get(wf.entry) if wf.entry else None
             if entry and entry.trigger and entry.trigger.kind == "event":
-                self.bus.subscribe(entry.trigger.event, self._on_event)
+                self.bus.subscribe(entry.trigger.event, self._handler_for(wf_name))
 
     # ── Runtime Protocol ────────────────────────────────────────────────────────
     async def trigger(self, event: Event) -> RunId | None:
-        return await self._dispatch(event)
+        """Route `event` through the bus; return the first run it started (or None)."""
+        before = len(self._run_ids)
+        await self.bus.publish(event)
+        started = self._run_ids[before:]
+        return started[0] if started else None
 
     async def tick(self, t, scheduled_at):  # pragma: no cover - cron is deferred (B7/B8)
         raise NotImplementedError("cron ticks land with durable timers (B7/B8)")
@@ -75,21 +88,21 @@ class InMemoryRuntime:
         return self._runs[run_id]
 
     # ── Internals ──────────────────────────────────────────────────────────────
-    async def _on_event(self, event: Event) -> None:
-        await self._dispatch(event)
+    def _handler_for(self, wf_name: str) -> Callable[[Event], Awaitable[None]]:
+        async def handler(event: Event) -> None:
+            await self._execute(wf_name, event)
 
-    async def _dispatch(self, event: Event) -> RunId | None:
-        match = self.manifest.workflow_for_event(event.name)
-        if match is None:
-            return None
-        wf_name, _ = match
-        return await self._execute(wf_name, event)
+        return handler
 
     async def _execute(self, wf_name: str, event: Event) -> RunId:
         wf = self.manifest.workflows[wf_name]
         self._run_seq += 1
         run_id = f"{wf_name}-{self._run_seq}"
+        self._run_ids.append(run_id)
         await self.state.create_run(run_id, self.manifest.schema_version, event)
+        await self.state.append(
+            run_id, RunEvent("run_started", None, {"event": event.name}, _now())
+        )
 
         outputs: dict[str, StepOutput] = {}  # keyed by local step name
         step_states: dict[str, str] = {}
@@ -104,27 +117,31 @@ class InMemoryRuntime:
                 upstream={p: outputs[p] for p in step.after if p in outputs},
                 idempotency_key=f"{run_id}:{step.id}",
             )
-            output = await self._run_step(wf_name, step, ctx)
+            output = await self._run_step(step, ctx)
             outputs[local_name] = output
             step_states[local_name] = "completed"
             self.execution_log.append(step.id)
             await self.state.record_output(run_id, local_name, output)
+            await self.state.append(run_id, RunEvent("step_completed", step.id, {}, _now()))
 
             for event_name in step.emits:
                 emitted.append(event_name)
                 self.emitted_log.append(event_name)
+                await self.state.append(
+                    run_id, RunEvent("event_emitted", step.id, {"event": event_name}, _now())
+                )
                 await self.bus.publish(self._build_emitted(event_name, output))
 
-        status = RunStatus(
+        await self.state.append(run_id, RunEvent("run_completed", None, {}, _now()))
+        self._runs[run_id] = RunStatus(
             run_id=run_id,
             state="completed",
             step_states=step_states,
             emitted=tuple(emitted),
         )
-        self._runs[run_id] = status
         return run_id
 
-    async def _run_step(self, wf_name: str, step: StepSpec, ctx: StepContext) -> StepOutput:
+    async def _run_step(self, step: StepSpec, ctx: StepContext) -> StepOutput:
         agent = self.manifest.registry.agents.get(step.agent) if step.agent else None
         sandbox_name = (agent.sandbox if agent and agent.sandbox else "default") or "default"
         spec = self.manifest.registry.sandboxes.get(sandbox_name) or SandboxSpec()
@@ -167,7 +184,7 @@ class InMemoryRuntime:
             name=event_name,
             fields=fields,
             id=f"evt-{self._event_seq}",
-            emitted_at=datetime.now(UTC),
+            emitted_at=_now(),
         )
 
     @staticmethod

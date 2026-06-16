@@ -53,7 +53,11 @@ def run(
         secrets=EnvFileSecretsResolver(root),
         bus=InProcessEventBus(),
     )
-    run_id = asyncio.run(runtime.trigger(_load_event(event, fields)))
+    try:
+        run_id = asyncio.run(runtime.trigger(_load_event(event, fields)))
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
     if run_id is None:
         typer.echo(f"no workflow subscribes to event '{event}'", err=True)
         raise typer.Exit(code=1)
