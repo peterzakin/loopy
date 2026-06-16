@@ -21,10 +21,14 @@ dependencies = [
 loopy = "loopy_core.cli:app"
 loopy-run = "loopy_runtime.cli:app"
 
+[project.optional-dependencies]
+daytona = ["daytona>=0.180"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
     "ruff>=0.4",
+    "daytona>=0.180",
 ]
 
 [build-system]
