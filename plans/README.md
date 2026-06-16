@@ -44,6 +44,7 @@ plan at the start of a session.
 
 ## Current epics
 
-- **`future/backend-v1/`** — the non-durable, in-memory backend (env_file addendum → contract →
-  in-memory engine). Active.
+- _(none active — `future/` is empty)_
+- **`past/backend-v1/`** — the non-durable, in-memory backend (env_file addendum → contract →
+  in-memory engine). Shipped.
 - **`past/loopy-core-frontend/`** — the compile frontend (M0–M5). Shipped.
