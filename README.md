@@ -1,0 +1,174 @@
+# Loopy
+
+Loopy is a framework for authoring agent automations**. The agent's** job is the **body** (prose); config is light **frontmatter**; the workflow's DAG is built from one rule.
+
+## Workflows
+
+A **workflow** is a directory. Inside it:
+
+- Exactly **one entry step** carries `on:` — a single **registered** Event, or a **built-in time
+trigger** `on: cron(<expr>)`. A step triggers on **exactly one** event; fan-in from many sources is
+done at the **sensor layer** (several sensors emit one normalized event — e.g. `Incident`).
+- **Every other step** carries `after: <step>` (or `after: [a, b]`), consuming the
+predecessor's **outputs**.
+- Data flows by reference: `{{ event.field }}` (from the triggering event) or `{{ step.field }}`
+(an **output** of a step you're `after`). There is no `ref()`.
+- Any step may also `emits:` a **registered** event for other workflows to subscribe to (see
+*Outputs and events* below).
+
+The engine builds the DAG directly: the `on:` step is the root, `after:` edges are the
+order. A step with neither `on:` nor `after:` is an orphan — a compile-time error.
+
+`cron(<expr>)` is a 5-field cron expression (optional `, tz=...`). It needs no registry
+entry — it's built in. The step receives a tick as its event, with `{{ event.scheduled_at }}`
+and `{{ event.last_run }}` so it can scan only what changed since it last ran.
+
+## Layout
+
+```
+ProjectName/
+  registry.yml                  # reused, Capitalized entities: Agents · Sandboxes · Events
+  workflows/                    # each subdirectory is one single-entry workflow
+    triage/      investigate.md                          # on: Incident → WorkItem
+    upkeep/      scan-deps.md                            # on: cron(0 3 * * *) → WorkItem
+    resolve/     arbitrate.md · fix.md · review.md · ship.md
+    confirm/     check.md                                # on: MetricThreshold
+    autoresearch/ propose.md · allocate.md · ratchet.md · confirm.md
+  skills/                       # reusable agent skills, referenced by name from registry.yml
+    triage/             SKILL.md
+    repro-authoring/    SKILL.md
+    rubrics/fix-quality/ SKILL.md                        # namespaced
+  sensors/                      # the event-publish layer — code that emits registered events
+    sensors.py
+```
+
+The incidents loop is **three workflows** wired by events only at the real seams — `Incident`
+(sensors → triage), `WorkItem` (triage → resolve), `MetricThreshold` (sensor → confirm), and
+`GoalReopened` (confirm → resolve) — while the tight internals (`arbitrate → fix → review → ship`) pass **outputs** along
+`after`-chains. `autoresearch` is **one** workflow: a single entry (`on: ResultsPlateaued`), an
+`after`-chain (`propose → allocate → ratchet → confirm`) passing outputs, and a `ResultRejected`
+event that loops `confirm` back to `propose`.
+
+## Naming convention
+
+Defined entities are **Capitalized types** — `WorkItem`, `Investigator`, `MetricThreshold` — and
+references point at them by that name (`on: WorkItem`, `agent: Investigator`). Filenames, step
+names, and event *fields* (`event.issue_id`) stay lowercase. (The built-in `default` sandbox is
+the one reserved lowercase name.)
+
+## A file
+
+```
+---
+after:  fix                 # or `on: <RegisteredEvent>` for the one entry step
+agent:  Reviewer            # from registry.yml
+output: { verdict: enum[pass, fail], notes: str }   # structured outputs, typed
+# emits: <RegisteredEvent>  # optional — only if another workflow subscribes to it
+budget: { wall_clock: 20, spend: { usd: 4 } }   # wall_clock in minutes; window/latency in days
+---
+the agent's objective, in prose — reads {{ event.* }} and {{ fix.diff }} (an output of `fix`)
+```
+
+## Outputs and events
+
+A step can produce two kinds of result, and they're different things:
+
+- **Outputs** are a step's structured data results, declared on the step (`output:`, a typed
+field map). A downstream step in the **same** workflow consumes them with `after:` +
+`{{ step.field }}`. Outputs are **not** events — they never touch the bus.
+- **Events** are emitted (`emits:`) onto the shared bus for **other** workflows to subscribe to
+(`on:`). Events must be formally **registered** in `registry.yml`; the bus only routes
+registered events, and an `on:` trigger requires its event to exist in the registry. Sensors
+publish events too — `on:` doesn't care whether a sensor or a step emitted it.
+
+The test for which to reach for: *does another workflow need this value?* If the next step in
+the same workflow consumes it, it's an **output**. If another workflow subscribes to it — or a
+step needs to loop back to a workflow's entry — it's an **event**. Within-workflow handoffs
+(e.g. `arbitrate → fix`) are outputs; cross-workflow seams (`investigate → arbitrate` via
+`WorkItem`, `check → arbitrate` via `GoalReopened`) are events.
+
+## Example `registry.yml`
+
+The reused entities, defined once and referenced by name. (Condensed — the full file defines
+more agents and events.)
+
+```yaml
+# Defaults — every agent inherits these; override a field only when needed.
+defaults:
+  agent:
+    sandbox: default
+    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
+
+# Sandbox — compute + egress. `image:` is the declarative build; `network:` the egress allowlist.
+sandboxes:
+  default:
+    provider: daytona
+    image: { debian_slim: "3.12", apt: [git], workdir: /home/daytona, user: daytona }
+    network: [github.com]
+
+# Agents — a judge = no write tools + run_evals. Tools are plain capability names;
+# numeric caps live in budget, not in the tool name.
+agents:
+  Investigator: { skills: [triage, repro-authoring] }                  # inherits default harness
+  Fixer:        { harness: { model: claude-opus-4-8 }, tools: [open_pr], skills: [testing] }
+  Reviewer:     { tools: [run_evals], skills: [rubrics/fix-quality] }   # a judge — no write tools
+  Releaser:     { tools: [merge_pr, set_flags], skills: [rollout] }
+
+# Events — the bus contract. A step's `on:` may only name an event registered here.
+# Typed field maps.
+events:
+  # published by sensors
+  Incident:        { fields: { source: enum[sentry, linear, datadog, pagerduty, slack], issue_id: id, title: str, link: url } }
+  MetricThreshold: { fields: { goal_id: id } }
+  # emitted by steps — cross-workflow seams + terminal announcements
+  WorkItem:
+    fields:
+      source:        enum[sentry, linear, datadog, pagerduty, slack, cve]   # Incident's 5 sources, carried through; + cve via upkeep's cron
+      link:          url
+      root_cause:    str
+      proposed_goal: str
+      repro:         str
+  GoalShipped:     { fields: { goal_id: id } }                         # terminal announcement
+```
+
+## `skills/`
+
+Reusable agent skills, a sibling of `workflows/`. One directory per skill — a `SKILL.md` plus
+any resources — and agents reference them **by name** in `registry.yml`
+(`skills: [triage, rubrics/fix-quality]`). Define a skill once, reuse it across agents.
+Namespaced subdirectories are allowed (`rubrics/fix-quality`). A skill name resolves only against
+`skills/`; an unresolved name is a compile-time error.
+
+This reflects the organizing principle: `**registry.yml` holds the lightweight, inline config**  
+**entities** (Agents, Sandboxes, Events — a few fields each), while **top-level directories hold**  
+**authored artifacts that have a *body*** (`workflows/`, `skills/`, and eventually `sensors/`). An  
+agent naming `skills: [triage]` resolves it against `skills/`, the same way `agent: Investigator`  
+resolves against the registry.
+
+## `sensors/`
+
+The event-publish layer: code that turns the outside world into **registered events**. One or
+more files (a single `sensors.py` is fine); each sensor is a function decorated with `@sensor`,
+triggered by a `webhook` or a `poll`.
+
+A sensor **returns a registered event** — and returning *is* emitting: the event goes on the
+bus and routes to whichever workflow subscribes with `on:`. Return `None` to emit nothing, or
+`yield` an `Iterator[Event]` to emit several.
+
+**Compile rule.** A sensor must annotate its return as an Event class generated from
+`registry.yml` (imported from `loopy.events`). A sensor with no return annotation, or one
+returning a type that isn't a registered event, fails to load — `loopy compile` errors before
+anything runs. That's what guarantees every event on the bus has a contract.
+
+```python
+from loopy import sensor
+from loopy.events import Incident             # generated from registry.yml
+
+@sensor(webhook="/hooks/sentry")
+def sentry_issues(req) -> Incident:           # normalizes Sentry → Incident; omit the annotation and it won't compile
+    i = req.json["data"]["issue"]
+    return Incident(source="sentry", issue_id=i["id"], title=i["title"], link=i["permalink"])
+```
+
+See `sensors/sensors.py` for the full example.
+
