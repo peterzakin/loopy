@@ -44,7 +44,8 @@ plan at the start of a session.
 
 ## Current epics
 
-- _(none active — `future/` is empty)_
+- **`agent-emitted-events/`** — the agent produces emitted-event payloads (#3) and real sensor
+  execution (#2). E1 (emit payloads) shipped → `past/`; E2 (sensor execution) active → `future/`.
 - **`past/backend-v1/`** — the non-durable, in-memory backend (env_file addendum → contract →
   in-memory engine). Shipped.
 - **`past/loopy-core-frontend/`** — the compile frontend (M0–M5). Shipped.
