@@ -11,13 +11,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from loopy_runtime.bus.inproc import InProcessEventBus
-from loopy_runtime.cli import _synthesizing_publisher
 from loopy_runtime.contract import Event
 from loopy_runtime.manifest_model import load_manifest
 from loopy_runtime.runtime.inmemory import InMemoryRuntime
 from loopy_runtime.sandbox.local import LocalSandboxProvider
 from loopy_runtime.secrets import StaticSecretsResolver
 from loopy_runtime.sensors.host import FastAPISensorHost
+from loopy_runtime.sensors.host import synthesizing_publisher as _synthesizing_publisher
 from tests.stub_harness import StubAgentHarness
 
 GOLDEN = Path(__file__).resolve().parent / "golden" / "incidents.manifest.json"

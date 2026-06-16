@@ -5,23 +5,48 @@ None to emit nothing); the host hands it to `sink` — the runtime's `trigger`, 
 publishes it and drains the resulting cascade. v1 ships the webhook path; poll
 registration is recorded but the durable scheduler lands with cron/watermarks
 (B7/B8). Executing user-authored sensor *modules* (which import the `loopy` authoring
-shim) is a later refinement — see `loopy dev`, which wires manifest webhooks to
-event publishers.
+shim) is handled by `loopy run`'s sensor loader; `synthesizing_publisher` is the
+dev fallback when a module can't be loaded.
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 
 from loopy_runtime.contract import Event
+from loopy_runtime.payloads import synthesize_fields
+
+if TYPE_CHECKING:
+    from loopy_runtime.manifest_model import Manifest, SensorSpec
 
 # A sensor callable: payload -> Event | None.
 SensorFn = Callable[[dict], "Event | None"]
 # A sink drives an event into the runtime (publish + drain): typically Runtime.trigger.
 EventSink = Callable[[Event], Awaitable[object]]
+
+
+def synthesizing_publisher(manifest: Manifest, sensor: SensorSpec) -> SensorFn:
+    """Dev fallback: publish the sensor's declared `emits` event with fields synthesized
+    from the contract (merged with the request payload). Used when the real sensor
+    module can't be loaded."""
+    contract = manifest.registry.events.get(sensor.emits)
+    schema = contract.fields if contract else {}
+    seq = {"n": 0}
+
+    def publisher(payload: dict) -> Event:
+        seq["n"] += 1
+        return Event(
+            name=sensor.emits,
+            fields=synthesize_fields(schema, payload or {}),
+            id=f"sensor-{sensor.name}-{seq['n']}",
+            emitted_at=datetime.now(UTC),
+        )
+
+    return publisher
 
 
 class FastAPISensorHost:
