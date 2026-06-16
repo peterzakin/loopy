@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib
 import itertools
 import sys
+import types
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,6 +42,10 @@ def to_event(result: object) -> Event | None:
     """Normalize a sensor's return (a `loopy.events` model instance, or None) to an Event."""
     if result is None:
         return None
+    if isinstance(result, list | tuple | types.GeneratorType):
+        raise NotImplementedError(
+            "multi-event sensors (yield / Iterator) are not supported in v1; return one event"
+        )
     if hasattr(result, "model_dump"):  # a generated loopy.events pydantic model
         return Event(
             name=type(result).__name__,
@@ -53,11 +58,22 @@ def to_event(result: object) -> Event | None:
     )
 
 
+def normalize(result: object, expected_emits: str) -> Event | None:
+    """Convert a sensor return to an Event and enforce the declared `emits` contract."""
+    event = to_event(result)
+    if event is not None and event.name != expected_emits:
+        raise ValueError(
+            f"sensor declared emits '{expected_emits}' but returned a '{event.name}' event"
+        )
+    return event
+
+
 def load_webhook_sensor(spec: SensorSpec, root: str | Path) -> Callable[[dict], Event | None]:
-    """Return a callable `payload -> Event | None` that runs the real sensor function."""
+    """Return a callable `payload -> Event | None` that runs the real sensor function and
+    enforces that what it returns matches the declared `emits`."""
     fn = _import_fn(spec.module, spec.fn, root)
 
     def invoke(payload: dict) -> Event | None:
-        return to_event(fn(Request(payload)))
+        return normalize(fn(Request(payload)), spec.emits)
 
     return invoke

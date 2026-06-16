@@ -5,13 +5,15 @@ from __future__ import annotations
 import asyncio
 import sys
 
+import pytest
+
 from loopy_core.compile.pipeline import compile_project
 from loopy_core.events.codegen import generate_events, write_events
 from loopy_core.registry.model import Registry
 from loopy_runtime.authoring import sensor, sensor_config
 from loopy_runtime.manifest_model import SensorSpec, SensorTriggerSpec
 from loopy_runtime.sensors.host import FastAPISensorHost
-from loopy_runtime.sensors.loader import load_webhook_sensor
+from loopy_runtime.sensors.loader import load_webhook_sensor, normalize
 from tests.helpers import write_project
 
 REGISTRY = (
@@ -40,6 +42,25 @@ def test_sensor_decorator_marks_function():
         return None
 
     assert sensor_config(s) == {"webhook": "/x", "poll": None, "emits": "Incident"}
+
+
+class _FakeIncident:
+    def model_dump(self):
+        return {"issue_id": "1"}
+
+
+def test_normalize_enforces_declared_emits():
+    # Class name "_FakeIncident" != declared "Incident" -> contract violation.
+    with pytest.raises(ValueError, match="declared emits"):
+        normalize(_FakeIncident(), "Incident")
+    # Matching name passes through.
+    assert normalize(_FakeIncident(), "_FakeIncident").name == "_FakeIncident"
+    assert normalize(None, "Incident") is None
+
+
+def test_normalize_rejects_multi_event_return():
+    with pytest.raises(NotImplementedError, match="multi-event"):
+        normalize([_FakeIncident()], "Incident")
 
 
 def test_codegen_init_reexports_sensor():
