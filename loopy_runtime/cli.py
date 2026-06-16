@@ -23,6 +23,7 @@ from loopy_runtime.runtime.inmemory import InMemoryRuntime
 from loopy_runtime.sandbox.local import LocalSandboxProvider
 from loopy_runtime.secrets import EnvFileSecretsResolver
 from loopy_runtime.sensors.host import FastAPISensorHost
+from loopy_runtime.sensors.loader import load_webhook_sensor
 
 app = typer.Typer(add_completion=False, help="Loopy runtime — run a manifest against an event.")
 
@@ -105,8 +106,18 @@ def dev(
     # The host injects sensor events via trigger (publish + drain the cascade).
     sensor_host = FastAPISensorHost(runtime.trigger)
     for sensor in m.sensors:
-        if sensor.trigger.kind == "webhook" and sensor.trigger.path:
-            sensor_host.register_webhook(sensor.trigger.path, _synthesizing_publisher(m, sensor))
+        if sensor.trigger.kind != "webhook" or not sensor.trigger.path:
+            continue
+        try:
+            fn = load_webhook_sensor(sensor, root)  # run the real @sensor function
+        except Exception as exc:  # noqa: BLE001 - any import/resolve failure degrades gracefully
+            typer.echo(
+                f"warning: sensor '{sensor.name}' not loadable ({exc}); "
+                "falling back to synthesized events",
+                err=True,
+            )
+            fn = _synthesizing_publisher(m, sensor)
+        sensor_host.register_webhook(sensor.trigger.path, fn)
     typer.echo(
         f"serving {len(sensor_host.webhook_paths)} webhook(s): "
         f"{', '.join(sensor_host.webhook_paths) or '(none)'}"
