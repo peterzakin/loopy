@@ -34,7 +34,10 @@ accurate. `workflow/loader.py` builds `Step`s (identity `<dir>/<stem>`), normali
 - [ ] Desugar each step `output:` via `registry/types.py` — unknown shorthand → `E201` at the
       step's `file:line`.
 - [ ] P4 `workflow/dag.py`: build `networkx.DiGraph`; W1–W7 → `E101`–`E107`.
-- [ ] Cron parse via `croniter` (5 fields) + optional IANA `tz=`; malformed → `E110`.
+- [ ] Cron parse (P2): expr is **quoted** — `cron("<expr>"[, tz=...])` — so commas inside it
+      (`cron("1,15 * * * *")`) don't collide with the `tz=` separator. Read the quoted string as the
+      expr, then an optional trailing `, tz=<iana>` kwarg; validate expr via `croniter` (5 fields)
+      and tz via `zoneinfo`. Missing quotes / bad expr / unknown tz → `E110`.
 
 ## Files likely to change
 - `loopy_core/workflow/frontmatter.py`, `loader.py`, `dag.py`, `model.py`

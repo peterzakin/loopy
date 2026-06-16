@@ -7,7 +7,7 @@ Loopy is a framework for authoring agent automations**. The agent's** job is the
 A **workflow** is a directory. Inside it:
 
 - Exactly **one entry step** carries `on:` — a single **registered** Event, or a **built-in time
-trigger** `on: cron(<expr>)`. A step triggers on **exactly one** event; fan-in from many sources is
+trigger** `on: cron("<expr>")`. A step triggers on **exactly one** event; fan-in from many sources is
 done at the **sensor layer** (several sensors emit one normalized event — e.g. `Incident`).
 - **Every other step** carries `after: <step>` (or `after: [a, b]`), consuming the
 predecessor's **outputs**.
@@ -19,8 +19,9 @@ predecessor's **outputs**.
 The engine builds the DAG directly: the `on:` step is the root, `after:` edges are the
 order. A step with neither `on:` nor `after:` is an orphan — a compile-time error.
 
-`cron(<expr>)` is a 5-field cron expression (optional `, tz=...`). It needs no registry
-entry — it's built in. The step receives a tick as its event, with `{{ event.scheduled_at }}`
+`cron("<expr>")` takes a **quoted** 5-field cron expression (optional `, tz=...`) — the quotes
+keep commas in the expression (`cron("1,15 * * * *")`) from colliding with the `tz=` separator. It
+needs no registry entry — it's built in. The step receives a tick as its event, with `{{ event.scheduled_at }}`
 and `{{ event.last_run }}` so it can scan only what changed since it last ran.
 
 ## Layout
@@ -30,7 +31,7 @@ ProjectName/
   registry.yml                  # reused, Capitalized entities: Agents · Sandboxes · Events
   workflows/                    # each subdirectory is one single-entry workflow
     triage/      investigate.md                          # on: Incident → WorkItem
-    upkeep/      scan-deps.md                            # on: cron(0 3 * * *) → WorkItem
+    upkeep/      scan-deps.md                            # on: cron("0 3 * * *") → WorkItem
     resolve/     arbitrate.md · fix.md · review.md · ship.md
     confirm/     check.md                                # on: MetricThreshold
     autoresearch/ propose.md · allocate.md · ratchet.md · confirm.md

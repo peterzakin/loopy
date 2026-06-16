@@ -65,7 +65,7 @@ A versioned JSON document — the only thing a backend is allowed to depend on. 
 
 - **`schema_version`** — a backend pins each in-flight run to the version it started under, so
   editing a `.md` mid-run never corrupts replay.
-- **Nodes (steps)**: `name`, trigger (`on: <Event>` or `cron(expr, tz)`), `after:`
+- **Nodes (steps)**: `name`, trigger (`on: <Event>` or `cron("expr", tz)`), `after:`
   edges, resolved `agent` binding, `output:` schema (typed field map), `emits:`, `budget`, and
   the prose **body with validated template slots**. Template *values* exist only at runtime, so
   the manifest carries the checked ref graph, not rendered text — the backend renders `{{ }}` at

@@ -27,15 +27,21 @@ schema pass-through. Registry naming checks (X1) run here.
 ## Steps
 - [ ] P0 `discovery.py`: inventory all four input kinds; missing/unreadable `registry.yml` → `E001`.
 - [ ] P1 `registry/loader.py`: parse with `ruamel.yaml`; apply `defaults.agent`; build typed
-      `Registry` with spans.
+      `Registry` with spans. **Merge semantics (P3): deep-merge `harness` field-by-field** (an agent
+      setting `harness: {model: X}` keeps the default `runtime`); **replace list fields**
+      (`tools`/`skills`) wholesale with the agent's own list (no union — an agent's list is its full
+      set).
 - [ ] P2 `registry/types.py`: desugar table (`str`/`int`/`float`/`bool`/`id`/`url`/`enum[...]`);
       pass through inline JSON Schema; unknown shorthand → `E201`.
 - [ ] X1 naming: entities Capitalized; `default` the one reserved lowercase sandbox; no dup
       names → `E210` / `E211`.
+- [ ] Seed `examples/incidents/` with at least a real `registry.yml` (the README registry) to
+      dogfood discovery + loader against (#2; grows through M2–M4, full by M5).
 
 ## Files likely to change
 - `loopy_core/discovery.py`
 - `loopy_core/registry/loader.py`, `loopy_core/registry/types.py`, `loopy_core/registry/model.py`
+- `examples/incidents/registry.yml` — seed of the canonical example
 
 ## Codes owned
 `E001`, `E201` (event `fields:`), `E210`, `E211`.

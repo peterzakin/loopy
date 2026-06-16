@@ -37,13 +37,18 @@ so other-language inspectors slot in producing the same descriptor.
 
 ## Steps
 - [ ] `events/codegen.py`: emit `loopy.events` module + `.pyi` from registry events (behind a
-      codegen-target interface; Python target only in M4).
+      codegen-target interface; Python target only in M4). **Output (#5): write to `<project>/loopy/`
+      by default** (so `from loopy.events import X` resolves and mypy/IDEs find it); generated +
+      gitignored; a CLI flag relocates it.
 - [ ] P7 `sensors/loader.py` (Python AST inspector, behind an inspector interface): parse each
       `sensors/*.py`; find `@sensor` functions; read `emits` + trigger config (`webhook` / `poll`).
 - [ ] S1: `emits` is declared and statically readable → else `E402` (missing / not statically
       analyzable). No return-type inference.
 - [ ] S2: declared `emits` event registered in `registry.yml` → else `E401`.
 - [ ] S3: webhook `path` unique across sensors; `poll` interval well-formed → else `E403`.
+- [ ] Derive `module` (P4): **dotted path from project root**, `.py` dropped, subdirs → dots
+      (`sensors/github/issues.py` → `sensors.github.issues`). Python-only for now; `module` is a
+      *language-appropriate locator* and a `lang` discriminator arrives with the second language.
 - [ ] Populate one `Sensor` per sensor (model defined in M0: `sensors/model.py` —
       `{name, trigger(webhook|poll), emits, module, fn}` + span).
 

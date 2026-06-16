@@ -28,15 +28,20 @@ suite.
 - [ ] P8 X2: every step `agent:` resolves to a registered Agent (`E501`); its `sandbox` resolves
       (`E502`); each `agent.skills[]` resolves in `skills/` (`E503`, no external skills).
 - [ ] P8 X3: every event-kind `on:` / `emits:` is registered → else `E504` (cron exempt).
-- [ ] P8 X5 lineage: build the event graph; registered `on:` with no producer → `W501`; terminal
-      `emits:` with no consumer is allowed.
+- [ ] P8 X5 lineage: build the event graph into the typed `Lineage` IR (M0 model); registered `on:`
+      with no producer → `W501`; terminal `emits:` with no consumer is allowed. **Sort all derived
+      collections** (each event's `producers`/`consumers`, and the events map) so the manifest stays
+      byte-stable (P6).
 - [ ] P9 `compile/manifest.py`: emit deterministic JSON (sorted keys) in the §9 shape; record
       pre-bound refs.
 - [ ] `manifest.schema.json`: JSON Schema for the manifest; validate emitted output.
 - [ ] `cli.py`: finalize `loopy compile [--out manifest.json]`; stamp `compiled_at`/version outside
       the hashed core.
-- [ ] Tests (§12): golden-positive (README example → byte-stable manifest snapshot); golden-negative
-      (one fixture per §14 code); properties (idempotent, order-independent, schema-valid).
+- [ ] Grow `examples/incidents/` to the **full** README example (incidents + autoresearch) — the
+      golden-positive source (#2; seeded after M0, completed here).
+- [ ] Tests (§12): golden-positive (`examples/incidents/` → byte-stable manifest snapshot);
+      golden-negative (per-milestone fixtures, one per §14 code, gathered here); properties
+      (idempotent, order-independent, schema-valid).
 
 ## Files likely to change
 - `loopy_core/compile/pipeline.py` (P8), `loopy_core/compile/manifest.py` (P9)

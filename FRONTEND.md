@@ -66,7 +66,12 @@ class Workflow(BaseModel):  name: str; entry: str; steps: dict[str,Step]; dag: "
 
 # sensors/model.py  (defined in M0, populated/validated in M4 — §7)
 class SensorTrigger(BaseModel): kind: Literal["webhook","poll"]; path: str|None; interval: str|None; span: Span  # distinct from Trigger
-class Sensor(BaseModel):        name: str; trigger: SensorTrigger; emits: str; module: str; fn: str; span: Span    # emits = declared registered event
+class Sensor(BaseModel):        name: str; trigger: SensorTrigger; emits: str; module: str; fn: str; span: Span    # emits = declared registered event; module = language-appropriate locator (dotted for Python)
+
+# compile/model.py  (defined in M0; Lineage populated by M5/X5 — derived, span-exempt)
+class EventLineage(BaseModel):  producers: list[str]; consumers: list[str]              # sorted for determinism
+class Lineage(BaseModel):       events: dict[str, EventLineage]
+class Project(BaseModel):       registry: Registry; workflows: dict[str,Workflow]; sensors: list[Sensor]; lineage: Lineage   # IR root → manifest
 ```
 
 The IR is the single source the manifest is serialized from — keep it lossless w.r.t. anything a
@@ -135,8 +140,10 @@ Rules (each → a diagnostic):
   not `after:`.
 - **W7** step names unique within a workflow; `(workflow, step)` unique globally.
 
-`cron(<expr>[, tz=...])` is parsed here: validate with **`croniter`** (5 fields), parse optional
-`tz=` (IANA name). Malformed → `LOOPY-E110`.
+`cron("<expr>"[, tz=...])` is parsed here. The expression is **quoted** so commas inside it
+(`cron("1,15 * * * *")`) don't collide with the `tz=` separator: read the quoted string as the
+expr, then an optional trailing `, tz=<iana>` kwarg. Validate the expr with **`croniter`** (5
+fields) and the tz with **`zoneinfo`**. Missing quotes, bad expr, or unknown tz → `LOOPY-E110`.
 
 ---
 
@@ -206,7 +213,11 @@ resolves `{{ }}` at run time against recorded values.
 - **S2** that event is **registered** in `registry.yml`; otherwise the project fails to compile
   (`LOOPY-E401`) — this is the README's hard rule.
 - **S3** webhook `path` unique across sensors; `poll` interval well-formed.
-- Record `{name, trigger(webhook|poll), emits, module, fn}` per sensor.
+- Record `{name, trigger(webhook|poll), emits, module, fn}` per sensor. `module` is a
+  **language-appropriate locator** — a dotted module path for Python (`sensors/github/issues.py` →
+  `sensors.github.issues`), an import specifier/path for other languages. A `lang` discriminator is
+  added to the descriptor when the second sensor language lands (so the backend `SensorHost` picks
+  the right runtime); Python-only until then.
 
 ---
 
@@ -274,6 +285,10 @@ Notes:
   `ARCHITECTURE.md` §0.)
 - `compiled_at` / `loopy_version` are stamped by the CLI wrapper, **outside** the deterministic
   core, so the hashable content stays reproducible.
+- `lineage` is derived; its `producers`/`consumers` and the `events` map are **sorted** so the
+  manifest is byte-stable.
+- sensor `module` is a **language-appropriate locator** (dotted for Python; import path for other
+  languages) — a `lang` discriminator is added when a second sensor language lands.
 - A companion **`manifest.schema.json`** (JSON Schema) validates the emitted manifest in CI and
   documents the contract backends consume.
 
@@ -298,7 +313,7 @@ loopy_core/
   template/   parser.py · resolver.py
   sensors/    model.py · loader.py
   events/     codegen.py
-  compile/    pipeline.py · diagnostics.py · manifest.py
+  compile/    model.py · pipeline.py · diagnostics.py · manifest.py
   manifest.schema.json
 ```
 
@@ -377,7 +392,7 @@ Some codes are shared where the same failure surfaces from more than one place (
 | **E105** | W5 | P4 | an `after:` target doesn't exist in the same workflow |
 | **E106** | W6 | P4 | the `after:` graph has a cycle |
 | **E107** | W7 | P4 | duplicate step name in a workflow / `(workflow, step)` id collision |
-| **E110** | — | P4 | malformed `cron(<expr>[, tz=…])` |
+| **E110** | — | P4 | malformed `cron("<expr>"[, tz=…])` — missing quotes, bad expr, or unknown tz |
 | **E111** | — | P3/P4 | `on:` lists multiple events (unions unsupported) |
 | **E201** | X4 | P2/P3 | unknown type shorthand in event `fields:` or step `output:` (desugar) |
 | **E210** | X1 | P8 | entity name not Capitalized, or reserved `default` misused |
