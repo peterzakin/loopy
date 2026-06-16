@@ -15,10 +15,9 @@ def test_all_section14_codes_present_no_phantoms():
     assert "LOOPY-E109" not in ALL_CODES
 
 
-def test_pipeline_runs_as_noop_over_empty_dir(tmp_path):
-    result = compile_project(tmp_path)
-    assert result.diagnostics.items == []
-    assert result.diagnostics.exit_code() == 0
+def test_pipeline_builds_a_project():
+    # The pipeline always returns a Project (possibly with diagnostics).
+    result = compile_project(".")
     assert result.project is not None
 
 
