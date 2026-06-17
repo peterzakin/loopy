@@ -121,10 +121,13 @@ def run(
             continue
         scheduler.register(sensor.name, interval, poll_fn)
 
-    typer.echo(
-        f"serving {len(sensor_runner.webhook_paths)} webhook(s) on {host}:{port}: "
-        f"{', '.join(sensor_runner.webhook_paths) or '(none)'}"
-    )
+    if sensor_runner.webhook_paths:
+        typer.echo(
+            f"serving {len(sensor_runner.webhook_paths)} webhook(s) on {host}:{port}: "
+            f"{', '.join(sensor_runner.webhook_paths)}"
+        )
+    else:
+        typer.echo("no webhook sensors; web server not started (poll-only)")
     typer.echo(
         f"polling {len(scheduler.poll_names)} sensor(s): "
         f"{', '.join(scheduler.poll_names) or '(none)'}"
@@ -135,12 +138,17 @@ def run(
         consumer = asyncio.create_task(runtime.serve())  # drain runs in the background
         broker = asyncio.create_task(event_bus.run())  # networked bus consume loop (no-op inproc)
         poller = asyncio.create_task(scheduler.start())  # poll sensors fire on their tasks
+        background = [consumer, broker, poller]
         try:
-            await sensor_runner.start(host, port)
+            if sensor_runner.webhook_paths:
+                await sensor_runner.start(host, port)  # uvicorn owns the foreground
+            else:
+                # Poll-only (or no sensors): no inbound HTTP, so don't spin up uvicorn —
+                # stay alive on the background tasks (the scheduler/consumer) until cancelled.
+                await asyncio.gather(*background)
         finally:
-            consumer.cancel()
-            broker.cancel()
-            poller.cancel()
+            for task in background:
+                task.cancel()
 
     asyncio.run(_serve())  # pragma: no cover
 
