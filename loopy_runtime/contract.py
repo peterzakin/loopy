@@ -74,6 +74,7 @@ class RunStatus:
     state: str  # running|completed|failed
     step_states: Mapping[StepId, str] = field(default_factory=dict)
     emitted: tuple[EventName, ...] = ()
+    error: str | None = None  # set when state == "failed"
 
 
 @dataclass(frozen=True)
@@ -149,9 +150,11 @@ class EventBus(Protocol):
 @runtime_checkable
 class EventReceiver(Protocol):
     async def receive(self, event: Event) -> RunId | None:
-        """Accept an event from a SensorRunner (any language/transport) and inject it into
-        the runtime. In-process this calls Runtime.trigger; across a boundary it's an HTTP
-        endpoint or broker. Returns the first run started, if any."""
+        """Accept an event from a SensorRunner (untrusted; any language/transport),
+        re-validate it against the registry, and publish it to the EventBus. This is
+        publish-and-acknowledge: it does NOT run the workflow, so it returns None once the
+        event is accepted; the Runtime produces RunIds asynchronously on consume. (A
+        legacy synchronous receiver may return the started RunId — Optional permits both.)"""
         ...
 
 

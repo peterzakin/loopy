@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loopy — The Sensor Surface</title>
+<style>
+  :root { --ink:#1a1a1a; --muted:#666; --line:#d0d0d0; --accent:#2b6cb0; --bg:#f6f7f9; }
+  * { box-sizing: border-box; }
+  body {
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--ink); max-width: 760px; margin: 40px auto; padding: 0 24px;
+  }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 32px 0 10px; border-bottom: 2px solid var(--line); padding-bottom: 4px; }
+  .sub { color: var(--muted); margin: 0 0 8px; }
+  p { margin: 10px 0; }
+  ul { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  .good::before { content: "✓ "; color: #2f855a; font-weight: 700; }
+  .cost::before { content: "→ cost: "; color: #b7791f; font-weight: 600; }
+  .callout { background: var(--bg); border: 1px solid var(--line); border-left: 4px solid var(--accent);
+             padding: 12px 16px; border-radius: 6px; margin: 16px 0; }
+  .callout strong { color: var(--accent); }
+
+  /* diagrams */
+  .flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 14px 0; }
+  .box { border: 1.5px solid var(--ink); border-radius: 8px; padding: 10px 12px; background: #fff;
+         text-align: center; flex: 1; min-width: 120px; }
+  .box .t { font-weight: 700; font-size: 14px; }
+  .box .s { color: var(--muted); font-size: 12px; }
+  .box.loopy { background: #eef4fb; border-color: var(--accent); }
+  .arrow { display: flex; align-items: center; justify-content: center; padding: 0 8px; font-size: 20px; color: var(--muted); }
+  .lane { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 2px 0 0; }
+
+  .stack { max-width: 460px; margin: 12px 0; }
+  .layer { border: 1.5px solid var(--ink); border-radius: 8px; padding: 10px 14px; margin: 0; background: #fff; }
+  .layer.top { background: #fffaf0; border-style: dashed; }
+  .layer.bottom { background: #eef4fb; border-color: var(--accent); }
+  .between { text-align: center; color: var(--muted); font-size: 13px; margin: 4px 0; }
+
+  .cmp { display: flex; gap: 16px; flex-wrap: wrap; }
+  .cmp > div { flex: 1; min-width: 240px; border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .cmp h3 { margin: 0 0 6px; font-size: 15px; }
+  .tag { font-size: 11px; font-weight: 700; color: #fff; background: var(--muted); border-radius: 10px; padding: 1px 8px; }
+  .tag.rec { background: #2f855a; }
+
+  footer { margin-top: 28px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+
+  @media print {
+    body { margin: 0; max-width: none; font-size: 12px; }
+    h2 { page-break-after: avoid; }
+    .flow, .stack, .cmp, .callout { page-break-inside: avoid; }
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+</style>
+</head>
+<body>
+
+<h1>Loopy — The Sensor Surface</h1>
+<p class="sub">Where do developers' sensors run, and what does Loopy hand them?</p>
+
+<p>A <strong>sensor</strong> turns something from the outside world — a webhook call, a timer tick —
+into a Loopy <strong>event</strong>. The question: does Loopy give the developer a <em>server</em> to run,
+or an <em>SDK</em> to drop into whatever they already run?</p>
+
+<h2>The two options</h2>
+<div class="cmp">
+  <div>
+    <h3>A. Loopy gives you a server <span class="tag">turnkey</span></h3>
+    <p>You write sensors; Loopy runs a web server that hosts them. You run <code>loopy run</code>.</p>
+    <ul>
+      <li class="good">Nothing to wire up — it just works.</li>
+      <li class="cost">to support another language, Loopy must build &amp; maintain a <em>whole separate server</em> for it.</li>
+    </ul>
+  </div>
+  <div>
+    <h3>B. Loopy gives you an SDK <span class="tag rec">recommended</span></h3>
+    <p>You host the webhook in what you already run (Next.js, Express, a Lambda…). The SDK validates the sensor's output and sends it to Loopy.</p>
+    <ul>
+      <li class="good">Fits where developers already work.</li>
+      <li class="good">Cheap to support many languages — an SDK is tiny vs. a server.</li>
+      <li class="cost">you wire it into your own app (a few lines).</li>
+    </ul>
+  </div>
+</div>
+
+<h2>The key insight</h2>
+<p>These aren't opposites. <strong>The SDK is the basic building block. The server is just one
+convenient thing built on top of it.</strong></p>
+
+<div class="stack">
+  <div class="layer top"><strong>Ready-made server</strong> &nbsp;<span class="box-note">— optional convenience</span></div>
+  <div class="between">▲ is built using ▲</div>
+  <div class="layer bottom"><strong>SDK</strong> &nbsp;— author sensors · validate the event · deliver it</div>
+</div>
+
+<div class="callout">
+  <strong>Recommendation:</strong> Lead with the SDK. Ship the ready-made server only as an
+  optional convenience (Python today). For TypeScript, start with <em>just the SDK</em> —
+  JavaScript developers already have an app to host webhooks in, and won't want to run a
+  separate Loopy server.
+</div>
+
+<h2>The flow is the same either way</h2>
+<div class="flow">
+  <div class="box"><div class="t">Your sensor</div><div class="s">webhook / poll</div></div>
+  <div class="arrow">→</div>
+  <div class="box loopy"><div class="t">Loopy SDK</div><div class="s">validate&nbsp;+&nbsp;deliver</div></div>
+  <div class="arrow">→</div>
+  <div class="box loopy"><div class="t">Event Receiver</div><div class="s">accepts events</div></div>
+  <div class="arrow">→</div>
+  <div class="box loopy"><div class="t">Executor</div><div class="s">runs workflows</div></div>
+</div>
+<div class="flow" style="margin-top:-6px">
+  <div style="flex:2"><p class="lane">your code · your language · your host</p></div>
+  <div style="flex:3"><p class="lane" style="text-align:right">Loopy core — one Python implementation</p></div>
+</div>
+
+<h2>Why this is the simplest path to "polyglot"</h2>
+<ul>
+  <li>You ship <strong>one small SDK per language</strong> (easy) instead of one whole server per language (hard).</li>
+  <li>The <strong>durable executor stays a single Python implementation</strong>. Only the thin sensor edge is per-language.</li>
+  <li>A TypeScript developer just imports the SDK into their existing app — no new service to deploy.</li>
+</ul>
+
+<h2>Two things it requires</h2>
+<ul>
+  <li>Loopy's <strong>Event Receiver</strong> becomes a small authenticated endpoint that re-checks every event (don't trust the sender).</li>
+  <li>The compiled <strong>manifest declares which sensors exist</strong>; the SDK (in your app) fulfills them.</li>
+</ul>
+
+<footer>Loopy architecture note · sensor surface · draft for discussion</footer>
+
+</body>
+</html>

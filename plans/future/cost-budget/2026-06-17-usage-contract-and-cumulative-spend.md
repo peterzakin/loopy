@@ -1,0 +1,126 @@
+# Usage reporting contract + cumulative cascade spend cap
+
+**Status:** draft (design only — NOT started; do not implement yet)
+**Owner:** peter
+**Date:** 2026-06-17
+
+## Goal
+Give the runtime a real terminator for runaway cascades: a **cumulative spend cap** across a
+cascade (loop-backs are the danger), instead of relying on `max_iterations` (a count, not cost).
+To do that cleanly, first make **usage reporting a first-class part of the harness contract** — the
+harness reports what it consumed per invocation, and the runtime aggregates it.
+
+This is backlog item **C** (see `BACKLOG.scratch.md`). Captured from a design discussion on
+2026-06-17; deliberately deferred — recorded here so the reasoning survives.
+
+## Context
+- Budgets today are **per-step only**, enforced inside the harness: `wall_clock` (a per-run
+  timeout) and `spend.usd` (this step's `total_cost_usd` vs this step's limit). `window`/`latency`
+  (day-scale) are unimplemented (need durable timers).
+- The runtime **never sees** the spend number — `ClaudeCodeHarness` computes `total_cost_usd`, hands
+  it to `BudgetEnforcer.check_spend`, and throws it away. So there is no running total anywhere.
+- A loop-back cascade (`ResultRejected → propose`, `GoalReopened → arbitrate`, or any step that
+  emits the event it triggers on) can spin unboundedly: each step stays within its per-step budget
+  while cumulative cost grows without limit. Only `max_iterations` stops it — a count, not money.
+- The `inmemory.py` comment already says "the *real* terminator is budgets (cumulative spend) …
+  this [max_iterations] just stops a runaway from spinning forever" — i.e., this is the missing piece.
+
+## Key design conclusions (the reasoning to preserve)
+
+### 1. Usage must be a harness-contract output, reported back to the runtime
+Not an incidental `cost_usd` one harness fills — a `Usage` value every harness returns per
+invocation. Interfaces are cheap to get right now and expensive to change once multiple harnesses
+exist (same argument as the EventReceiver seam).
+
+### 2. Tokens are portable; cost is NOT
+- Every major provider reports prompt/completion tokens (Anthropic `input/output_tokens`, OpenAI
+  `prompt/completion_tokens`, Gemini `prompt/candidatesTokenCount`, local servers eval counts).
+  Mapping provider names → `input_tokens`/`output_tokens` is the adapter's job. Universally
+  satisfiable.
+- **Cost is derived, not reported.** Raw provider APIs (Anthropic API, OpenAI, Gemini) don't return
+  dollars — you compute from tokens × a price table. The `total_cost_usd` we get is a feature of the
+  **claude CLI** specifically, not of the model API. So requiring `cost_usd` would force every other
+  harness to embed pricing (wrong layer) or report 0 (silently breaks the cap).
+- ⇒ Contract: **tokens required; `cost_usd` optional** (filled when the harness already knows it).
+  When absent, a future **runtime pricing layer** derives cost from tokens × a per-model rate table.
+  Pricing centralizes where it belongs, not duplicated per harness.
+
+### 3. An invocation can span MULTIPLE models → no singular `model` field
+An agent run is a tool loop that can fan across models (subagents, routing, small+large mix). Even
+claude-code does this; the CLI's `total_cost_usd` is **aggregated across models**. So a top-level
+`model: str` is actively wrong and would be a corner.
+- ⇒ Contract is an **aggregate** now (tokens + optional cost), with **no model field**. claude-code
+  reports cost already summed across its models, so the dollar cap "just works" under multi-model
+  today without us modeling the split.
+- A **per-model breakdown** (`per_model: tuple[ModelUsage, …]`) is a separate, later structure. It
+  is only *needed* by (a) runtime-derived pricing (can't price a summed token count when models
+  differ) and (b) per-model observability — both deferred. `Usage` is a defaulted frozen dataclass,
+  so adding `per_model` later (and making aggregates derived sums) is **non-breaking**. No corner.
+
+### 4. The cap itself
+- **Spend only.** Cumulative wall-clock was considered and rejected as unnecessary (per-step
+  `wall_clock` already bounds each step; spend is the real concern). `window`/`latency` stay with
+  durability.
+- **Per-drain scope.** A `_drain()` call *is* one cascade in practice (a step's `emits` enqueues the
+  next run into the same drain loop). Reset the accumulator where the `_draining` guard flips true.
+  Caveat: under `serve()`, two unrelated events sharing a drain share the counter — only trips
+  *earlier* (safe). Precise per-cascade-id accounting is a noted follow-up, not v1.
+- **Knob, not declared budget.** `InMemoryRuntime(cascade_budget_usd: float | None = None)`, a
+  backstop like `max_iterations`. A *declared* cascade budget (frontmatter / `registry.yml`) is the
+  proper long-term form (ties to ARCHITECTURE open-decision #2) but is out of scope.
+- **Check before each step, accumulate after.** Over-budget runs short-circuit before running the
+  agent → emit nothing → the cascade winds down on its own.
+- **Composes with run-failure handling** (the shipped #1 work): a `CascadeBudgetExceeded`
+  (subclass of `BudgetExceeded`) raised in `_execute` is caught → recorded as a `failed` run with the
+  message → surfaced via `status()` / `failed_runs` / WARNING log / `loopy trigger` exit 1. No new
+  observability plumbing.
+
+## Proposed shape (for when we build it)
+```
+# contract.py
+@dataclass(frozen=True)
+class Usage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float | None = None          # filled when the harness knows it (claude CLI); else runtime-priced
+    # per_model: tuple[ModelUsage, ...] = ()  # ADD LATER, with pricing/observability — non-breaking
+
+@dataclass(frozen=True)
+class StepResult:
+    output: StepOutput
+    emits: Mapping[EventName, Mapping[str, Any]] = field(default_factory=dict)
+    usage: Usage = Usage()                 # NEW: required of real harnesses (stubs may report zeros)
+```
+- `AgentHarness.run` docstring states reporting `usage` is part of the contract.
+- `ClaudeCodeHarness` maps the `--output-format json` envelope (`usage` block + `total_cost_usd`) → `Usage`.
+- Runtime: `cascade_budget_usd` knob; reset `_cascade_spend` at drain start; before each step raise
+  `CascadeBudgetExceeded` if `_cascade_spend >= cap`; after each step add `result.usage.cost_usd`.
+- CLI: `--max-spend` on `run` and `trigger`.
+
+## Steps (high-level — flesh out when scheduled)
+- [ ] `Usage` type + `StepResult.usage`; document the harness contract obligation.
+- [ ] `ClaudeCodeHarness` fills `Usage` from the envelope (tokens + cost).
+- [ ] `CascadeBudgetExceeded`; runtime accumulator + per-step check + reset; `cascade_budget_usd` knob.
+- [ ] `--max-spend` CLI flag (run + trigger).
+- [ ] Tests: looping cascade trips the cap and winds down (not via `max_iterations`); under-budget
+      cascade completes; stub harness reports zero usage.
+
+## Non-goals / deferred (explicitly)
+- Cumulative wall-clock cap (rejected — unnecessary).
+- `window`/`latency` day-scale budgets (durable-timer milestone).
+- Runtime pricing table (tokens × rate) and the `per_model` breakdown it requires.
+- Declared (frontmatter/registry) cascade budgets.
+- Per-cascade-id precise scoping (per-drain is the v1 approximation).
+- Replay-safe budget decisions (record elapsed/usage like other nondeterminism) — durable adapter.
+
+## Open questions
+- Cap unit: **dollars** (works today via claude-code's reported cost) vs **tokens** (universally
+  enforceable with no pricing table). Lean: dollars now, token cap trivially addable for harnesses
+  that don't report cost. Revisit when a second harness lands.
+- Cost source per invocation: harness-reported (now) vs runtime-priced from tokens+`per_model`
+  (later). Determines whether cost is required or purely derived.
+
+## Notes / decisions
+- 2026-06-17: Decided to DEFER all of this. No implementation, no doc changes now. Two exploratory
+  edits made during discussion (`StepResult.cost_usd`, `CascadeBudgetExceeded`) were reverted; tree
+  is clean. This plan is the record.
