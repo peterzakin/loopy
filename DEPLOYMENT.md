@@ -98,7 +98,7 @@ outside world it integrates with on the edges. Solid arrows are the live request
 
 | Piece | What it does in a running deployment | Today (`loopy run`) |
 |---|---|---|
-| **SensorRunner** | Hosts each `@sensor(webhook=…)` as an HTTP route; runs the author's function to turn a raw vendor payload into a registered `Event`. The one language-pluggable edge. | `FastAPISensorRunner` on `uvicorn`; loads the real sensor module, or synthesizes events if it can't load. Poll sensors are recorded but not yet scheduled. |
+| **SensorRunner** | Hosts each `@sensor(webhook=…)` as an HTTP route; runs the author's function to turn a raw vendor payload into a registered `Event`. The one language-pluggable edge. | `FastAPISensorRunner` on `uvicorn`; loads the real sensor module, or synthesizes events if it can't load. Poll (`@sensor(poll=…)`) sensors run on the separate `PollScheduler`, not here. |
 | **EventReceiver** | Transport-neutral intake — accepts an `Event` from any runner and injects it into the runtime. The seam that lets a non-Python sensor feed the Python engine. | `LocalEventReceiver` (in-proc; just calls `Runtime.trigger`). |
 | **EventBus** | Routes registered events to every workflow whose entry step subscribes via `on:`. Handles fan-out (one event → many workflows) and loop-backs (a step's `emits:` re-enters the bus). | `InProcessEventBus` (single process). |
 | **Runtime** | The engine. Instantiates a run at the `on:` step, walks the `after:` DAG in topo order, renders templates against real run data, records outputs + an event-sourced history, and publishes `emits:`. | `InMemoryRuntime` — covers B1–B6; single-process, non-durable. Durable timers/cron/resume are stubbed (B7/B10). |

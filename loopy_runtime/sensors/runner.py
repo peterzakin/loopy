@@ -1,18 +1,18 @@
-"""SensorRunner (B1 ingress) — webhook server + poll scheduler that injects events.
+"""SensorRunner (B1 ingress) — the webhook server that injects events.
 
-A registered sensor callable takes the incoming payload and returns an `Event` (or
-None to emit nothing); the host hands it to `sink` — the runtime's `trigger`, which
-publishes it and drains the resulting cascade. v1 ships the webhook path; poll
-registration is recorded but the durable scheduler lands with cron/watermarks
-(B7/B8). Executing user-authored sensor *modules* (which import the `loopy` authoring
-shim) is handled by `loopy run`'s sensor loader; `synthesizing_publisher` is the
-dev fallback when a module can't be loaded.
+Hosts each `@sensor(webhook=…)` as an HTTP route: a registered sensor callable takes the
+incoming payload and returns an `Event` (or None to emit nothing), which is handed to the
+`EventReceiver` (validate → publish). This is the *push* edge only; *poll* (timer) sensors
+are driven by the separate `PollScheduler` (`sensors/scheduler.py`) — both feed the same
+receiver but through different trigger mechanisms. Executing user-authored sensor *modules*
+(which import the `loopy` authoring shim) is handled by `loopy run`'s sensor loader;
+`synthesizing_publisher` is the dev fallback when a module can't be loaded.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, HTTPException
@@ -53,7 +53,6 @@ class FastAPISensorRunner:
         self.receiver = receiver
         self.app = FastAPI()
         self.webhook_paths: list[str] = []
-        self.polls: list[tuple[timedelta, SensorFn, str]] = []
 
     def register_webhook(self, path: str, fn: SensorFn) -> None:
         async def handler(payload: dict | None = None):
@@ -66,10 +65,6 @@ class FastAPISensorRunner:
 
         self.app.add_api_route(path, handler, methods=["POST"])
         self.webhook_paths.append(path)
-
-    def register_poll(self, interval: timedelta, fn: SensorFn, t: str) -> None:
-        # Recorded for v1; the durable poll scheduler is deferred (B7/B8).
-        self.polls.append((interval, fn, t))
 
     async def _dispatch(self, fn: SensorFn, payload: dict) -> dict:
         event = fn(payload)

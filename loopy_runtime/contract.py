@@ -182,15 +182,17 @@ class EventReceiver(Protocol):
         ...
 
 
-# ── SensorRunner ─ B1 ingress (producer, language-pluggable) ──────────────────────────────
+# ── SensorRunner ─ B1 ingress (the webhook/push edge; language-pluggable) ──────────────────
+# Hosts inbound webhook sensors and delivers their events to the EventReceiver. Poll (timer)
+# sensors are NOT here — they're driven by the `Scheduler` below; the two are sibling sensor
+# sources that share an output (the receiver) but not a trigger mechanism.
 SensorFn = Callable[..., Any]
 
 
 @runtime_checkable
 class SensorRunner(Protocol):
     def register_webhook(self, path: str, fn: SensorFn) -> None: ...
-    def register_poll(self, interval: timedelta, fn: SensorFn, t: TriggerId) -> None: ...
-    async def start(self) -> None: ...  # delivers each sensor's Event to the EventReceiver
+    async def start(self) -> None: ...  # serves the webhooks; each Event goes to the EventReceiver
 
 
 # ── Scheduler ─ poll timing (in-process now; durable-timer seam for B7) ──────────────────
