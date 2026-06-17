@@ -64,6 +64,7 @@ def run(
     from loopy_runtime.bus.inproc import InProcessEventBus
     from loopy_runtime.harness.claude_code import ClaudeCodeHarness
     from loopy_runtime.manifest_model import load_manifest
+    from loopy_runtime.receiver import LocalEventReceiver
     from loopy_runtime.runtime.inmemory import InMemoryRuntime
     from loopy_runtime.sandbox.factory import make_sandbox_provider
     from loopy_runtime.secrets import EnvFileSecretsResolver
@@ -78,7 +79,7 @@ def run(
         secrets=EnvFileSecretsResolver(root),
         bus=InProcessEventBus(),
     )
-    sensor_runner = FastAPISensorRunner(runtime.trigger)
+    sensor_runner = FastAPISensorRunner(LocalEventReceiver(runtime))
     for sensor in m.sensors:
         if sensor.trigger.kind != "webhook" or not sensor.trigger.path:
             continue

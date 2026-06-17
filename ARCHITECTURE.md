@@ -118,8 +118,21 @@ modular" = swap the `Runtime`; the rest give modularity along orthogonal axes.
 | **`AgentHarness`** | Run a step's prose against a model + tools + skills inside a sandbox; return structured output. | B4 | claude-code runtime · (future: other runtimes) |
 | **`SandboxProvider`** | Provision compute + egress from a sandbox spec (image build, network allowlist). | B4 | Daytona · local subprocess · container |
 | **`EventBus`** | Route registered events to `on:` subscribers. In-proc = single machine; networked = distributed. | B5 | in-process · Redis · NATS · Kafka |
-| **`SensorRunner`** | Webhook server + poll scheduler that invokes `@sensor` functions and publishes returns to the bus. | B1 (ingress) | FastAPI + scheduler |
+| **`SensorRunner`** | The **language-pluggable** ingress edge: hosts + runs the developer's `@sensor` code, normalizes returns into `Event`s, and delivers them to the `EventReceiver`. Stateless. | B1 (ingress) | Python (FastAPI) · (future) Node/TS |
+| **`EventReceiver`** | Executor-side, transport-neutral **intake**: accepts an `Event` from any `SensorRunner` (any language/process) and injects it into the runtime. The seam that lets a non-Python `SensorRunner` feed the Python executor. | B1 (ingress) | in-process · HTTP `POST /events` · broker |
 | **`RetryPolicy`** (cross-cutting) | Backoff + idempotency-key strategy wrapping all side-effecting calls. | B9 | exponential-backoff default |
+
+**The ingress boundary (and why it's split):** the durable executor is always a single Python
+implementation; the **sensor surface is the one language-pluggable layer**. A `SensorRunner`
+produces events; an `EventReceiver` accepts them; the `EventBus` routes them:
+
+```
+SensorRunner (any language)  ──Event──▶  EventReceiver (in-proc | HTTP | broker)  ──▶  EventBus ──▶ Runtime
+```
+
+In-process they collapse (the receiver just calls `Runtime.trigger`); across a process/language
+boundary the `EventReceiver` is an HTTP endpoint or broker topic. This is what makes a TypeScript
+`SensorRunner` possible **without** a second executor — it just delivers `Event`s to the receiver.
 
 **Key property — orthogonality:** these axes are independent. Same `Runtime` + in-proc `EventBus`
 = single-process; same `Runtime` + networked `EventBus` + Postgres `StateStore` = distributed.
@@ -220,14 +233,20 @@ class EventBus(Protocol):
     async def publish(self, event: Event) -> None: ...                      # routes only registered events
     def subscribe(self, name: EventName, handler: Callable[[Event], Awaitable[None]]) -> None: ...
 
-# ── SensorRunner ─ B1 ingress ────────────────────────────────────────────────────────
+# ── EventReceiver ─ B1 ingress (executor-side, transport-neutral) ─────────────────────
+@runtime_checkable
+class EventReceiver(Protocol):
+    async def receive(self, event: Event) -> Optional[RunId]:   # inject an event into the runtime
+        ...
+
+# ── SensorRunner ─ B1 ingress (producer, language-pluggable) ──────────────────────────
 SensorFn = Callable[..., "Event | None | Iterator[Event]"]   # @sensor-decorated fn
 
 @runtime_checkable
 class SensorRunner(Protocol):
     def register_webhook(self, path: str, fn: SensorFn) -> None: ...
     def register_poll(self, interval: timedelta, fn: SensorFn, t: TriggerId) -> None: ...
-    async def start(self) -> None: ...                          # publishes sensor returns to the bus
+    async def start(self) -> None: ...      # delivers each sensor's Event to the EventReceiver
 
 # ── RetryPolicy ─ B9 ────────────────────────────────────────────────────────────────
 @runtime_checkable
@@ -259,7 +278,7 @@ runtime = DurableLiteRuntime(                 # ← swap for InMemoryRuntime / T
     bus      = NatsEventBus(...),             # ← in-proc (single node) vs networked (distributed)
     retry    = ExponentialBackoff(max_attempts=5),
 )
-sensor_host = FastAPISensorRunner(bus=runtime.bus)
+sensor_runner = FastAPISensorRunner(LocalEventReceiver(runtime))   # producer → receiver → bus
 ```
 
 The **`Runtime` is the unit of durability modularity** — one adapter per provider (§9). The other

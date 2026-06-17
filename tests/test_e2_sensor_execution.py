@@ -97,13 +97,14 @@ def test_load_and_run_real_sensor(tmp_path):
         assert event.fields["issue_id"] == "ISS-1"
         assert event.fields["source"] == "sentry"
 
-        # And it flows through the host to a sink (the cascade entry point).
+        # And it flows through the runner to the EventReceiver (the cascade entry point).
         seen: list[str] = []
 
-        async def sink(ev):
-            seen.append(ev.name)
+        class _Receiver:
+            async def receive(self, ev):
+                seen.append(ev.name)
 
-        host = FastAPISensorRunner(sink)
+        host = FastAPISensorRunner(_Receiver())
         host.register_webhook("/hooks/sentry", invoke)
         result = asyncio.run(host._dispatch(invoke, payload))
         assert result == {"emitted": "Incident"}

@@ -11,13 +11,13 @@ dev fallback when a module can't be loaded.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 
-from loopy_runtime.contract import Event
+from loopy_runtime.contract import Event, EventReceiver
 from loopy_runtime.payloads import synthesize_fields
 
 if TYPE_CHECKING:
@@ -25,8 +25,6 @@ if TYPE_CHECKING:
 
 # A sensor callable: payload -> Event | None.
 SensorFn = Callable[[dict], "Event | None"]
-# A sink drives an event into the runtime (publish + drain): typically Runtime.trigger.
-EventSink = Callable[[Event], Awaitable[object]]
 
 
 def synthesizing_publisher(manifest: Manifest, sensor: SensorSpec) -> SensorFn:
@@ -50,8 +48,8 @@ def synthesizing_publisher(manifest: Manifest, sensor: SensorSpec) -> SensorFn:
 
 
 class FastAPISensorRunner:
-    def __init__(self, sink: EventSink) -> None:
-        self.sink = sink
+    def __init__(self, receiver: EventReceiver) -> None:
+        self.receiver = receiver
         self.app = FastAPI()
         self.webhook_paths: list[str] = []
         self.polls: list[tuple[timedelta, SensorFn, str]] = []
@@ -71,7 +69,7 @@ class FastAPISensorRunner:
         event = fn(payload)
         if event is None:
             return {"emitted": None}
-        await self.sink(event)
+        await self.receiver.receive(event)
         return {"emitted": event.name}
 
     async def start(self, host: str = "127.0.0.1", port: int = 8000) -> None:  # pragma: no cover
