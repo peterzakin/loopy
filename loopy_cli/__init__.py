@@ -57,11 +57,15 @@ def run(
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(8000, "--port"),
     sandbox: str = typer.Option("local", "--sandbox", help="Sandbox provider: local | daytona."),
+    bus: str = typer.Option("inproc", "--bus", help="EventBus: inproc | redis."),
+    redis_url: str = typer.Option(
+        "redis://localhost:6379", "--redis-url", help="Redis URL (used with --bus redis)."
+    ),
 ) -> None:
     """Start the Loopy server: host sensor webhooks; incoming events drive workflow runs."""
     import asyncio
 
-    from loopy_runtime.bus.inproc import InProcessEventBus
+    from loopy_runtime.bus.factory import make_event_bus
     from loopy_runtime.harness.claude_code import ClaudeCodeHarness
     from loopy_runtime.manifest_model import load_manifest
     from loopy_runtime.receiver import LocalEventReceiver
@@ -71,17 +75,22 @@ def run(
     from loopy_runtime.sensors.loader import load_poll_sensor, load_webhook_sensor
     from loopy_runtime.sensors.runner import FastAPISensorRunner, synthesizing_publisher
     from loopy_runtime.sensors.scheduler import PollScheduler, parse_interval
+    from loopy_runtime.state.inmemory import InMemoryStateStore
 
     m = load_manifest(manifest)
-    bus = InProcessEventBus()  # shared: the receiver publishes to it, the runtime consumes
+    # One StateStore shared by the runtime (run history/watermarks) and the bus (at-least-once
+    # dedupe by Event.id) — a networked bus consumes off the broker, so it needs its own dedupe.
+    state = InMemoryStateStore()
+    event_bus = make_event_bus(bus, redis_url=redis_url, state=state)
     runtime = InMemoryRuntime(
         m,
         harness=ClaudeCodeHarness(m.registry.agents, m.registry.events),
         sandboxes=make_sandbox_provider(sandbox),
         secrets=EnvFileSecretsResolver(root),
-        bus=bus,
+        bus=event_bus,
+        state=state,
     )
-    receiver = LocalEventReceiver(bus, m.registry.events)  # shared gate for webhooks + polls
+    receiver = LocalEventReceiver(event_bus, m.registry.events)  # shared gate for webhooks + polls
     sensor_runner = FastAPISensorRunner(receiver)
     for sensor in m.sensors:
         if sensor.trigger.kind != "webhook" or not sensor.trigger.path:
@@ -120,14 +129,17 @@ def run(
         f"polling {len(scheduler.poll_names)} sensor(s): "
         f"{', '.join(scheduler.poll_names) or '(none)'}"
     )
+    typer.echo(f"event bus: {bus}" + (f" ({redis_url})" if bus == "redis" else ""))
 
     async def _serve() -> None:  # pragma: no cover - exercised by running the server
         consumer = asyncio.create_task(runtime.serve())  # drain runs in the background
+        broker = asyncio.create_task(event_bus.run())  # networked bus consume loop (no-op inproc)
         poller = asyncio.create_task(scheduler.start())  # poll sensors fire on their tasks
         try:
             await sensor_runner.start(host, port)
         finally:
             consumer.cancel()
+            broker.cancel()
             poller.cancel()
 
     asyncio.run(_serve())  # pragma: no cover

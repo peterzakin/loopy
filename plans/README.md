@@ -44,7 +44,11 @@ plan at the start of a session.
 
 ## Current epics
 
-- _(none active — `future/` is empty)_
+- **`future/sensor-ingress/`** — receiver-as-gate + decoupling (core shipped; HTTP intake / auth /
+  contract distribution still open).
+- **`future/cost-budget/`** — usage-reporting contract + cumulative cascade spend cap (design only).
+- **`past/redis-broker/`** — `RedisEventBus` (Redis Streams) as the first networked broker behind
+  the `EventBus` seam. Shipped; durable-run recovery still B10.
 - **`past/poll-sensors/`** — in-process asyncio poll scheduler behind a durable-timer seam
   (`Tick` input, multi-event fan-out, watermarks). Shipped; durability deferred to B7.
 - **`past/daytona-sandbox/`** — DaytonaSandboxProvider behind the Sandbox Protocol. Shipped.

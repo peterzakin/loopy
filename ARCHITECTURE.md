@@ -117,7 +117,7 @@ modular" = swap the `Runtime`; the rest give modularity along orthogonal axes.
 | **`StateStore`** | Persist run history (event-sourced log), step outputs, watermarks (`last_run`). | B8, B10, B11 | dict (in-mem) · SQLite · Postgres · Temporal history |
 | **`AgentHarness`** | Run a step's prose against a model + tools + skills inside a sandbox; return structured output. | B4 | claude-code runtime · (future: other runtimes) |
 | **`SandboxProvider`** | Provision compute + egress from a sandbox spec (image build, network allowlist). | B4 | Daytona · local subprocess · container |
-| **`EventBus`** | Route registered events to `on:` subscribers. In-proc = single machine; networked = distributed. | B5 | in-process · Redis · NATS · Kafka |
+| **`EventBus`** | Route registered events to `on:` subscribers. In-proc = single machine; networked = distributed. | B5 | in-process · **Redis (Streams)** · NATS · Kafka |
 | **`SensorRunner`** | The **language-pluggable** ingress edge: hosts + runs the developer's `@sensor` code, normalizes returns into `Event`s, and delivers them to the `EventReceiver`. Stateless. | B1 (ingress) | Python (FastAPI) · (future) Node/TS |
 | **`EventReceiver`** | Trusted ingress intake on the **producer side of the `EventBus`**: accepts an `Event` from any `SensorRunner` (any language/process), re-validates it against the registry contract, and hands it on toward the `EventBus`. Loopy-owned and trusted — distinct from the untrusted `SensorRunner`. The seam that lets a non-Python `SensorRunner` feed the Python `Runtime`. | B1 (ingress) | in-process · HTTP `POST /events` · broker |
 | **`Scheduler`** | Fire poll sensors on a timer: hand each `@sensor(poll=…)` a `Tick` (`scheduled_at`, `last_run`) every interval, deliver the normalized event(s) through the `EventReceiver`, and advance the per-sensor watermark only on success. The **timer** seam (distinct from the `EventBus` delivery seam). | B1 (poll) · B7 (durable timing) | in-process asyncio · (future) Redis zset+lock · Postgres · Temporal/DBOS native timers |
@@ -154,6 +154,18 @@ loopy process (synchronous mode), or a **standalone ingress service** in front o
 (decoupled mode). Never inside the untrusted `SensorRunner`, and never inside the broker (Redis/NATS
 run no loopy code). This is what makes a TypeScript `SensorRunner` possible **without** a second
 `Runtime` — it just delivers `Event`s to the receiver.
+
+**`EventBus.publish` means different things in the two modes — wire callers accordingly.**
+In-process, `publish` runs the subscribed handlers *inline* and returns once they're enqueued, so
+`Runtime.trigger()` can `await bus.publish(event)` and then `_drain()` the work it just produced.
+A **networked bus cannot honor that**: `publish` only durably accepts the event (`XADD`); the
+matching handler fires later, from the bus's `run()` consumer loop. So a networked `EventBus`
+(`RedisEventBus`) is **decoupled-mode only** — it backs the long-lived `serve()` path, never the
+synchronous `trigger()` path. The lesson the seam encodes: treat `publish` as *"durably accepted,"*
+not *"delivered,"* and never wire a synchronous-drain caller onto a networked bus (it would drain an
+empty queue). The in-proc bus's inline delivery is the convenience of single-process, not the
+contract. `RedisEventBus` uses Redis **Streams + a consumer group** (durable, buffered,
+at-least-once with `XACK`; dedupe by `Event.id` via `StateStore.seen`), not pub/sub (lossy).
 
 **Key property — orthogonality:** these axes are independent. Same `Runtime` + in-proc `EventBus`
 = single-process; same `Runtime` + networked `EventBus` + Postgres `StateStore` = distributed.
@@ -271,8 +283,9 @@ class StateStore(Protocol):
 # ── EventBus ─ B5 ─────────────────────────────────────────────────────────────────
 @runtime_checkable
 class EventBus(Protocol):
-    async def publish(self, event: Event) -> None: ...                      # routes only registered events
+    async def publish(self, event: Event) -> None: ...                      # in-proc: deliver inline; networked: durably accept (XADD)
     def subscribe(self, name: EventName, handler: Callable[[Event], Awaitable[None]]) -> None: ...
+    async def run(self) -> None: ...                                        # consume loop (no-op in-proc; XREADGROUP→dispatch→XACK on Redis)
 
 # ── EventReceiver ─ B1 ingress (trusted, producer-side of the EventBus) ───────────────
 @runtime_checkable
