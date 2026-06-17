@@ -53,7 +53,8 @@ def test_protocols_are_runtime_checkable():
         "SandboxProvider",
         "Sandbox",
         "EventBus",
-        "SensorHost",
+        "EventReceiver",
+        "SensorRunner",
         "RetryPolicy",
         "SecretsResolver",
     ):

@@ -145,15 +145,25 @@ class EventBus(Protocol):
     def subscribe(self, name: EventName, handler: Callable[[Event], Awaitable[None]]) -> None: ...
 
 
-# ── SensorHost ─ B1 ingress ──────────────────────────────────────────────────────────
+# ── EventReceiver ─ B1 ingress (executor-side, transport-neutral) ─────────────────────────
+@runtime_checkable
+class EventReceiver(Protocol):
+    async def receive(self, event: Event) -> RunId | None:
+        """Accept an event from a SensorRunner (any language/transport) and inject it into
+        the runtime. In-process this calls Runtime.trigger; across a boundary it's an HTTP
+        endpoint or broker. Returns the first run started, if any."""
+        ...
+
+
+# ── SensorRunner ─ B1 ingress (producer, language-pluggable) ──────────────────────────────
 SensorFn = Callable[..., Any]
 
 
 @runtime_checkable
-class SensorHost(Protocol):
+class SensorRunner(Protocol):
     def register_webhook(self, path: str, fn: SensorFn) -> None: ...
     def register_poll(self, interval: timedelta, fn: SensorFn, t: TriggerId) -> None: ...
-    async def start(self) -> None: ...
+    async def start(self) -> None: ...  # delivers each sensor's Event to the EventReceiver
 
 
 # ── RetryPolicy ─ B9 ──────────────────────────────────────────────────────────────────

@@ -18,8 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-loopy = "loopy_core.cli:app"
-loopy-run = "loopy_runtime.cli:app"
+loopy = "loopy_cli:app"
 
 [project.optional-dependencies]
 daytona = ["daytona>=0.180"]
@@ -36,7 +35,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["loopy_core", "loopy_runtime"]
+packages = ["loopy_core", "loopy_runtime", "loopy_cli"]
 
 [tool.ruff]
 line-length = 100

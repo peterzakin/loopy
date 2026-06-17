@@ -54,7 +54,7 @@ sensors/*.py ──┘  ─ compile / validate   │    DAG + event  │     ├
                                          │    contracts +  │     └─ Temporal      (adapter)
                                          │    lineage)     │   composed from modules:
                                          │                 │     • AgentHarness · SandboxProvider
-                                         │                 │     • EventBus · StateStore · SensorHost
+                                         │                 │     • EventBus · StateStore · SensorRunner
 ```
 
 ---
@@ -118,8 +118,21 @@ modular" = swap the `Runtime`; the rest give modularity along orthogonal axes.
 | **`AgentHarness`** | Run a step's prose against a model + tools + skills inside a sandbox; return structured output. | B4 | claude-code runtime · (future: other runtimes) |
 | **`SandboxProvider`** | Provision compute + egress from a sandbox spec (image build, network allowlist). | B4 | Daytona · local subprocess · container |
 | **`EventBus`** | Route registered events to `on:` subscribers. In-proc = single machine; networked = distributed. | B5 | in-process · Redis · NATS · Kafka |
-| **`SensorHost`** | Webhook server + poll scheduler that invokes `@sensor` functions and publishes returns to the bus. | B1 (ingress) | FastAPI + scheduler |
+| **`SensorRunner`** | The **language-pluggable** ingress edge: hosts + runs the developer's `@sensor` code, normalizes returns into `Event`s, and delivers them to the `EventReceiver`. Stateless. | B1 (ingress) | Python (FastAPI) · (future) Node/TS |
+| **`EventReceiver`** | Executor-side, transport-neutral **intake**: accepts an `Event` from any `SensorRunner` (any language/process) and injects it into the runtime. The seam that lets a non-Python `SensorRunner` feed the Python executor. | B1 (ingress) | in-process · HTTP `POST /events` · broker |
 | **`RetryPolicy`** (cross-cutting) | Backoff + idempotency-key strategy wrapping all side-effecting calls. | B9 | exponential-backoff default |
+
+**The ingress boundary (and why it's split):** the durable executor is always a single Python
+implementation; the **sensor surface is the one language-pluggable layer**. A `SensorRunner`
+produces events; an `EventReceiver` accepts them; the `EventBus` routes them:
+
+```
+SensorRunner (any language)  ──Event──▶  EventReceiver (in-proc | HTTP | broker)  ──▶  EventBus ──▶ Runtime
+```
+
+In-process they collapse (the receiver just calls `Runtime.trigger`); across a process/language
+boundary the `EventReceiver` is an HTTP endpoint or broker topic. This is what makes a TypeScript
+`SensorRunner` possible **without** a second executor — it just delivers `Event`s to the receiver.
 
 **Key property — orthogonality:** these axes are independent. Same `Runtime` + in-proc `EventBus`
 = single-process; same `Runtime` + networked `EventBus` + Postgres `StateStore` = distributed.
@@ -220,14 +233,20 @@ class EventBus(Protocol):
     async def publish(self, event: Event) -> None: ...                      # routes only registered events
     def subscribe(self, name: EventName, handler: Callable[[Event], Awaitable[None]]) -> None: ...
 
-# ── SensorHost ─ B1 ingress ────────────────────────────────────────────────────────
+# ── EventReceiver ─ B1 ingress (executor-side, transport-neutral) ─────────────────────
+@runtime_checkable
+class EventReceiver(Protocol):
+    async def receive(self, event: Event) -> Optional[RunId]:   # inject an event into the runtime
+        ...
+
+# ── SensorRunner ─ B1 ingress (producer, language-pluggable) ──────────────────────────
 SensorFn = Callable[..., "Event | None | Iterator[Event]"]   # @sensor-decorated fn
 
 @runtime_checkable
-class SensorHost(Protocol):
+class SensorRunner(Protocol):
     def register_webhook(self, path: str, fn: SensorFn) -> None: ...
     def register_poll(self, interval: timedelta, fn: SensorFn, t: TriggerId) -> None: ...
-    async def start(self) -> None: ...                          # publishes sensor returns to the bus
+    async def start(self) -> None: ...      # delivers each sensor's Event to the EventReceiver
 
 # ── RetryPolicy ─ B9 ────────────────────────────────────────────────────────────────
 @runtime_checkable
@@ -259,7 +278,7 @@ runtime = DurableLiteRuntime(                 # ← swap for InMemoryRuntime / T
     bus      = NatsEventBus(...),             # ← in-proc (single node) vs networked (distributed)
     retry    = ExponentialBackoff(max_attempts=5),
 )
-sensor_host = FastAPISensorHost(bus=runtime.bus)
+sensor_runner = FastAPISensorRunner(LocalEventReceiver(runtime))   # producer → receiver → bus
 ```
 
 The **`Runtime` is the unit of durability modularity** — one adapter per provider (§9). The other
@@ -308,7 +327,7 @@ registered event via `emits` (a decorator arg in Python, a `sensorRegistry` lite
 in a form Core can read without executing code, or it fails to load. The declaration — not the
 return type — is the source of truth; the return annotation is optional sugar the author's own
 typechecker enforces. A **pluggable per-language inspector** reduces each sensor to a common
-descriptor (Python AST first); the function *bodies* run in the backend's `SensorHost` (§3.2),
+descriptor (Python AST first); the function *bodies* run in the backend's `SensorRunner` (§3.2),
 which executes whatever language the sensor is written in. Sensors straddle the line: declarations
 are frontend-validated, execution is backend.
 
@@ -326,7 +345,7 @@ are frontend-validated, execution is backend.
 | **6** | Define backend interfaces (§3.2) + manifest schema v1 | boundary |
 | **7** | **InMemory backend** — satisfies B1–B6, stubs B7/B10; prove README example end-to-end | backend |
 | **8** | `AgentHarness` (claude-code) + `SandboxProvider` (daytona) behind interfaces | backend |
-| **9** | `SensorHost` (webhook + poll) + `EventBus` | backend |
+| **9** | `SensorRunner` (webhook + poll) + `EventBus` | backend |
 | **10** | Cron triggers + watermarks (B7, B8) | backend |
 | **11** | **DurableLite backend** — event-sourced StateStore, retries, durable timers (B7–B11) | backend |
 | **12** | Conformance suite + full example E2E; **(optional) Temporal adapter** | backend |
@@ -380,7 +399,7 @@ mapping, not the plumbing.
 | CLI | `Typer` | `loopy compile` / `run` / `dev` |
 | `loopy.events` stubs | `datamodel-code-generator` | `.pyi` from the registry |
 | Cron + scheduling | `croniter` + `APScheduler` | 5-field expr + tz; drives poll/cron ticks |
-| `SensorHost` webhooks | `FastAPI` + `uvicorn` | mount `@sensor(webhook=…)` routes |
+| `SensorRunner` webhooks | `FastAPI` + `uvicorn` | mount `@sensor(webhook=…)` routes |
 | `EventBus` (networked) | `FastStream` over NATS/Redis | in-proc bus is trivial; swap brokers without touching the engine |
 | Observability | `OpenTelemetry` + `structlog` | DBOS and Temporal both emit OTel |
 

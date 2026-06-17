@@ -1,4 +1,4 @@
-"""Load real `@sensor` functions from a project and adapt them to the SensorHost.
+"""Load real `@sensor` functions from a project and adapt them to the SensorRunner.
 
 Imports the user's sensor module (which does `from loopy import sensor` / `from
 loopy.events import …` — both provided by what `loopy compile` generated), and wraps

@@ -216,7 +216,7 @@ resolves `{{ }}` at run time against recorded values.
 - Record `{name, trigger(webhook|poll), emits, module, fn}` per sensor. `module` is a
   **language-appropriate locator** — a dotted module path for Python (`sensors/github/issues.py` →
   `sensors.github.issues`), an import specifier/path for other languages. A `lang` discriminator is
-  added to the descriptor when the second sensor language lands (so the backend `SensorHost` picks
+  added to the descriptor when the second sensor language lands (so the backend `SensorRunner` picks
   the right runtime); Python-only until then.
 
 ---

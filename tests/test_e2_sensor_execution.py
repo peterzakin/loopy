@@ -12,8 +12,8 @@ from loopy_core.events.codegen import generate_events, write_events
 from loopy_core.registry.model import Registry
 from loopy_runtime.authoring import sensor, sensor_config
 from loopy_runtime.manifest_model import SensorSpec, SensorTriggerSpec
-from loopy_runtime.sensors.host import FastAPISensorHost
 from loopy_runtime.sensors.loader import load_webhook_sensor, normalize
+from loopy_runtime.sensors.runner import FastAPISensorRunner
 from tests.helpers import write_project
 
 REGISTRY = (
@@ -97,13 +97,14 @@ def test_load_and_run_real_sensor(tmp_path):
         assert event.fields["issue_id"] == "ISS-1"
         assert event.fields["source"] == "sentry"
 
-        # And it flows through the host to a sink (the cascade entry point).
+        # And it flows through the runner to the EventReceiver (the cascade entry point).
         seen: list[str] = []
 
-        async def sink(ev):
-            seen.append(ev.name)
+        class _Receiver:
+            async def receive(self, ev):
+                seen.append(ev.name)
 
-        host = FastAPISensorHost(sink)
+        host = FastAPISensorRunner(_Receiver())
         host.register_webhook("/hooks/sentry", invoke)
         result = asyncio.run(host._dispatch(invoke, payload))
         assert result == {"emitted": "Incident"}
