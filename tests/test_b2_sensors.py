@@ -64,35 +64,59 @@ def test_dispatch_skips_when_sensor_returns_none():
 
 def test_webhook_drives_full_cascade():
     # A webhook publishing Incident should trigger triage -> resolve, end to end.
+    # receive() now publishes-and-acks, so drain explicitly (serve() does this in the server).
     m = load_manifest(GOLDEN)
+    bus = InProcessEventBus()
     runtime = InMemoryRuntime(
         m,
         harness=StubAgentHarness(m.registry.events),
         sandboxes=LocalSandboxProvider(),
         secrets=StaticSecretsResolver({}),
-        bus=InProcessEventBus(),
+        bus=bus,
     )
-    host = FastAPISensorRunner(LocalEventReceiver(runtime))
+    host = FastAPISensorRunner(LocalEventReceiver(bus, m.registry.events))
     sentry = next(s for s in m.sensors if s.emits == "Incident")
     host.register_webhook(sentry.trigger.path, _synthesizing_publisher(m, sentry))
 
-    asyncio.run(host._dispatch(_synthesizing_publisher(m, sentry), {"issue_id": "ISS-7"}))
+    async def go():
+        await host._dispatch(_synthesizing_publisher(m, sentry), {"issue_id": "ISS-7"})
+        await runtime.drain()
+
+    asyncio.run(go())
 
     assert runtime.execution_log[0] == "triage/investigate"
     assert "resolve/ship" in runtime.execution_log
     assert runtime.emitted_log == ["WorkItem", "GoalShipped"]
 
 
-def test_local_event_receiver_injects_into_runtime():
-    # The in-proc EventReceiver hands an event straight to Runtime.trigger.
+def test_local_event_receiver_validates_publishes_then_runtime_consumes():
+    # The in-proc EventReceiver validates against the registry and publishes to the bus;
+    # the Runtime consumes off the bus when drained (publish-and-ack, not run-on-receive).
     m = load_manifest(GOLDEN)
+    bus = InProcessEventBus()
     runtime = InMemoryRuntime(
         m,
         harness=StubAgentHarness(m.registry.events),
         sandboxes=LocalSandboxProvider(),
         secrets=StaticSecretsResolver({}),
-        bus=InProcessEventBus(),
+        bus=bus,
     )
-    receiver = LocalEventReceiver(runtime)
-    asyncio.run(receiver.receive(_event("Incident")))
+    receiver = LocalEventReceiver(bus, m.registry.events)
+    incident = Event(
+        name="Incident",
+        fields={
+            "source": "sentry",
+            "issue_id": "ISS-1",
+            "title": "boom",
+            "link": "https://example.test/i/1",
+        },
+        id="e",
+        emitted_at=datetime.now(UTC),
+    )
+
+    async def go():
+        assert await receiver.receive(incident) is None  # publish-and-ack
+        await runtime.drain()
+
+    asyncio.run(go())
     assert runtime.execution_log[0] == "triage/investigate"

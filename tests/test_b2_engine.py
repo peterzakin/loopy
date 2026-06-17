@@ -81,8 +81,11 @@ def test_env_file_resolver_rejects_escape(tmp_path):
         EnvFileSecretsResolver(tmp_path).resolve("default", SandboxSpec(env_file=["../escape.env"]))
 
 
-def test_runtime_missing_model_key_errors():
+def test_runtime_missing_model_key_records_failed_run():
     # ClaudeCodeHarness requires ANTHROPIC_API_KEY; StaticSecretsResolver supplies none.
+    # The engine now isolates the failure: the run is recorded as failed (carrying the
+    # error) rather than raising out of the cascade — `loopy trigger` surfaces it via
+    # exit 1, and `serve()` keeps running.
     m = load_manifest(GOLDEN)
     rt = InMemoryRuntime(
         m,
@@ -92,5 +95,7 @@ def test_runtime_missing_model_key_errors():
         bus=InProcessEventBus(),
     )
     event = Event(name="Incident", fields={}, id="x", emitted_at=datetime.now(UTC))
-    with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
-        asyncio.run(rt.trigger(event))
+    run_id = asyncio.run(rt.trigger(event))
+    status = asyncio.run(rt.status(run_id))
+    assert status.state == "failed"
+    assert "ANTHROPIC_API_KEY" in (status.error or "")

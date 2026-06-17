@@ -72,14 +72,15 @@ def run(
     from loopy_runtime.sensors.runner import FastAPISensorRunner, synthesizing_publisher
 
     m = load_manifest(manifest)
+    bus = InProcessEventBus()  # shared: the receiver publishes to it, the runtime consumes
     runtime = InMemoryRuntime(
         m,
         harness=ClaudeCodeHarness(m.registry.agents, m.registry.events),
         sandboxes=make_sandbox_provider(sandbox),
         secrets=EnvFileSecretsResolver(root),
-        bus=InProcessEventBus(),
+        bus=bus,
     )
-    sensor_runner = FastAPISensorRunner(LocalEventReceiver(runtime))
+    sensor_runner = FastAPISensorRunner(LocalEventReceiver(bus, m.registry.events))
     for sensor in m.sensors:
         if sensor.trigger.kind != "webhook" or not sensor.trigger.path:
             continue
@@ -97,7 +98,15 @@ def run(
         f"serving {len(sensor_runner.webhook_paths)} webhook(s) on {host}:{port}: "
         f"{', '.join(sensor_runner.webhook_paths) or '(none)'}"
     )
-    asyncio.run(sensor_runner.start(host, port))  # pragma: no cover
+
+    async def _serve() -> None:  # pragma: no cover - exercised by running the server
+        consumer = asyncio.create_task(runtime.serve())  # drain runs in the background
+        try:
+            await sensor_runner.start(host, port)
+        finally:
+            consumer.cancel()
+
+    asyncio.run(_serve())  # pragma: no cover
 
 
 @app.command()
@@ -145,6 +154,10 @@ def trigger(
     typer.echo(f"run: {run_id}")
     typer.echo(f"steps: {' -> '.join(runtime.execution_log)}")
     typer.echo(f"emitted: {', '.join(runtime.emitted_log) or '(none)'}")
+    if runtime.failed_runs:  # a recorded run failure → report and exit non-zero
+        for status in runtime.failed_runs:
+            typer.echo(f"FAILED {status.run_id}: {status.error}", err=True)
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":  # pragma: no cover

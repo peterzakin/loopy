@@ -15,10 +15,11 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from loopy_runtime.contract import Event, EventReceiver
 from loopy_runtime.payloads import synthesize_fields
+from loopy_runtime.validation import EventValidationError
 
 if TYPE_CHECKING:
     from loopy_runtime.manifest_model import Manifest, SensorSpec
@@ -56,7 +57,12 @@ class FastAPISensorRunner:
 
     def register_webhook(self, path: str, fn: SensorFn) -> None:
         async def handler(payload: dict | None = None):
-            return await self._dispatch(fn, payload or {})
+            try:
+                return await self._dispatch(fn, payload or {})
+            except EventValidationError as exc:
+                # The produced event failed the registry contract: a client error, not a
+                # 500. 422 Unprocessable Entity with the validation detail.
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         self.app.add_api_route(path, handler, methods=["POST"])
         self.webhook_paths.append(path)

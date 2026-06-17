@@ -12,6 +12,7 @@ Out of scope (v1): durable timers, crash-recoverable `resume`, version pinning.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import deque
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
@@ -29,6 +30,8 @@ from loopy_runtime.contract import (
 from loopy_runtime.manifest_model import Manifest, SandboxSpec, StepSpec, WorkflowSpec
 from loopy_runtime.retry import ExponentialBackoffRetry
 from loopy_runtime.state.inmemory import InMemoryStateStore
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -64,9 +67,12 @@ class InMemoryRuntime:
         self._event_seq = 0
         self._runs: dict[RunId, RunStatus] = {}
         self._queue: deque[tuple[str, Event]] = deque()  # pending (workflow, event) work
+        self._work = asyncio.Event()  # signalled on enqueue; wakes the serve() consumer
+        self._draining = False  # guard so concurrent drains don't race the shared queue
         # Observability for tests/CLI: global ordered logs across the cascade.
         self.execution_log: list[str] = []
         self.emitted_log: list[str] = []
+        self.drain_errors: list[Exception] = []  # runs that failed under serve()
 
         # Subscribe a handler PER workflow so an event with multiple `on:` consumers
         # fans out to all of them (not just the first).
@@ -77,11 +83,39 @@ class InMemoryRuntime:
 
     # ── Runtime Protocol ────────────────────────────────────────────────────────
     async def trigger(self, event: Event) -> RunId | None:
-        """Route `event` through the bus, then drain the cascade iteratively (a flat
-        loop, not recursion — so loop-backs can't overflow the stack). Returns the
-        first run started (or None if nothing subscribes)."""
+        """Synchronous one-shot entry (for `loopy trigger` and tests): publish `event`,
+        then drain the cascade to completion and return the first run started (or None if
+        nothing subscribes). The server path uses the `EventReceiver` (publish only) plus
+        `serve()` to drain in the background instead."""
         await self.bus.publish(event)  # handlers enqueue matching (workflow, event)
         return await self._drain()
+
+    async def serve(self) -> None:
+        """Background consumer for the long-lived server: drain whenever work is enqueued
+        on the bus. A run that raises is recorded in `drain_errors` and skipped, so one
+        bad event can't stop ingress. This is what decouples intake (the receiver just
+        publishes) from execution."""
+        while True:
+            await self._work.wait()
+            self._work.clear()
+            try:
+                await self._drain()
+            except Exception as exc:  # noqa: BLE001 - a bad run must not kill the consumer
+                # Per-run failures are handled in _execute; this catches drain-level faults
+                # (e.g. the max_iterations backstop) so the consumer survives them.
+                logger.exception("drain aborted; ingress continues")
+                self.drain_errors.append(exc)
+
+    async def drain(self) -> RunId | None:
+        """Run all currently-queued work to completion; return the first run started.
+        Exposed for tests and the synchronous path; `serve()` calls it on each wake."""
+        return await self._drain()
+
+    @property
+    def failed_runs(self) -> list[RunStatus]:
+        """Runs that ended in state 'failed' (each carries its `error`). For the
+        one-shot CLI and observability — a failed run is recorded, not raised."""
+        return [s for s in self._runs.values() if s.state == "failed"]
 
     async def tick(self, t, scheduled_at):  # pragma: no cover - cron is deferred (B7/B8)
         raise NotImplementedError("cron ticks land with durable timers (B7/B8)")
@@ -96,24 +130,36 @@ class InMemoryRuntime:
     def _handler_for(self, wf_name: str) -> Callable[[Event], Awaitable[None]]:
         async def handler(event: Event) -> None:
             self._queue.append((wf_name, event))  # enqueue; the drain loop runs it
+            self._work.set()  # wake serve() if it's the one draining
 
         return handler
 
     async def _drain(self) -> RunId | None:
         """Run queued (workflow, event) work until the queue empties. Each run's emits
-        enqueue more work via the bus; depth stays flat (one run on the stack at a time)."""
+        enqueue more work via the bus; depth stays flat (one run on the stack at a time).
+
+        Guarded so concurrent callers don't race the shared queue: if a drain is already
+        in flight, this no-ops and returns None — that drain's `while self._queue` loop
+        will pick up the newly-enqueued work (safe because no `await` sits between the
+        loop's empty-check and clearing the guard)."""
+        if self._draining:
+            return None
+        self._draining = True
         first_run_id: RunId | None = None
         iterations = 0
-        while self._queue:
-            iterations += 1
-            if iterations > self.max_iterations:
-                raise RuntimeError(
-                    f"cascade exceeded max_iterations ({self.max_iterations}) — "
-                    "possible unbounded event loop with no terminating budget"
-                )
-            wf_name, event = self._queue.popleft()
-            run_id = await self._execute(wf_name, event)
-            first_run_id = first_run_id or run_id
+        try:
+            while self._queue:
+                iterations += 1
+                if iterations > self.max_iterations:
+                    raise RuntimeError(
+                        f"cascade exceeded max_iterations ({self.max_iterations}) — "
+                        "possible unbounded event loop with no terminating budget"
+                    )
+                wf_name, event = self._queue.popleft()
+                run_id = await self._execute(wf_name, event)
+                first_run_id = first_run_id or run_id
+        finally:
+            self._draining = False
         return first_run_id
 
     async def _execute(self, wf_name: str, event: Event) -> RunId:
@@ -128,35 +174,59 @@ class InMemoryRuntime:
         outputs: dict[str, StepOutput] = {}  # keyed by local step name
         step_states: dict[str, str] = {}
         emitted: list[str] = []
+        current_local: str | None = None  # local step name (key for step_states)
+        current_step_id: str | None = None  # workflow-qualified id (for history/logs)
 
-        for local_name in self._topo_order(wf):
-            step = wf.steps[local_name]
-            ctx = StepContext(
-                run_id=run_id,
-                step_id=step.id,
-                event=event,
-                upstream={p: outputs[p] for p in step.after if p in outputs},
-                idempotency_key=f"{run_id}:{step.id}",
-            )
-            result = await self._run_step(step, ctx)
-            outputs[local_name] = result.output
-            step_states[local_name] = "completed"
-            self.execution_log.append(step.id)
-            await self.state.record_output(run_id, local_name, result.output)
-            await self.state.append(run_id, RunEvent("step_completed", step.id, {}, _now()))
-
-            for event_name in step.emits:
-                payload = result.emits.get(event_name)
-                if payload is None:
-                    raise RuntimeError(
-                        f"step '{step.id}' declares emits '{event_name}' but produced no payload"
-                    )
-                emitted.append(event_name)
-                self.emitted_log.append(event_name)
-                await self.state.append(
-                    run_id, RunEvent("event_emitted", step.id, {"event": event_name}, _now())
+        try:
+            for local_name in self._topo_order(wf):
+                step = wf.steps[local_name]
+                current_local = local_name
+                current_step_id = step.id
+                ctx = StepContext(
+                    run_id=run_id,
+                    step_id=step.id,
+                    event=event,
+                    upstream={p: outputs[p] for p in step.after if p in outputs},
+                    idempotency_key=f"{run_id}:{step.id}",
                 )
-                await self.bus.publish(self._build_emitted(event_name, payload))
+                result = await self._run_step(step, ctx)
+                outputs[local_name] = result.output
+                step_states[local_name] = "completed"
+                self.execution_log.append(step.id)
+                await self.state.record_output(run_id, local_name, result.output)
+                await self.state.append(run_id, RunEvent("step_completed", step.id, {}, _now()))
+
+                for event_name in step.emits:
+                    payload = result.emits.get(event_name)
+                    if payload is None:
+                        raise RuntimeError(
+                            f"step '{step.id}' declares emits '{event_name}' "
+                            "but produced no payload"
+                        )
+                    emitted.append(event_name)
+                    self.emitted_log.append(event_name)
+                    await self.state.append(
+                        run_id, RunEvent("event_emitted", step.id, {"event": event_name}, _now())
+                    )
+                    await self.bus.publish(self._build_emitted(event_name, payload))
+        except Exception as exc:  # noqa: BLE001 - a failed run is a recorded outcome, not an
+            # engine crash: record it, mark status, and let the drain continue to other runs.
+            # (CancelledError is BaseException, so it is NOT caught here and still propagates.)
+            if current_local is not None:
+                step_states.setdefault(current_local, "failed")
+            logger.warning("run %s failed at step %s: %s", run_id, current_step_id, exc)
+            await self.state.append(
+                run_id,
+                RunEvent("run_failed", current_step_id, {"error": str(exc)}, _now()),
+            )
+            self._runs[run_id] = RunStatus(
+                run_id=run_id,
+                state="failed",
+                step_states=step_states,
+                emitted=tuple(emitted),
+                error=str(exc),
+            )
+            return run_id
 
         await self.state.append(run_id, RunEvent("run_completed", None, {}, _now()))
         self._runs[run_id] = RunStatus(

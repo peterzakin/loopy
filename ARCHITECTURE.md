@@ -119,20 +119,35 @@ modular" = swap the `Runtime`; the rest give modularity along orthogonal axes.
 | **`SandboxProvider`** | Provision compute + egress from a sandbox spec (image build, network allowlist). | B4 | Daytona · local subprocess · container |
 | **`EventBus`** | Route registered events to `on:` subscribers. In-proc = single machine; networked = distributed. | B5 | in-process · Redis · NATS · Kafka |
 | **`SensorRunner`** | The **language-pluggable** ingress edge: hosts + runs the developer's `@sensor` code, normalizes returns into `Event`s, and delivers them to the `EventReceiver`. Stateless. | B1 (ingress) | Python (FastAPI) · (future) Node/TS |
-| **`EventReceiver`** | Executor-side, transport-neutral **intake**: accepts an `Event` from any `SensorRunner` (any language/process) and injects it into the runtime. The seam that lets a non-Python `SensorRunner` feed the Python executor. | B1 (ingress) | in-process · HTTP `POST /events` · broker |
+| **`EventReceiver`** | Trusted ingress intake on the **producer side of the `EventBus`**: accepts an `Event` from any `SensorRunner` (any language/process), re-validates it against the registry contract, and hands it on toward the `EventBus`. Loopy-owned and trusted — distinct from the untrusted `SensorRunner`. The seam that lets a non-Python `SensorRunner` feed the Python `Runtime`. | B1 (ingress) | in-process · HTTP `POST /events` · broker |
 | **`RetryPolicy`** (cross-cutting) | Backoff + idempotency-key strategy wrapping all side-effecting calls. | B9 | exponential-backoff default |
 
-**The ingress boundary (and why it's split):** the durable executor is always a single Python
+**The ingress boundary (and why it's split):** the durable `Runtime` is always a single Python
 implementation; the **sensor surface is the one language-pluggable layer**. A `SensorRunner`
-produces events; an `EventReceiver` accepts them; the `EventBus` routes them:
+produces events; an `EventReceiver` re-validates and hands them on; the `EventBus` routes them to
+the `Runtime`:
 
 ```
-SensorRunner (any language)  ──Event──▶  EventReceiver (in-proc | HTTP | broker)  ──▶  EventBus ──▶ Runtime
+SensorRunner (any language)  ──Event──▶  EventReceiver  ──▶  EventBus  ──▶ Runtime
+   (untrusted producer)                  (trusted ingress)   (the seam)    (subscribes)
 ```
 
-In-process they collapse (the receiver just calls `Runtime.trigger`); across a process/language
-boundary the `EventReceiver` is an HTTP endpoint or broker topic. This is what makes a TypeScript
-`SensorRunner` possible **without** a second executor — it just delivers `Event`s to the receiver.
+**Where the `EventReceiver` runs follows from one interface choice — and there are exactly two
+modes.** `receive(event) -> Optional[RunId]` permits both:
+
+- **Synchronous (in-process), today.** `receive` accepts the event and *triggers a run*, returning
+  its `RunId` (`LocalEventReceiver` just calls `Runtime.trigger`). Because it drives execution, it
+  co-resides with the `Runtime` in one process — single-node, in-process `EventBus`.
+- **Decoupled (distributed).** `receive` *publishes to the `EventBus` and returns `None` (an ack)*;
+  a `Runtime` worker produces the `RunId` later, on consume. Now the receiver is a small
+  **stateless ingress service in front of the broker**, scaled and kept up independently of the
+  engine.
+
+So the `EventReceiver` has exactly **two physical homes, never more**: **embedded** in the single
+loopy process (synchronous mode), or a **standalone ingress service** in front of the broker
+(decoupled mode). Never inside the untrusted `SensorRunner`, and never inside the broker (Redis/NATS
+run no loopy code). This is what makes a TypeScript `SensorRunner` possible **without** a second
+`Runtime` — it just delivers `Event`s to the receiver.
 
 **Key property — orthogonality:** these axes are independent. Same `Runtime` + in-proc `EventBus`
 = single-process; same `Runtime` + networked `EventBus` + Postgres `StateStore` = distributed.
@@ -233,10 +248,14 @@ class EventBus(Protocol):
     async def publish(self, event: Event) -> None: ...                      # routes only registered events
     def subscribe(self, name: EventName, handler: Callable[[Event], Awaitable[None]]) -> None: ...
 
-# ── EventReceiver ─ B1 ingress (executor-side, transport-neutral) ─────────────────────
+# ── EventReceiver ─ B1 ingress (trusted, producer-side of the EventBus) ───────────────
 @runtime_checkable
 class EventReceiver(Protocol):
-    async def receive(self, event: Event) -> Optional[RunId]:   # inject an event into the runtime
+    async def receive(self, event: Event) -> Optional[RunId]:
+        # Re-validate against the registry, then hand the event on. Two modes:
+        #   synchronous (in-proc) — trigger a run, return its RunId (today); or
+        #   decoupled — publish to the EventBus, return None (ack); a Runtime
+        #   worker produces the RunId on consume. The Optional permits both.
         ...
 
 # ── SensorRunner ─ B1 ingress (producer, language-pluggable) ──────────────────────────
