@@ -150,7 +150,11 @@ resolves against the registry.
 
 The event-publish layer: code that turns the outside world into **registered events**. One or
 more files (a single `sensors.py` is fine); each sensor is a function decorated with `@sensor`,
-triggered by a `webhook` or a `poll`.
+triggered by a `poll` or a `webhook`.
+
+> **Note:** `poll` is the intended near-term trigger. **`webhook` is a future improvement** —
+> hosting webhooks for arbitrary third-party services needs per-source authentication, which is
+> deferred. The `webhook=` examples below illustrate that future path.
 
 A sensor **returns a registered event** — and returning *is* emitting: the event goes on the
 bus and routes to whichever workflow subscribes with `on:`. Return `None` to emit nothing, or

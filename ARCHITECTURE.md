@@ -122,6 +122,11 @@ modular" = swap the `Runtime`; the rest give modularity along orthogonal axes.
 | **`EventReceiver`** | Trusted ingress intake on the **producer side of the `EventBus`**: accepts an `Event` from any `SensorRunner` (any language/process), re-validates it against the registry contract, and hands it on toward the `EventBus`. Loopy-owned and trusted — distinct from the untrusted `SensorRunner`. The seam that lets a non-Python `SensorRunner` feed the Python `Runtime`. | B1 (ingress) | in-process · HTTP `POST /events` · broker |
 | **`RetryPolicy`** (cross-cutting) | Backoff + idempotency-key strategy wrapping all side-effecting calls. | B9 | exponential-backoff default |
 
+> **Trigger direction:** `poll` is the intended near-term sensor trigger. **Webhook ingress is a
+> future improvement** — hosting webhooks for arbitrary third-party services requires per-source
+> authentication (deferred); the `webhook` references in this doc describe that future path. Durable
+> poll scheduling itself is the deferred B7/B8 work, so neither is production-ready yet.
+
 **The ingress boundary (and why it's split):** the durable `Runtime` is always a single Python
 implementation; the **sensor surface is the one language-pluggable layer**. A `SensorRunner`
 produces events; an `EventReceiver` re-validates and hands them on; the `EventBus` routes them to
