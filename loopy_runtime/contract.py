@@ -157,6 +157,11 @@ class StateStore(Protocol):
 class EventBus(Protocol):
     async def publish(self, event: Event) -> None: ...
     def subscribe(self, name: EventName, handler: Callable[[Event], Awaitable[None]]) -> None: ...
+    async def run(self) -> None:
+        """Run the bus's delivery loop until cancelled. In-process delivery happens inline in
+        `publish`, so the in-proc bus returns immediately; a networked bus (Redis/NATS) consumes
+        off the broker here and dispatches to subscribers. Started as a task by the server."""
+        ...
 
 
 # ── EventReceiver ─ B1 ingress (executor-side, transport-neutral) ─────────────────────────

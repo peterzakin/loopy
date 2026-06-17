@@ -268,11 +268,17 @@ interface "ready to split." Two things land **now**:
    receiver can't hold a connection open for a minutes-to-days run, so synchronous-run-from-receive
    must never be depended on. The `Runtime` consumes off the bus instead.
 
-Deliberately **deferred** to the developer-hosted milestone (additive, easy to get wrong if built
-speculatively): the HTTP `POST /events` endpoint, producer authentication, an external broker, and
-contract versioning/distribution to remote sensors. The one rule while they're deferred — keep
-`Event` serializable and never assume the sensor and receiver share an in-memory registry. *(Tracked
-in `plans/future/sensor-ingress/`.)*
+An **external broker has now landed**: `RedisEventBus` (Redis Streams + a consumer group) is a
+drop-in for the in-process bus, selected with `loopy run --bus redis` — durable, out-of-process,
+at-least-once delivery, exactly the networked seam this section anticipated. *(Tracked in
+`plans/past/redis-broker/`.)* Crash-mid-run recovery is a separate, later concern (the durable
+`Runtime`, B10) — the broker makes *transport* durable, not in-flight *runs*.
+
+Still deliberately **deferred** to the developer-hosted milestone (additive, easy to get wrong if
+built speculatively): the HTTP `POST /events` endpoint, producer authentication, and contract
+versioning/distribution to remote sensors. The one rule while they're deferred — keep `Event`
+serializable and never assume the sensor and receiver share an in-memory registry. *(Tracked in
+`plans/future/sensor-ingress/`.)*
 
 ---
 

@@ -25,3 +25,9 @@ class InProcessEventBus:
     async def publish(self, event: Event) -> None:
         for handler in self._subscribers.get(event.name, []):
             await handler(event)
+
+    async def run(self) -> None:
+        """No-op: in-process delivery happens inline in `publish`; there is no broker to
+        consume from. Present so the in-proc bus satisfies the same lifecycle as a networked
+        bus (the server starts `run()` as a task regardless of which bus is wired in)."""
+        return

@@ -22,12 +22,16 @@ loopy = "loopy_cli:app"
 
 [project.optional-dependencies]
 daytona = ["daytona>=0.180"]
+redis = [
+    "redis>=5.0",
+]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
     "ruff>=0.4",
     "daytona>=0.180",
+    "fakeredis>=2.21",
 ]
 
 [build-system]
