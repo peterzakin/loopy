@@ -132,9 +132,10 @@
   <strong>polling</strong> (Loopy calls out to each source on a schedule). <strong>Webhook ingress is
   a future improvement:</strong> supporting arbitrary third-party webhooks requires per-source
   authentication, which is deferred. The webhook examples below illustrate that future path — they
-  are <strong>not</strong> a production ingress. (Honest status: webhook routes currently run but are
-  unauthenticated; durable poll scheduling is itself still ahead — ARCHITECTURE B7/B8. Neither is
-  production-ready yet; polling is the <em>direction</em>.)
+  are <strong>not</strong> a production ingress. (Honest status: an in-process poll scheduler now
+  runs <code>@sensor(poll=…)</code> sensors; <em>durable</em> poll scheduling — survives restarts,
+  fires once across workers — is still ahead (ARCHITECTURE B7/B8). Webhook routes run but are
+  unauthenticated. Polling is the production direction; durability is the remaining gap.)
 </div>
 
 <h2>1. The two lifecycles</h2>
@@ -203,14 +204,15 @@ effects originate from the <code>Sandbox</code> and are governed by its <code>ne
 <h3 style="margin-top:18px">The pieces, and what ships today</h3>
 <table>
   <tr><th>Piece</th><th>Responsibility</th><th>Today (<code>loopy run</code>)</th></tr>
-  <tr><td><strong>SensorRunner</strong></td><td>Hosts each <code>@sensor(webhook=…)</code> as an HTTP route; runs the author's fn to turn a raw vendor payload into a registered <code>Event</code>. The one language-pluggable edge.</td><td><code>FastAPISensorRunner</code> on uvicorn; loads the real sensor module, or synthesizes events if it can't load. Poll sensors recorded but not yet scheduled.</td></tr>
-  <tr><td><strong>EventReceiver</strong></td><td>Transport-neutral intake — accepts an <code>Event</code> from any <code>SensorRunner</code> and injects it into the <code>Runtime</code>. Lets a non-Python sensor feed the Python <code>Runtime</code>.</td><td><code>LocalEventReceiver</code> (in-proc; calls <code>Runtime.trigger</code>).</td></tr>
-  <tr><td><strong>EventBus</strong></td><td>Routes registered events to every workflow subscribing via <code>on:</code>. Handles fan-out (one event → many workflows) and loop-backs (<code>emits:</code> re-enters the <code>EventBus</code>).</td><td><code>InProcessEventBus</code> (single process).</td></tr>
+  <tr><td><strong>SensorRunner</strong></td><td>Hosts each <code>@sensor(webhook=…)</code> as an HTTP route; runs the author's fn to turn a raw vendor payload into a registered <code>Event</code>. The webhook/push edge — one language-pluggable surface.</td><td><code>FastAPISensorRunner</code> on uvicorn; loads the real sensor module, or synthesizes events if it can't load. Webhook-only — poll sensors run on the <code>PollScheduler</code> (below). Started only when webhook sensors exist.</td></tr>
+  <tr><td><strong>PollScheduler</strong></td><td>The timer/pull edge. Fires each <code>@sensor(poll=…)</code> on its interval with a <code>Tick</code> (<code>scheduled_at</code>, <code>last_run</code>), normalizes the returned event(s), and delivers them to the <code>EventReceiver</code> — same output as a webhook, different trigger.</td><td>In-process asyncio (one task/sensor, sequential, watermark advances only on success, cold-start scans one window). Behind a <code>Scheduler</code> seam; durable timing is B7.</td></tr>
+  <tr><td><strong>EventReceiver</strong></td><td>Transport-neutral intake — accepts an <code>Event</code> from any sensor source, re-validates it against the registry, and publishes it to the <code>EventBus</code>. Lets a non-Python sensor feed the Python <code>Runtime</code>.</td><td><code>LocalEventReceiver</code> (in-proc; <strong>publish-and-ack</strong> — validates then <code>bus.publish</code>, does <em>not</em> run the workflow; the <code>Runtime</code> drains the bus separately).</td></tr>
+  <tr><td><strong>EventBus</strong></td><td>Routes registered events to every workflow subscribing via <code>on:</code>. Handles fan-out (one event → many workflows) and loop-backs (<code>emits:</code> re-enters the <code>EventBus</code>).</td><td><code>InProcessEventBus</code> (single process), or <code>RedisEventBus</code> (Redis Streams + consumer group — durable, at-least-once) with <code>--bus redis</code>.</td></tr>
   <tr><td><strong>Runtime</strong></td><td>The engine. Instantiates a run at the <code>on:</code> step, walks the <code>after:</code> DAG, renders templates, records outputs + event-sourced history, publishes <code>emits:</code>.</td><td><code>InMemoryRuntime</code> — covers B1–B6; single-process, non-durable. Durable timers / cron / resume stubbed (B7/B10).</td></tr>
   <tr><td><strong>AgentHarness</strong></td><td>Runs a step's prose against its agent (model + tools + skills); validates against the typed <code>output:</code>/<code>emits:</code>.</td><td><code>ClaudeCodeHarness</code> — runs headless <code>claude -p … --output-format json</code> <em>inside the sandbox</em>, parses the envelope, feeds <code>total_cost_usd</code> to the budget enforcer.</td></tr>
   <tr><td><strong>SandboxProvider</strong></td><td>Provisions compute + egress from the sandbox spec (image build + <code>network:</code> allowlist). The trust boundary.</td><td><code>local</code> (subprocess, dev) or <code>daytona</code> (isolated cloud container). Selected with <code>--sandbox</code>.</td></tr>
   <tr><td><strong>Secrets</strong></td><td>Resolves a sandbox's <code>env_file</code>(s) at run time and injects them into the sandbox. Never in the manifest, never logged.</td><td><code>EnvFileSecretsResolver</code> — reads dotenv relative to the project root; refuses paths that escape it.</td></tr>
-  <tr><td><strong>StateStore</strong></td><td>Run history (event-sourced), step outputs, cron/poll watermarks.</td><td><code>InMemoryStateStore</code> — process-lifetime only.</td></tr>
+  <tr><td><strong>StateStore</strong></td><td>Run history (event-sourced), step outputs, poll watermarks (<code>last_run</code>), event-id dedupe.</td><td><code>InMemoryStateStore</code> — process-lifetime only. Now actively used: poll watermarks and the Redis bus's at-least-once dedupe.</td></tr>
   <tr><td><strong>RetryPolicy</strong></td><td>Wraps side-effecting calls with backoff + idempotency key (<code>run_id:step_id</code>) so retries/replays don't double-fire.</td><td><code>ExponentialBackoffRetry</code>; budget trips are terminal.</td></tr>
 </table>
 
@@ -422,7 +424,7 @@ step is touched.</strong></p>
   </div>
   <div>
     <h3>C. Durable / distributed <span class="tag future">design-complete</span></h3>
-    <p>Swap Runtime → DBOS / Temporal; StateStore → Postgres / history; bus → NATS / Redis.</p>
+    <p>Swap Runtime → DBOS / Temporal; StateStore → Postgres / history. (The networked bus already ships — <code>--bus redis</code>, Redis Streams.)</p>
     <p class="sub">Harness + sandbox unchanged.</p>
     <ul>
       <li class="good">durable timers (<code>cron</code>, day-spanning budgets), crash-recoverable <code>resume</code>, version pinning.</li>
@@ -466,9 +468,10 @@ step is touched.</strong></p>
     <li><strong>Sensor module won't load</strong> → the server logs a warning and falls back to
       <em>synthesizing</em> events from the contract, so the path still exercises end-to-end. Real
       payloads need the module to import cleanly.</li>
-    <li><strong><code>cron(…)</code> / poll triggers</strong> → recorded in the manifest but not scheduled by
-      the v1 runtime (durable timers are deferred). Polling is the intended sensor model; the durable
-      scheduler that runs it is still ahead.</li>
+    <li><strong>Poll sensors</strong> → now fired by the in-process <code>PollScheduler</code> (one task per
+      sensor, watermark-gated). <strong>Durable</strong> scheduling (survives restart, single-firing across
+      workers) is still ahead (B7/B8), and workflow <code>cron(…)</code> triggers / <code>Runtime.tick</code>
+      remain unscheduled — both wait on durable timers.</li>
     <li><strong>Webhook ingress</strong> → a <strong>future improvement</strong>, not production-ready: the
       routes run but are unauthenticated (authenticating arbitrary third-party webhooks is deferred). Don't
       expose them to untrusted networks.</li>
