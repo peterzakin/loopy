@@ -1,4 +1,4 @@
-"""SensorHost (B1 ingress) — webhook server + poll scheduler that injects events.
+"""SensorRunner (B1 ingress) — webhook server + poll scheduler that injects events.
 
 A registered sensor callable takes the incoming payload and returns an `Event` (or
 None to emit nothing); the host hands it to `sink` — the runtime's `trigger`, which
@@ -49,7 +49,7 @@ def synthesizing_publisher(manifest: Manifest, sensor: SensorSpec) -> SensorFn:
     return publisher
 
 
-class FastAPISensorHost:
+class FastAPISensorRunner:
     def __init__(self, sink: EventSink) -> None:
         self.sink = sink
         self.app = FastAPI()

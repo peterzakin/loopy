@@ -145,12 +145,12 @@ class EventBus(Protocol):
     def subscribe(self, name: EventName, handler: Callable[[Event], Awaitable[None]]) -> None: ...
 
 
-# ── SensorHost ─ B1 ingress ──────────────────────────────────────────────────────────
+# ── SensorRunner ─ B1 ingress ──────────────────────────────────────────────────────────
 SensorFn = Callable[..., Any]
 
 
 @runtime_checkable
-class SensorHost(Protocol):
+class SensorRunner(Protocol):
     def register_webhook(self, path: str, fn: SensorFn) -> None: ...
     def register_poll(self, interval: timedelta, fn: SensorFn, t: TriggerId) -> None: ...
     async def start(self) -> None: ...

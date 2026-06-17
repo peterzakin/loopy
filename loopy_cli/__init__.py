@@ -67,8 +67,8 @@ def run(
     from loopy_runtime.runtime.inmemory import InMemoryRuntime
     from loopy_runtime.sandbox.factory import make_sandbox_provider
     from loopy_runtime.secrets import EnvFileSecretsResolver
-    from loopy_runtime.sensors.host import FastAPISensorHost, synthesizing_publisher
     from loopy_runtime.sensors.loader import load_webhook_sensor
+    from loopy_runtime.sensors.runner import FastAPISensorRunner, synthesizing_publisher
 
     m = load_manifest(manifest)
     runtime = InMemoryRuntime(
@@ -78,7 +78,7 @@ def run(
         secrets=EnvFileSecretsResolver(root),
         bus=InProcessEventBus(),
     )
-    sensor_host = FastAPISensorHost(runtime.trigger)
+    sensor_runner = FastAPISensorRunner(runtime.trigger)
     for sensor in m.sensors:
         if sensor.trigger.kind != "webhook" or not sensor.trigger.path:
             continue
@@ -90,13 +90,13 @@ def run(
                 err=True,
             )
             fn = synthesizing_publisher(m, sensor)
-        sensor_host.register_webhook(sensor.trigger.path, fn)
+        sensor_runner.register_webhook(sensor.trigger.path, fn)
 
     typer.echo(
-        f"serving {len(sensor_host.webhook_paths)} webhook(s) on {host}:{port}: "
-        f"{', '.join(sensor_host.webhook_paths) or '(none)'}"
+        f"serving {len(sensor_runner.webhook_paths)} webhook(s) on {host}:{port}: "
+        f"{', '.join(sensor_runner.webhook_paths) or '(none)'}"
     )
-    asyncio.run(sensor_host.start(host, port))  # pragma: no cover
+    asyncio.run(sensor_runner.start(host, port))  # pragma: no cover
 
 
 @app.command()
