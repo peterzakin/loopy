@@ -68,8 +68,9 @@ def run(
     from loopy_runtime.runtime.inmemory import InMemoryRuntime
     from loopy_runtime.sandbox.factory import make_sandbox_provider
     from loopy_runtime.secrets import EnvFileSecretsResolver
-    from loopy_runtime.sensors.loader import load_webhook_sensor
+    from loopy_runtime.sensors.loader import load_poll_sensor, load_webhook_sensor
     from loopy_runtime.sensors.runner import FastAPISensorRunner, synthesizing_publisher
+    from loopy_runtime.sensors.scheduler import PollScheduler, parse_interval
 
     m = load_manifest(manifest)
     bus = InProcessEventBus()  # shared: the receiver publishes to it, the runtime consumes
@@ -80,7 +81,8 @@ def run(
         secrets=EnvFileSecretsResolver(root),
         bus=bus,
     )
-    sensor_runner = FastAPISensorRunner(LocalEventReceiver(bus, m.registry.events))
+    receiver = LocalEventReceiver(bus, m.registry.events)  # shared gate for webhooks + polls
+    sensor_runner = FastAPISensorRunner(receiver)
     for sensor in m.sensors:
         if sensor.trigger.kind != "webhook" or not sensor.trigger.path:
             continue
@@ -94,17 +96,39 @@ def run(
             fn = synthesizing_publisher(m, sensor)
         sensor_runner.register_webhook(sensor.trigger.path, fn)
 
+    # Poll sensors run on the in-process scheduler, sharing the runtime's StateStore for
+    # watermarks and the same receiver -> bus -> serve() delivery path as webhooks.
+    scheduler = PollScheduler(receiver=receiver, state=runtime.state)
+    for sensor in m.sensors:
+        if sensor.trigger.kind != "poll" or not sensor.trigger.interval:
+            continue
+        try:
+            poll_fn = load_poll_sensor(sensor, root)
+            interval = parse_interval(sensor.trigger.interval)
+        except Exception as exc:  # noqa: BLE001 - a bad poll sensor is skipped, not fatal
+            typer.echo(
+                f"warning: poll sensor '{sensor.name}' not loadable ({exc}); skipping", err=True
+            )
+            continue
+        scheduler.register(sensor.name, interval, poll_fn)
+
     typer.echo(
         f"serving {len(sensor_runner.webhook_paths)} webhook(s) on {host}:{port}: "
         f"{', '.join(sensor_runner.webhook_paths) or '(none)'}"
     )
+    typer.echo(
+        f"polling {len(scheduler.poll_names)} sensor(s): "
+        f"{', '.join(scheduler.poll_names) or '(none)'}"
+    )
 
     async def _serve() -> None:  # pragma: no cover - exercised by running the server
         consumer = asyncio.create_task(runtime.serve())  # drain runs in the background
+        poller = asyncio.create_task(scheduler.start())  # poll sensors fire on their tasks
         try:
             await sensor_runner.start(host, port)
         finally:
             consumer.cancel()
+            poller.cancel()
 
     asyncio.run(_serve())  # pragma: no cover
 

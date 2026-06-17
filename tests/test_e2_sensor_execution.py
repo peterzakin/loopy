@@ -53,13 +53,17 @@ def test_normalize_enforces_declared_emits():
     # Class name "_FakeIncident" != declared "Incident" -> contract violation.
     with pytest.raises(ValueError, match="declared emits"):
         normalize(_FakeIncident(), "Incident")
-    # Matching name passes through.
-    assert normalize(_FakeIncident(), "_FakeIncident").name == "_FakeIncident"
-    assert normalize(None, "Incident") is None
+    # Matching name passes through as a single-element list; None emits nothing.
+    assert [e.name for e in normalize(_FakeIncident(), "_FakeIncident")] == ["_FakeIncident"]
+    assert normalize(None, "Incident") == []
 
 
-def test_normalize_rejects_multi_event_return():
-    with pytest.raises(NotImplementedError, match="multi-event"):
+def test_normalize_fans_out_multi_event_return():
+    # A poll (or yield-ing) sensor returning many models normalizes to many events, each
+    # still checked against the declared emits.
+    events = normalize([_FakeIncident(), _FakeIncident()], "_FakeIncident")
+    assert [e.name for e in events] == ["_FakeIncident", "_FakeIncident"]
+    with pytest.raises(ValueError, match="declared emits"):
         normalize([_FakeIncident()], "Incident")
 
 

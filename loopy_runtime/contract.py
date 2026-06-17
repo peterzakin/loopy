@@ -34,6 +34,19 @@ class Event:
 
 
 @dataclass(frozen=True)
+class Tick:
+    """A scheduler tick handed to a poll sensor — the poll analogue of the webhook `Request`.
+
+    Webhook and poll sensors share their *output* (both return events) but not their
+    *input*: a webhook gets the inbound HTTP `Request`, a poll gets a `Tick`. `scheduled_at`
+    is when this tick fired; `last_run` is the watermark from the previous successful tick
+    (None only before the seam fills it in — the scheduler supplies a cold-start window)."""
+
+    scheduled_at: datetime
+    last_run: datetime | None
+
+
+@dataclass(frozen=True)
 class StepOutput:
     fields: Mapping[str, Any]  # validated against step.output
 
@@ -167,6 +180,27 @@ class SensorRunner(Protocol):
     def register_webhook(self, path: str, fn: SensorFn) -> None: ...
     def register_poll(self, interval: timedelta, fn: SensorFn, t: TriggerId) -> None: ...
     async def start(self) -> None: ...  # delivers each sensor's Event to the EventReceiver
+
+
+# ── Scheduler ─ poll timing (in-process now; durable-timer seam for B7) ──────────────────
+# A poll sensor's body, already imported + normalized: given a Tick, return the events to
+# deliver (fan-out allowed). Synchronous like the webhook invoke; the scheduler awaits the
+# downstream delivery, not the user fn.
+PollFn = Callable[[Tick], list[Event]]
+
+
+@runtime_checkable
+class Scheduler(Protocol):
+    def register(self, name: TriggerId, interval: timedelta, poll_fn: PollFn) -> None:
+        """Register a poll sensor: call `poll_fn` with a fresh `Tick` every `interval`,
+        keyed by `name` for watermark tracking. The in-process variant runs one asyncio
+        task per sensor; a durable variant (B7) persists next-fire + a single-firing claim
+        behind this same seam — the seam is 'durable timer + watermark', not Redis-specific."""
+        ...
+
+    async def start(self) -> None:
+        """Run every registered poll loop until cancelled (one tick at a time per sensor)."""
+        ...
 
 
 # ── RetryPolicy ─ B9 ──────────────────────────────────────────────────────────────────
