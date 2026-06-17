@@ -312,14 +312,15 @@ class EventReceiver(Protocol):
         #   worker produces the RunId on consume. The Optional permits both.
         ...
 
-# ── SensorRunner ─ B1 ingress (producer, language-pluggable) ──────────────────────────
+# ── SensorRunner ─ B1 ingress (the webhook/push edge; language-pluggable) ──────────────
 SensorFn = Callable[..., "Event | None | Iterator[Event]"]   # @sensor-decorated fn
 
 @runtime_checkable
 class SensorRunner(Protocol):
     def register_webhook(self, path: str, fn: SensorFn) -> None: ...
-    def register_poll(self, interval: timedelta, fn: SensorFn, t: TriggerId) -> None: ...
-    async def start(self) -> None: ...      # delivers each sensor's Event to the EventReceiver
+    async def start(self) -> None: ...      # serves webhooks; each Event → EventReceiver
+    # Poll (timer) sensors are NOT here — they run on the Scheduler below. Sibling sensor
+    # sources: shared output (the receiver), different trigger (HTTP push vs timer).
 
 # ── Scheduler ─ poll timing (in-process now; durable-timer seam for B7) ───────────────
 PollFn = Callable[[Tick], list[Event]]      # imported + normalized poll body (fan-out allowed)
@@ -430,7 +431,7 @@ are frontend-validated, execution is backend.
 | **6** | Define backend interfaces (§3.2) + manifest schema v1 | boundary |
 | **7** | **InMemory backend** — satisfies B1–B6, stubs B7/B10; prove README example end-to-end | backend |
 | **8** | `AgentHarness` (claude-code) + `SandboxProvider` (daytona) behind interfaces | backend |
-| **9** | `SensorRunner` (webhook + poll) + `EventBus` | backend |
+| **9** | `SensorRunner` (webhook) + `EventBus` | backend |
 | **10** | Cron triggers + watermarks (B7, B8) | backend |
 | **11** | **DurableLite backend** — event-sourced StateStore, retries, durable timers (B7–B11) | backend |
 | **12** | Conformance suite + full example E2E; **(optional) Temporal adapter** | backend |
