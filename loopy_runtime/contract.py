@@ -172,7 +172,13 @@ class EventReceiver(Protocol):
         re-validate it against the registry, and publish it to the EventBus. This is
         publish-and-acknowledge: it does NOT run the workflow, so it returns None once the
         event is accepted; the Runtime produces RunIds asynchronously on consume. (A
-        legacy synchronous receiver may return the started RunId — Optional permits both.)"""
+        legacy synchronous receiver may return the started RunId — Optional permits both.)
+
+        Validation belongs HERE (not in the Runtime): the bus fans out one event to N
+        subscribers, so the receiver is the single chokepoint that validates once, before the
+        event multiplies and before it reaches shared broker infra. Producer *authentication*
+        is deferred — in-repo/in-process sensors are trusted by co-location; auth is added
+        here (additively, in front of validate→publish) only when sensors externalize."""
         ...
 
 

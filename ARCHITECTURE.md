@@ -155,6 +155,21 @@ loopy process (synchronous mode), or a **standalone ingress service** in front o
 run no loopy code). This is what makes a TypeScript `SensorRunner` possible **without** a second
 `Runtime` — it just delivers `Event`s to the receiver.
 
+**Why validation lives at the receiver, and why auth doesn't (yet).** The receiver's job is
+*validation*, and it sits at ingress for one structural reason: the bus **fans out** (one event → N
+`on:` subscribers), so the receiver is the single chokepoint where an event is checked **once,
+before it multiplies** and before it lands on shared broker infra. Validating downstream in the
+`Runtime` instead would either re-check per-workflow (N times) or force a new single gate on the
+consumer side of the bus — i.e. reinvent the receiver, just in a worse place. So validation stays
+here. *Authentication is a separate, deferred concern.* Today sensors are in-repo, compiled, and
+**in-process**, so they're trusted by co-location — there is no producer to authenticate and the
+receiver does validation only (no auth). Producer auth becomes necessary precisely when a
+`SensorRunner` moves **out of process / out of repo** (the polyglot, developer-hosted path): "in
+repo ⇒ trusted" stops describing reality, and the receiver — the first trusted component on the far
+side of that network boundary — picks up authenticating the remote producer at `POST /events`. That
+step is **additive** (a credential check in front of the same `validate → publish`), not a move of
+where validation lives. Until sensors externalize, receiver auth may legitimately never be built.
+
 **`EventBus.publish` means different things in the two modes — wire callers accordingly.**
 In-process, `publish` runs the subscribed handlers *inline* and returns once they're enqueued, so
 `Runtime.trigger()` can `await bus.publish(event)` and then `_drain()` the work it just produced.
