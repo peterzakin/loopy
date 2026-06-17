@@ -45,6 +45,8 @@ plan at the start of a session.
 ## Current epics
 
 - _(none active — `future/` is empty)_
+- **`past/poll-sensors/`** — in-process asyncio poll scheduler behind a durable-timer seam
+  (`Tick` input, multi-event fan-out, watermarks). Shipped; durability deferred to B7.
 - **`past/daytona-sandbox/`** — DaytonaSandboxProvider behind the Sandbox Protocol. Shipped.
 - **`past/agent-emitted-events/`** — the agent produces emitted-event payloads (#3, E1) and real
   sensor execution (#2, E2). Shipped.

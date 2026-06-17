@@ -1,6 +1,6 @@
 # Poll sensors: an in-process scheduler behind a durable-timer seam
 
-**Status:** draft (design ready — implement when scheduled)
+**Status:** done (in-process scheduler shipped; durability deferred to B7 per non-goals)
 **Owner:** peter
 **Date:** 2026-06-17
 
@@ -78,19 +78,37 @@ loop (per poll sensor):
   history).
 
 ## Steps
-- [ ] `Tick` value type (`scheduled_at: datetime`, `last_run: datetime | None`) in the runtime contract.
-- [ ] Generalize sensor-return normalization: `to_events(result) -> list[Event]` handling
+- [x] `Tick` value type (`scheduled_at: datetime`, `last_run: datetime | None`) in the runtime contract.
+- [x] Generalize sensor-return normalization: `to_events(result) -> list[Event]` handling
       `None | model | Iterable[model]` (replaces the current `to_event` that raises on iterables).
       Also unlocks the README's `yield`-an-iterator webhook sensors.
-- [ ] `load_poll_sensor(spec, root)` — mirror `load_webhook_sensor`, but pass a `Tick` (not `Request`)
+- [x] `load_poll_sensor(spec, root)` — mirror `load_webhook_sensor`, but pass a `Tick` (not `Request`)
       and normalize to events.
-- [ ] `PollScheduler` — asyncio task per sensor; loop above; behind a small seam
+- [x] `PollScheduler` — asyncio task per sensor; loop above; behind a small seam
       (a `Scheduler`/timer protocol) so APScheduler / durable-timer variants swap in.
-- [ ] Interval parsing: duration strings (`"30s"`, `"5m"`, `"1h"`) → seconds.
-- [ ] `loopy run`: iterate **poll** sensors, parse intervals, register with the `PollScheduler`, run
+- [x] Interval parsing: duration strings (`"30s"`, `"5m"`, `"1h"`, `"2d"`) → `timedelta`.
+- [x] `loopy run`: iterate **poll** sensors, parse intervals, register with the `PollScheduler`, run
       `scheduler.start()` alongside `runtime.serve()`. (Webhook wiring stays as the deferred path.)
-- [ ] Tests: a poll fn fans out N events → N runs via the receiver; watermark advances on success and
+- [x] Tests: a poll fn fans out N events → N runs via the receiver; watermark advances on success and
       holds on failure; cold-start window; sequential (no overlap); a stub clock so tests don't sleep.
+
+## Outcome (2026-06-17)
+Shipped the in-process scheduler. `loopy compile` already mapped `@sensor(poll="5m", …)` to a
+`SensorSpec` with `trigger.kind == "poll"` + interval, so no compile change was needed. Touch points:
+- `loopy_runtime/contract.py` — `Tick` value type; `Scheduler` Protocol + `PollFn` alias (the timer
+  seam, distinct from the `EventBus` delivery seam).
+- `loopy_runtime/sensors/loader.py` — `to_events()` (None | model | Iterable[model]) replaces
+  `to_event`; `normalize()` now returns `list[Event]` with the per-event `emits` check; new
+  `load_poll_sensor()`. Webhook path keeps a single-event `Event | None` invoke (the FastAPI handler
+  carries at most one per request).
+- `loopy_runtime/sensors/scheduler.py` (new) — `PollScheduler` (one asyncio task/sensor, sequential,
+  watermark-advances-only-on-success, cold-start window) + `parse_interval`. Clock + `sleep` injected.
+- `loopy_cli/__init__.py` — `run` registers poll sensors and runs `scheduler.start()` alongside
+  `runtime.serve()`, sharing the receiver + the runtime's `StateStore`.
+- Tests in `tests/test_b7_poll_scheduler.py` (deterministic, injected clock/sleep, no real sleeps).
+- Durable decisions graduated into `ARCHITECTURE.md` (`Scheduler` swappable module + "broker helps
+  delivery, not timing").
+Out-of-scope items below remain deferred (durability/restart, HA locks, cron intervals, `Runtime.tick`).
 
 ## Files likely to change
 - `loopy_runtime/contract.py` — `Tick`; maybe a `Scheduler` protocol.

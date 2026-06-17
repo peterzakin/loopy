@@ -120,6 +120,7 @@ modular" = swap the `Runtime`; the rest give modularity along orthogonal axes.
 | **`EventBus`** | Route registered events to `on:` subscribers. In-proc = single machine; networked = distributed. | B5 | in-process · Redis · NATS · Kafka |
 | **`SensorRunner`** | The **language-pluggable** ingress edge: hosts + runs the developer's `@sensor` code, normalizes returns into `Event`s, and delivers them to the `EventReceiver`. Stateless. | B1 (ingress) | Python (FastAPI) · (future) Node/TS |
 | **`EventReceiver`** | Trusted ingress intake on the **producer side of the `EventBus`**: accepts an `Event` from any `SensorRunner` (any language/process), re-validates it against the registry contract, and hands it on toward the `EventBus`. Loopy-owned and trusted — distinct from the untrusted `SensorRunner`. The seam that lets a non-Python `SensorRunner` feed the Python `Runtime`. | B1 (ingress) | in-process · HTTP `POST /events` · broker |
+| **`Scheduler`** | Fire poll sensors on a timer: hand each `@sensor(poll=…)` a `Tick` (`scheduled_at`, `last_run`) every interval, deliver the normalized event(s) through the `EventReceiver`, and advance the per-sensor watermark only on success. The **timer** seam (distinct from the `EventBus` delivery seam). | B1 (poll) · B7 (durable timing) | in-process asyncio · (future) Redis zset+lock · Postgres · Temporal/DBOS native timers |
 | **`RetryPolicy`** (cross-cutting) | Backoff + idempotency-key strategy wrapping all side-effecting calls. | B9 | exponential-backoff default |
 
 > **Trigger direction:** `poll` is the intended near-term sensor trigger. **Webhook ingress is a
@@ -159,6 +160,21 @@ run no loopy code). This is what makes a TypeScript `SensorRunner` possible **wi
 Swap Daytona for a local sandbox in tests without touching the engine. The A/B/C durability
 choice is just *which `Runtime` + `StateStore` pair* you wire in.
 
+**The `Scheduler` is a swappable module with a durability target — and a broker does not replace
+it.** A poll tick is three steps: (1) *fire the tick* (decide "it's time") — needs a **timer
+source**; (2) *read/advance the watermark* (`last_run`) — needs the `StateStore`; (3) *deliver the
+produced events* — the `EventReceiver` → `EventBus`. A message broker (Redis/NATS pub-sub) only
+helps **step 3** (delivery), which already rides the `EventBus`; it does **not** fire timers. So
+"lean on Redis" would mean Redis in up to *three* distinct roles (streams = delivery/`EventBus`, KV
+= watermark/`StateStore`, sorted-set + `SETNX` lock = a hand-rolled durable timer) — only the first
+is the broker role. The seam to design for is **"durable timer + watermark," not anything
+Redis-specific**: ship the **in-process asyncio** scheduler now (the InMemory-equivalent for
+timers, one task per sensor, sequential per sensor, watermark-advances-only-on-success), and drop a
+durable backing in behind the `Scheduler` Protocol at B7. Crucially, if a durable-execution
+`Runtime` (Temporal/DBOS) is adopted, **durable timers arrive as a native primitive** — so the
+hand-rolled Redis zset is likely never built. (Cron-expression intervals + workflow `on: cron(…)`
+arrive with that same scheduler later; poll sensors use duration strings only.)
+
 ### 3.3 Conformance suite
 
 One backend-agnostic test set every `Runtime` must pass: run the README's incidents +
@@ -189,6 +205,11 @@ class Event:                          # a runtime instance of a registered event
     fields: Mapping[str, Any]         # validated against the registry contract
     id: str                           # stable id → dedupe / idempotency
     emitted_at: datetime
+
+@dataclass(frozen=True)
+class Tick:                           # a scheduler tick handed to a poll sensor
+    scheduled_at: datetime            # when this tick fired
+    last_run: Optional[datetime]      # the watermark; scheduler supplies a cold-start window
 
 @dataclass(frozen=True)
 class StepOutput:
@@ -271,6 +292,18 @@ class SensorRunner(Protocol):
     def register_webhook(self, path: str, fn: SensorFn) -> None: ...
     def register_poll(self, interval: timedelta, fn: SensorFn, t: TriggerId) -> None: ...
     async def start(self) -> None: ...      # delivers each sensor's Event to the EventReceiver
+
+# ── Scheduler ─ poll timing (in-process now; durable-timer seam for B7) ───────────────
+PollFn = Callable[[Tick], list[Event]]      # imported + normalized poll body (fan-out allowed)
+
+@runtime_checkable
+class Scheduler(Protocol):
+    def register(self, name: TriggerId, interval: timedelta, poll_fn: PollFn) -> None:
+        # Fire poll_fn with a fresh Tick every interval, keyed by name for the watermark.
+        # In-process: one asyncio task/sensor, sequential. Durable (B7): persists next-fire
+        # + a single-firing claim behind this same seam (timer + watermark, not Redis-specific).
+        ...
+    async def start(self) -> None: ...      # run every poll loop until cancelled
 
 # ── RetryPolicy ─ B9 ────────────────────────────────────────────────────────────────
 @runtime_checkable
