@@ -64,6 +64,14 @@
 into a Loopy <strong>event</strong>. The question: does Loopy give the developer a <em>server</em> to run,
 or an <em>SDK</em> to drop into whatever they already run?</p>
 
+<div class="callout">
+  <strong>Note — this is forward-looking.</strong> The intended near-term sensor trigger is
+  <strong>polling</strong>. <strong>Webhook ingress (and the server-vs-SDK question below) is a future
+  improvement</strong> — hosting webhooks for arbitrary third-party services requires per-source
+  authentication, which is deferred. This note explores that future design; it doesn't describe a
+  shipped capability.
+</div>
+
 <h2>The two options</h2>
 <div class="cmp">
   <div>

@@ -5,6 +5,14 @@
 > explains a *deployment*** — the concrete pieces that make up a running Loopy, how they
 > wire together, and what changes as you go from a laptop to production.
 
+> ⚠️ **Ingress direction — read first.** The intended sensor model is **polling** (Loopy calls
+> out to each source on a schedule). **Webhook ingress is a future improvement:** supporting
+> arbitrary third-party webhooks requires per-source authentication, which is deferred (see
+> `BACKLOG.scratch.md` and the sensor-ingress plan). The webhook examples below illustrate that
+> future path — they are **not** a production ingress. (Honest status: webhook routes currently
+> run but are unauthenticated; durable poll scheduling is itself still ahead — ARCHITECTURE B7/B8.
+> So neither is production-ready yet; polling is the *direction*.)
+
 ---
 
 ## 1. The two lifecycles
@@ -372,7 +380,11 @@ What you actually need in place for a successful run, in order:
   events from the contract, so the path still exercises end-to-end. Real payloads need the
   module to import cleanly (it imports the `loopy` authoring shim).
 - **`cron(…)` / poll triggers** → recorded in the manifest but **not scheduled** by the v1
-  runtime (durable timers are B7/B8, deferred). Webhook sensors are the live ingress today.
+  runtime (durable timers are B7/B8, deferred). Polling is the intended sensor model; the
+  durable scheduler that runs it is still ahead.
+- **Webhook ingress** → a **future improvement**, not production-ready: the webhook routes run
+  but are unauthenticated (authenticating arbitrary third-party webhooks is deferred). Don't
+  expose them to untrusted networks.
 - **Process restart** → in-flight runs are lost under the InMemory runtime (topology A/B). This
   is the single biggest reason to move to topology C for anything long-running.
 - **Budget trip** → terminal, not retried. A step exceeding `wall_clock` or `spend.usd` fails

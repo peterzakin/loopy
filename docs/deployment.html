@@ -127,6 +127,16 @@
   topologies — grounded in what <code>loopy run</code> actually stands up today.
 </div>
 
+<div class="callout warn">
+  <strong>⚠️ Ingress direction — read first.</strong> The intended sensor model is
+  <strong>polling</strong> (Loopy calls out to each source on a schedule). <strong>Webhook ingress is
+  a future improvement:</strong> supporting arbitrary third-party webhooks requires per-source
+  authentication, which is deferred. The webhook examples below illustrate that future path — they
+  are <strong>not</strong> a production ingress. (Honest status: webhook routes currently run but are
+  unauthenticated; durable poll scheduling is itself still ahead — ARCHITECTURE B7/B8. Neither is
+  production-ready yet; polling is the <em>direction</em>.)
+</div>
+
 <h2>1. The two lifecycles</h2>
 <p>A Loopy deployment has a <strong>build-time</strong> path and a <strong>run-time</strong> path,
 joined by one artifact: the <strong>manifest</strong>.</p>
@@ -457,7 +467,11 @@ step is touched.</strong></p>
       <em>synthesizing</em> events from the contract, so the path still exercises end-to-end. Real
       payloads need the module to import cleanly.</li>
     <li><strong><code>cron(…)</code> / poll triggers</strong> → recorded in the manifest but not scheduled by
-      the v1 runtime (durable timers are deferred). Webhook sensors are the live ingress today.</li>
+      the v1 runtime (durable timers are deferred). Polling is the intended sensor model; the durable
+      scheduler that runs it is still ahead.</li>
+    <li><strong>Webhook ingress</strong> → a <strong>future improvement</strong>, not production-ready: the
+      routes run but are unauthenticated (authenticating arbitrary third-party webhooks is deferred). Don't
+      expose them to untrusted networks.</li>
     <li><strong>Process restart</strong> → in-flight runs are lost under the InMemory runtime (A/B). The
       biggest reason to move to topology C for anything long-running.</li>
     <li><strong>Budget trip</strong> → terminal, not retried. A step over <code>wall_clock</code> or
