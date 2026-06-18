@@ -356,6 +356,22 @@ to `redis://localhost:6379`. `sandbox` is *not* a config key — it's declared p
 `state:` (durable StateStore) and `limits:` (spend caps) are reserved for B10/B-cost and not yet
 read.
 
+**`loopy.env` — the secret companion to `loopy.yaml`.** Because connection strings and provider
+keys can't live in the YAML, a local-dev convenience file supplies them: `loopy run` reads
+`loopy.env` at the project root and merges it into the process env with **non-override** (a value
+already set in the real/platform environment always wins), *before* resolving `redis_url` and
+before any Daytona client is created. It holds **infra creds only** — `REDIS_URL`,
+`DAYTONA_API_KEY`/`DAYTONA_API_URL` — and is gitignored; agent secrets stay in sandbox `env_file`s
+and sensor secrets in `sensors/.env`. In production you typically skip the file and inject these
+straight from the platform's secret store, which the non-override semantics respect.
+
+```ini
+# loopy.env (project root; gitignored; local-dev convenience)
+REDIS_URL=redis://localhost:6379
+DAYTONA_API_KEY=dt-...
+DAYTONA_API_URL=https://...
+```
+
 ### C. Durable / distributed — the production target (design-complete, behind the same interfaces)
 
 ```
@@ -397,10 +413,15 @@ What you actually need in place for a successful run, in order:
    real environment wins), so sensors read them via `os.environ`. Optional and gitignored. Keep
    infra creds (`DAYTONA_API_KEY`, `REDIS_URL`) *out* of it — those are the server's own env
    (item 5), and sensors share the engine's process env today.
-5. **Sandbox + infra access.** For `--sandbox daytona`: `DAYTONA_API_KEY` / `DAYTONA_API_URL` in
-   the server's environment, and `loopy-core[daytona]` installed. For `--bus redis`: a reachable
-   `--redis-url`. For `--sandbox local`: nothing — but agents run as subprocesses on the host, so
-   it's dev-only.
+5. **Control-plane / infra creds.** The creds the engine itself needs go in its **process env**:
+   for `--sandbox daytona`, `DAYTONA_API_KEY` / `DAYTONA_API_URL` (and `loopy-core[daytona]`
+   installed); for `--bus redis`, a reachable `REDIS_URL` (or `--redis-url`). In production these
+   come from the platform (container env, systemd, CI secret store). For **local dev**, drop them
+   in **`loopy.env`** at the project root — the secret companion to `loopy.yaml`, merged into the
+   process env at `loopy run` with non-override (a value set in the real environment always wins).
+   Keep this file to infra creds only; agent secrets live in sandbox `env_file`s (item 3) and
+   sensor secrets in `sensors/.env` (item 4). For `--sandbox local`: nothing — but agents run as
+   subprocesses on the host, so it's dev-only.
 6. **Egress allowlist.** Each sandbox's `network:` list is the egress contract — it must include
    every host an agent's tools reach (e.g. `github.com` for `open_pr`/`merge_pr`). The model
    API endpoint must be reachable from inside the sandbox.

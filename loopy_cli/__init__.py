@@ -78,11 +78,24 @@ def run(
     from loopy_runtime.receiver import LocalEventReceiver
     from loopy_runtime.runtime.inmemory import InMemoryRuntime
     from loopy_runtime.sandbox.factory import make_sandbox_provider
-    from loopy_runtime.secrets import EnvFileSecretsResolver, load_sensor_env
+    from loopy_runtime.secrets import (
+        EnvFileSecretsResolver,
+        load_control_plane_env,
+        load_sensor_env,
+    )
     from loopy_runtime.sensors.loader import load_poll_sensor, load_webhook_sensor
     from loopy_runtime.sensors.runner import FastAPISensorRunner, synthesizing_publisher
     from loopy_runtime.sensors.scheduler import PollScheduler, parse_interval
     from loopy_runtime.state.inmemory import InMemoryStateStore
+
+    # Control-plane infra creds (REDIS_URL, DAYTONA_API_KEY/URL): a local-dev convenience read
+    # from `loopy.env`, merged with setdefault (real/platform env always wins). Must land before
+    # resolve_redis_url() and any Daytona client creation, both of which read os.environ.
+    control_env = load_control_plane_env(root)
+    for key, value in control_env.items():
+        os.environ.setdefault(key, value)
+    if control_env:
+        typer.echo(f"loaded {len(control_env)} control-plane var(s) from {root}/loopy.env")
 
     try:
         cfg = resolve(load_config(config), host=host, port=port, bus=bus)

@@ -1,10 +1,12 @@
 """loopy.yaml — deployment defaults for `loopy run`, mapping ~1:1 to CLI flags.
 
 Scope is deliberately tight (see plans/future/config): the sensor-webhook bind address
-(`sensor_server.host/port`) and the event-bus backend (`bus`). Connection strings stay in the
-environment, never YAML — `redis_url` is resolved from the env var `REDIS_URL` (see
-`resolve_redis_url`). `sandbox` is registry-owned and `root` is per-invocation, so neither lives
-here.
+(`sensor_server.host/port`) and the event-bus backend (`bus`). Connection strings and provider
+keys stay in the environment, never YAML — `redis_url` is resolved from the env var `REDIS_URL`
+(see `resolve_redis_url`). For local dev those env vars can be supplied from `loopy.env` (the
+secret companion to this file; `loopy_runtime.secrets.load_control_plane_env`), merged into the
+process env before resolution. `sandbox` is registry-owned and `root` is per-invocation, so
+neither lives here.
 
 Precedence is applied by the CLI via `resolve()`: explicit flag > loopy.yaml > built-in default.
 Parses with ruamel.yaml to match the compile frontend (`loopy_core/registry/loader.py`).
@@ -123,5 +125,7 @@ def resolve_redis_url(flag: str | None) -> str:
     """Resolve the Redis URL: --redis-url flag > REDIS_URL env var > built-in default.
 
     Connection strings are environment/secret material, so this is never read from loopy.yaml.
+    The env var may itself be supplied for local dev via `loopy.env` (loaded into the process
+    env before this runs); the flag still wins over both.
     """
     return flag or os.environ.get("REDIS_URL") or DEFAULT_REDIS_URL

@@ -17,5 +17,6 @@ build/
 **/loopy/__init__.py
 
 # Secrets — referenced env files, resolved at run time, never committed
+loopy.env         # control-plane infra creds (REDIS_URL, DAYTONA_API_KEY/URL)
 **/sensors/.env   # sensor-layer secrets (runner-wide dotenv)
 **/secrets/       # sandbox env_file(s)
