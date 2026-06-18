@@ -486,6 +486,25 @@ workflow `.md`.
 1. **Durability target for the first production backend** — DurableLite (self-contained,
    sqlite/pg) vs Temporal adapter (offload durability, take the operational dependency). Deferred
    to Phase 11 by design; the interface work in Phase 6 keeps both open.
+   - **Why not "just use Redis"?** Redis is already in the stack as the delivery broker
+     (`RedisEventBus` = Streams + consumer group), which is only step 3 of a poll tick (deliver).
+     It does not fire timers and is not a system-of-record (in-memory + AOF/RDB, weaker than a
+     transactional append log). "Lean on Redis" for durability means Redis in three roles —
+     streams (delivery), KV (watermark), zset+`SETNX` (a hand-rolled durable timer) — i.e.
+     re-implementing a durable-execution runtime on Redis primitives. See line ~190; once a durable
+     `Runtime` (DBOS/Temporal) lands, durable timers are a native primitive and the Redis zset is
+     likely never built.
+   - **Why not "a SQLite per workflow"?** Storage ≠ execution. SQLite is already an allowed
+     `StateStore` backend (§3.4) and DurableLite is "sqlite/pg" — so SQLite is on the table. But a
+     file is not a process: it won't detect an orphaned run after a crash, replay history to resume
+     mid-DAG, or fire a timer. That recovery+timer engine is what DBOS provides (and DBOS is
+     Postgres-only, so "SQLite + DBOS" isn't a combination — SQLite means building the engine
+     yourself, the path §8 chose to adopt rather than rebuild). *Per-workflow* files specifically
+     fight the model: watermarks (per-trigger), idempotency `seen` (global), and "which runs are
+     in-flight/orphaned?" recovery are all cross-run — they want one scannable log, not N files.
+   - **Net tradeoff:** *bring a Postgres + adopt DBOS* → B7–B11 for free; vs *single-file (not
+     per-workflow) SQLite DurableLite* → zero extra infra but you own the recovery/timer engine.
+     Redis buys out of neither.
 2. **Retry policy surface** — README's `budget` covers wall_clock/spend but not failure-retry.
    Add a `retry:` block to step frontmatter, or keep retry policy backend-config-only? (Leaning:
    backend default + optional step override.)

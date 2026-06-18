@@ -22,8 +22,17 @@ plan/source. When an item ships, check its box (`- [x]`) and strike the heading
   Largest capability gap. InMemory runtime loses all state on crash and has no durable timers, so
   `cron` ticks, watermarks, and `window`/`latency` day-scale budgets are all stubbed (poll
   scheduler and Redis broker both shipped with durability deferred to B7/B10). Decided approach:
-  adopt DBOS (Postgres-backed durable-execution library) behind the existing `Runtime` interface
-  rather than hand-rolling event-sourcing. Gate to anything beyond a dev demo; larger lift than #1.
+  adopt DBOS (Postgres-backed durable-execution *library* — embedded, no cluster/daemon; its only
+  operational cost is "bring a Postgres") behind the existing `Runtime` interface rather than
+  hand-rolling event-sourcing. Gate to anything beyond a dev demo; larger lift than #1.
+  **Why not Redis or a SQLite-per-workflow** (asked often — full reasoning in `ARCHITECTURE.md` §7
+  open decision #1): both solve *durable storage* but not *durable execution* (orphan detection +
+  replay-resume + transactional timers). Redis is already the delivery broker only (§3.4 / line
+  190); SQLite is already an allowed `StateStore` backend, but a *single-file* DurableLite ≠
+  *per-workflow* files (watermarks, idempotency `seen`, and crash recovery are cross-run, so they
+  want one scannable log, not N files), and SQLite means building the recovery/timer engine
+  yourself (DBOS is Postgres-only). The real zero-extra-infra option is single-file SQLite
+  DurableLite at the cost of owning that engine.
 
 ## Secondary
 
