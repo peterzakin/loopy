@@ -23,6 +23,54 @@ def main() -> None:
     """Author, compile, and run durable agent workflows."""
 
 
+def _print_workflows(project) -> None:  # noqa: ANN001 - loopy_core.compile.model.Project
+    """Print every compiled workflow (its trigger and steps) to stdout, with flair."""
+    workflows = project.workflows
+    count = len(workflows)
+    plural = "workflow" if count == 1 else "workflows"
+    typer.echo()
+    typer.echo(typer.style(f"  🔁  Loopy compiled {count} {plural}", fg=typer.colors.CYAN, bold=True))
+    typer.echo(typer.style("  " + "─" * 40, fg=typer.colors.BRIGHT_BLACK))
+
+    for name, wf in sorted(workflows.items()):
+        entry = wf.steps.get(wf.entry) if wf.entry else None
+        trigger = entry.trigger if entry else None
+        if trigger and trigger.kind == "event":
+            icon, trig = "⚡", f"on event {trigger.event}"
+        elif trigger and trigger.kind == "cron":
+            icon, trig = "⏰", f"on cron({trigger.expr})"
+        else:
+            icon, trig = "❓", "no trigger"
+
+        typer.echo()
+        typer.echo(
+            f"  {icon}  "
+            + typer.style(name, fg=typer.colors.BRIGHT_WHITE, bold=True)
+            + "  "
+            + typer.style(trig, fg=typer.colors.YELLOW)
+        )
+
+        steps = list(wf.steps.values())
+        for i, step in enumerate(steps):
+            connector = "└─" if i == len(steps) - 1 else "├─"
+            line = "      " + typer.style(connector, fg=typer.colors.BRIGHT_BLACK)
+            line += " " + typer.style(step.name, fg=typer.colors.GREEN)
+            meta = []
+            if step.agent:
+                meta.append("🤖 " + typer.style(step.agent, fg=typer.colors.BLUE))
+            if step.after:
+                meta.append(
+                    typer.style("after ", fg=typer.colors.BRIGHT_BLACK)
+                    + typer.style(", ".join(step.after), fg=typer.colors.CYAN)
+                )
+            if step.emits:
+                meta.append("📡 " + typer.style(", ".join(step.emits), fg=typer.colors.MAGENTA))
+            if meta:
+                line += typer.style("  ·  ", fg=typer.colors.BRIGHT_BLACK).join([""] + meta)
+            typer.echo(line)
+    typer.echo()
+
+
 @app.command()
 def compile(
     path: Path = typer.Argument(Path("."), help="Project directory to compile."),
@@ -39,6 +87,9 @@ def compile(
     result = compile_project(path)
     for diagnostic in result.diagnostics.items:
         typer.echo(diagnostic.render(), err=True)
+
+    if result.project is not None:
+        _print_workflows(result.project)
 
     if not result.diagnostics.has_errors() and result.project is not None:
         write_events(result.project.registry, path)
