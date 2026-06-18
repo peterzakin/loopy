@@ -113,14 +113,49 @@ class StepResult:
 - Per-cascade-id precise scoping (per-drain is the v1 approximation).
 - Replay-safe budget decisions (record elapsed/usage like other nondeterminism) — durable adapter.
 
+## Harness usage-reporting survey (2026-06-18)
+What four real coding harnesses actually emit, to ground "tokens required, cost optional" against
+implementations rather than memory. Researched 2026-06-18 (links below).
+
+| Harness | Structured output | Token counts | Native USD cost? | Per-model breakdown? |
+|---|---|---|---|---|
+| **Claude Code** | `--print --output-format json` | `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens` | **Yes** — top-level `total_cost_usd` (client-side estimate from a bundled price table, not billing truth) | **Yes** — `modelUsage` map: per-model `costUSD` + token fields |
+| **Codex** | `codex exec --json`; session JSONL | input, cached input, output, reasoning (cumulative per turn) | **No** — tokens only; billing is credit/token-based, cost derived externally (req: openai/codex#5085) | Yes — each turn tagged with model in `turn_context` |
+| **opencode** | HTTP server API + JSON export | `input`, `output`, `reasoning`, `cache.read`, `cache.write` | **Yes for built-in providers** (computed from models.dev pricing); **$0 for custom providers** with no price config | Yes — per assistant message, tagged with model |
+| **Pi** | `--mode json` (JSON-line events), `--mode rpc` | input/output, cache read (`R`), cache write (`W`) | **Yes** — computed from pricing tables; API-measured usage takes precedence over estimates | Yes — per message, tagged with `provider` + `model` |
+
+**Conclusions that feed the contract:**
+- **Tokens are universal** — all four report `input`/`output` (cache/reasoning vary). The required
+  floor is `input_tokens`/`output_tokens`; treat cache/reasoning as optional extras. ⇒ token-based
+  cap is enforceable everywhere.
+- **Cost is the common case but cannot be required.** 3 of 4 emit USD; **Codex emits none**. And the
+  three that do are all doing `tokens × price table` **client-side** — i.e. the same runtime pricing
+  layer this plan defers. So `cost_usd` stays optional convenience, not authoritative; the token
+  count is the truth. Codex is the concrete proof requiring cost would break a real harness.
+- **Per-model is recoverable from all four** at the message/turn grain (the aggregate is just a
+  convenience headline). Lowers the risk of the deferred `per_model` add-later — it's a regrouping,
+  not new data we'd have to invent.
+
 ## Open questions
-- Cap unit: **dollars** (works today via claude-code's reported cost) vs **tokens** (universally
-  enforceable with no pricing table). Lean: dollars now, token cap trivially addable for harnesses
-  that don't report cost. Revisit when a second harness lands.
-- Cost source per invocation: harness-reported (now) vs runtime-priced from tokens+`per_model`
-  (later). Determines whether cost is required or purely derived.
+- Cap unit: **tokens** (universally enforceable, no pricing table — see survey) vs **dollars** (only
+  works for harnesses that report cost; Codex doesn't). **Decision (2026-06-18): token-based cap for
+  v1; dollar cap layers on optionally for harnesses that report cost.** Flipped from the earlier
+  "dollars now" lean after the harness survey above.
+- Cost source per invocation: harness-reported (when present) vs runtime-priced from tokens+`per_model`
+  (later). Survey shows even harness-reported cost is client-side `tokens × table`, so a runtime
+  pricing layer is the same mechanism centralized — cost stays purely derived/optional, never required.
+
+## Sources (harness survey, 2026-06-18)
+- Claude Code: [Track cost and usage — Claude Code Docs](https://code.claude.com/docs/en/agent-sdk/cost-tracking)
+- Codex: [Cost Tracking & Usage Analytics — openai/codex#5085](https://github.com/openai/codex/issues/5085), [ccusage Codex guide](https://ccusage.com/guide/codex/)
+- opencode: [opencode CLI docs](https://opencode.ai/docs/cli/), [RFC: Cost Tracking Architecture — opencode#12377](https://github.com/anomalyco/opencode/issues/12377)
+- Pi: [Pi session format](https://pi.dev/docs/latest/session-format), [Pi JSON mode](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/json.md)
 
 ## Notes / decisions
 - 2026-06-17: Decided to DEFER all of this. No implementation, no doc changes now. Two exploratory
   edits made during discussion (`StepResult.cost_usd`, `CascadeBudgetExceeded`) were reverted; tree
   is clean. This plan is the record.
+- 2026-06-18: Surveyed four real harnesses (Claude Code, Codex, opencode, Pi) — see "Harness
+  usage-reporting survey". Tokens universal; cost native in 3/4 but Codex emits none, and even
+  reported cost is client-side `tokens × table`. Decision: **token-based cumulative cap for v1**,
+  `cost_usd` optional metadata, dollar cap as an optional later layer. Still design-only; no code.
