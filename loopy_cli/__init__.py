@@ -54,18 +54,24 @@ def compile(
 def run(
     manifest: Path = typer.Argument(..., help="Path to manifest.json."),
     root: Path = typer.Option(Path("."), "--root", help="Project root (for env_file + sensors)."),
-    host: str = typer.Option("127.0.0.1", "--host"),
-    port: int = typer.Option(8000, "--port"),
+    config: Path = typer.Option(
+        Path("loopy.yaml"), "--config", help="Deployment defaults (loopy.yaml); flags override it."
+    ),
+    host: str | None = typer.Option(None, "--host", help="Override sensor_server.host."),
+    port: int | None = typer.Option(None, "--port", help="Override sensor_server.port."),
     sandbox: str = typer.Option("local", "--sandbox", help="Sandbox provider: local | daytona."),
-    bus: str = typer.Option("inproc", "--bus", help="EventBus: inproc | redis."),
-    redis_url: str = typer.Option(
-        "redis://localhost:6379", "--redis-url", help="Redis URL (used with --bus redis)."
+    bus: str | None = typer.Option(
+        None, "--bus", help="EventBus: inproc | redis. Overrides config."
+    ),
+    redis_url: str | None = typer.Option(
+        None, "--redis-url", help="Redis URL (or REDIS_URL env var; used when bus=redis)."
     ),
 ) -> None:
     """Start the Loopy server: host sensor webhooks; incoming events drive workflow runs."""
     import asyncio
 
     from loopy_runtime.bus.factory import make_event_bus
+    from loopy_runtime.config import ConfigError, load_config, resolve, resolve_redis_url
     from loopy_runtime.harness.claude_code import ClaudeCodeHarness
     from loopy_runtime.manifest_model import load_manifest
     from loopy_runtime.receiver import LocalEventReceiver
@@ -77,11 +83,18 @@ def run(
     from loopy_runtime.sensors.scheduler import PollScheduler, parse_interval
     from loopy_runtime.state.inmemory import InMemoryStateStore
 
+    try:
+        cfg = resolve(load_config(config), host=host, port=port, bus=bus)
+    except ConfigError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    resolved_redis_url = resolve_redis_url(redis_url)
+
     m = load_manifest(manifest)
     # One StateStore shared by the runtime (run history/watermarks) and the bus (at-least-once
     # dedupe by Event.id) — a networked bus consumes off the broker, so it needs its own dedupe.
     state = InMemoryStateStore()
-    event_bus = make_event_bus(bus, redis_url=redis_url, state=state)
+    event_bus = make_event_bus(cfg.bus, redis_url=resolved_redis_url, state=state)
     runtime = InMemoryRuntime(
         m,
         harness=ClaudeCodeHarness(m.registry.agents, m.registry.events),
@@ -134,7 +147,7 @@ def run(
 
     if sensor_runner.webhook_paths:
         typer.echo(
-            f"serving {len(sensor_runner.webhook_paths)} webhook(s) on {host}:{port}: "
+            f"serving {len(sensor_runner.webhook_paths)} webhook(s) on {cfg.host}:{cfg.port}: "
             f"{', '.join(sensor_runner.webhook_paths)}"
         )
     else:
@@ -147,7 +160,7 @@ def run(
         f"cron triggers ({len(scheduler.cron_names)}): "
         f"{', '.join(scheduler.cron_names) or '(none)'}"
     )
-    typer.echo(f"event bus: {bus}" + (f" ({redis_url})" if bus == "redis" else ""))
+    typer.echo(f"event bus: {cfg.bus}" + (f" ({resolved_redis_url})" if cfg.bus == "redis" else ""))
 
     async def _serve() -> None:  # pragma: no cover - exercised by running the server
         consumer = asyncio.create_task(runtime.serve())  # drain runs in the background
@@ -156,7 +169,7 @@ def run(
         background = [consumer, broker, poller]
         try:
             if sensor_runner.webhook_paths:
-                await sensor_runner.start(host, port)  # uvicorn owns the foreground
+                await sensor_runner.start(cfg.host, cfg.port)  # uvicorn owns the foreground
             else:
                 # Poll/cron-only (or no sensors): no inbound HTTP, so don't spin up uvicorn —
                 # stay alive on the background tasks (the scheduler/consumer) until cancelled.

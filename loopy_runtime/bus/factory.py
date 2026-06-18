@@ -9,6 +9,10 @@ from loopy_runtime.contract import StateStore
 
 _DEFAULT_REDIS_URL = "redis://localhost:6379"
 
+# Canonical set of EventBus backend names — the single source of truth for both the factory's
+# dispatch below and the config/CLI validation in `loopy_runtime.config`.
+VALID_BUS = ("inproc", "redis")
+
 
 def make_event_bus(
     name: str = "inproc",
@@ -24,4 +28,4 @@ def make_event_bus(
         from loopy_runtime.bus.redis import RedisEventBus
 
         return RedisEventBus(redis_url or _DEFAULT_REDIS_URL, state=state)
-    raise ValueError(f"unknown event bus {name!r}; choose 'inproc' or 'redis'")
+    raise ValueError(f"unknown event bus {name!r}; choose one of {VALID_BUS}")
