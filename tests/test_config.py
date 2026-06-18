@@ -1,0 +1,113 @@
+"""loopy.yaml config loading + flag/env resolution (loopy_runtime/config.py)."""
+
+from __future__ import annotations
+
+import pytest
+
+from loopy_runtime.config import (
+    DEFAULT_BUS,
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    DEFAULT_REDIS_URL,
+    ConfigError,
+    LoopyConfig,
+    load_config,
+    resolve,
+    resolve_redis_url,
+)
+
+
+def _write(tmp_path, text: str):
+    p = tmp_path / "loopy.yaml"
+    p.write_text(text)
+    return p
+
+
+def test_missing_file_is_all_defaults(tmp_path):
+    cfg = load_config(tmp_path / "loopy.yaml")
+    assert cfg == LoopyConfig(host=DEFAULT_HOST, port=DEFAULT_PORT, bus=DEFAULT_BUS)
+
+
+def test_empty_file_is_defaults(tmp_path):
+    assert load_config(_write(tmp_path, "")) == LoopyConfig()
+
+
+def test_yaml_values_loaded(tmp_path):
+    cfg = load_config(
+        _write(tmp_path, "sensor_server:\n  host: 0.0.0.0\n  port: 9001\nbus: redis\n")
+    )
+    assert (cfg.host, cfg.port, cfg.bus) == ("0.0.0.0", 9001, "redis")
+
+
+def test_partial_yaml_keeps_defaults(tmp_path):
+    cfg = load_config(_write(tmp_path, "sensor_server:\n  port: 9999\n"))
+    assert (cfg.host, cfg.port, cfg.bus) == (DEFAULT_HOST, 9999, DEFAULT_BUS)
+
+
+def test_unknown_keys_warn_not_fatal(tmp_path):
+    warnings: list[str] = []
+    path = _write(tmp_path, "bus: inproc\nnope: 1\nsensor_server:\n  host: h\n  bogus: 2\n")
+    cfg = load_config(path, on_warning=warnings.append)
+    assert cfg.host == "h"
+    assert any("nope" in w for w in warnings)
+    assert any("sensor_server.bogus" in w for w in warnings)
+
+
+def test_reserved_keys_do_not_warn(tmp_path):
+    warnings: list[str] = []
+    load_config(
+        _write(tmp_path, "state: memory\nlimits:\n  max_tokens: 5\n"), on_warning=warnings.append
+    )
+    assert warnings == []
+
+
+def test_malformed_yaml_raises(tmp_path):
+    with pytest.raises(ConfigError):
+        load_config(_write(tmp_path, "sensor_server: [unclosed\n"))
+
+
+def test_non_mapping_raises(tmp_path):
+    with pytest.raises(ConfigError):
+        load_config(_write(tmp_path, "- just\n- a\n- list\n"))
+
+
+def test_bad_bus_value_raises(tmp_path):
+    with pytest.raises(ConfigError):
+        load_config(_write(tmp_path, "bus: kafka\n"))
+
+
+def test_non_integer_port_raises(tmp_path):
+    with pytest.raises(ConfigError):
+        load_config(_write(tmp_path, "sensor_server:\n  port: eighty\n"))
+
+
+def test_resolve_flag_overrides_config():
+    base = LoopyConfig(host="cfg-host", port=1, bus="inproc")
+    assert resolve(base, host="flag-host", bus="redis") == LoopyConfig("flag-host", 1, "redis")
+
+
+def test_resolve_none_keeps_config():
+    base = LoopyConfig(host="cfg-host", port=1, bus="redis")
+    assert resolve(base) == base
+
+
+def test_resolve_bad_bus_flag_raises():
+    # An invalid --bus flag must surface as a ConfigError (clean CLI error), not a factory
+    # ValueError leaking from make_event_bus later.
+    with pytest.raises(ConfigError):
+        resolve(LoopyConfig(), bus="kafka")
+
+
+def test_redis_url_flag_wins(monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "redis://env:6379")
+    assert resolve_redis_url("redis://flag:6379") == "redis://flag:6379"
+
+
+def test_redis_url_env_used(monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "redis://env:6379")
+    assert resolve_redis_url(None) == "redis://env:6379"
+
+
+def test_redis_url_default(monkeypatch):
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    assert resolve_redis_url(None) == DEFAULT_REDIS_URL

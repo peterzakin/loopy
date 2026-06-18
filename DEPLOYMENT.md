@@ -335,6 +335,26 @@ is a genuine deployment for workloads that tolerate process-lifetime state — *
 restarts, in-flight runs are lost** (the InMemory runtime stubs durability). Good for
 short-lived cascades; not yet for day-spanning runs.
 
+**`loopy.yaml` — deployment defaults for `loopy run`.** The `run`-time wiring choices map to a
+small config file so they need not be retyped as flags. It is optional: absent the file,
+defaults apply unchanged.
+
+```yaml
+# loopy.yaml (next to where you invoke `loopy run`; override path with --config)
+sensor_server:        # the host:port that binds the sensor-webhook listener
+  host: 0.0.0.0
+  port: 8000
+bus: redis            # inproc (single-process) | redis (networked broker)
+```
+
+Precedence is **explicit flag > loopy.yaml > built-in default**, so `--bus inproc` still wins
+over a file that says `redis`. Connection strings stay in the environment, never the file:
+`bus: redis` reads its URL from the `REDIS_URL` env var (or the `--redis-url` flag), defaulting
+to `redis://localhost:6379`. `sandbox` is *not* a config key — it's declared per-agent in
+`registry.yml`; the `--sandbox` flag selects only the provider backend (`local`/`daytona`).
+`state:` (durable StateStore) and `limits:` (spend caps) are reserved for B10/B-cost and not yet
+read.
+
 ### C. Durable / distributed — the production target (design-complete, behind the same interfaces)
 
 ```
