@@ -433,6 +433,22 @@ step is touched.</strong></p>
   </div>
 </div>
 
+<h3 style="margin-top:18px"><code>loopy.yaml</code> — deployment defaults for <code>loopy run</code></h3>
+<p>The <code>run</code>-time wiring choices map to an optional config file so they need not be
+retyped as flags. Absent the file, defaults apply unchanged.</p>
+<pre class="ascii">sensor_server:        # the host:port that binds the sensor-webhook listener
+  host: 0.0.0.0
+  port: 8000
+bus: redis            # inproc (single-process) | redis (networked broker)</pre>
+<p>Precedence is <strong>explicit flag &gt; <code>loopy.yaml</code> &gt; built-in default</strong>,
+so <code>--bus inproc</code> still wins over a file that says <code>redis</code>. Connection
+strings stay in the environment, never the file: <code>bus: redis</code> reads its URL from the
+<code>REDIS_URL</code> env var (or the <code>--redis-url</code> flag), defaulting to
+<code>redis://localhost:6379</code>. <code>sandbox</code> is <em>not</em> a config key — it's
+declared per-agent in <code>registry.yml</code>; the <code>--sandbox</code> flag selects only the
+provider backend. <code>state:</code> (durable StateStore) and <code>limits:</code> (spend caps)
+are reserved for B10/B-cost and not yet read.</p>
+
 <div class="callout">
   <strong>Invisible vs. leaks:</strong> the <em>code</em> is swappable across all three; the
   <em>operational shape</em> is not. A → "nothing extra"; B → "a Daytona account"; C → "bring a
