@@ -124,7 +124,7 @@ def run(
 
     from loopy_runtime.bus.factory import make_event_bus
     from loopy_runtime.config import ConfigError, load_config, resolve, resolve_redis_url
-    from loopy_runtime.harness.claude_code import ClaudeCodeHarness
+    from loopy_runtime.harness.router import HarnessRouter
     from loopy_runtime.manifest_model import load_manifest
     from loopy_runtime.receiver import LocalEventReceiver
     from loopy_runtime.runtime.inmemory import InMemoryRuntime
@@ -170,7 +170,7 @@ def run(
     event_bus = make_event_bus(cfg.bus, redis_url=resolved_redis_url, state=state)
     runtime = InMemoryRuntime(
         m,
-        harness=ClaudeCodeHarness(m.registry.agents, m.registry.events),
+        harness=HarnessRouter(m.registry.agents, m.registry.events),
         sandboxes=make_sandbox_provider(sandbox),
         secrets=EnvFileSecretsResolver(root),
         bus=event_bus,
@@ -268,7 +268,7 @@ def trigger(
 
     from loopy_runtime.bus.inproc import InProcessEventBus
     from loopy_runtime.contract import Event
-    from loopy_runtime.harness.claude_code import ClaudeCodeHarness
+    from loopy_runtime.harness.router import HarnessRouter
     from loopy_runtime.manifest_model import load_manifest
     from loopy_runtime.runtime.inmemory import InMemoryRuntime
     from loopy_runtime.sandbox.factory import make_sandbox_provider
@@ -284,7 +284,7 @@ def trigger(
     try:
         runtime = InMemoryRuntime(
             m,
-            harness=ClaudeCodeHarness(m.registry.agents, m.registry.events),
+            harness=HarnessRouter(m.registry.agents, m.registry.events),
             sandboxes=make_sandbox_provider(sandbox),
             secrets=EnvFileSecretsResolver(root),
             bus=InProcessEventBus(),

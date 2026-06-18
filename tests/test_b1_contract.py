@@ -8,7 +8,11 @@ import pytest
 
 from loopy_runtime import contract
 from loopy_runtime.manifest_model import Manifest, load_manifest
-from loopy_runtime.providers import REQUIRED_MODEL_KEY, required_model_key
+from loopy_runtime.providers import (
+    REQUIRED_MODEL_KEY,
+    required_model_key,
+    validate_model,
+)
 
 GOLDEN = Path(__file__).resolve().parent / "golden" / "incidents.manifest.json"
 
@@ -38,11 +42,26 @@ def test_workflow_for_event_resolves_entry():
     assert m.workflow_for_event("NotARegisteredEvent") is None
 
 
-def test_provider_registry_resolves_v1_runtime():
+def test_provider_registry_resolves_v1_runtimes():
     assert required_model_key("claude-code") == "ANTHROPIC_API_KEY"
-    assert "OPENAI_API_KEY" not in REQUIRED_MODEL_KEY.values()  # reserved, not wired in v1
+    assert required_model_key("codex") == "OPENAI_API_KEY"  # codex harness is wired now
+    assert set(REQUIRED_MODEL_KEY) == {"claude-code", "codex"}
     with pytest.raises(ValueError):
-        required_model_key("codex")
+        required_model_key("unknown-runtime")
+
+
+def test_model_eligibility_per_harness():
+    # Each harness only drives its provider's models.
+    validate_model("claude-code", "claude-opus-4-8")
+    validate_model("codex", "gpt-5-codex")
+    validate_model("codex", "o3")
+    # A None model is allowed (falls back to the runtime default).
+    validate_model("codex", None)
+    # Cross-provider pairings are rejected.
+    with pytest.raises(ValueError):
+        validate_model("claude-code", "gpt-5-codex")
+    with pytest.raises(ValueError):
+        validate_model("codex", "claude-opus-4-8")
 
 
 def test_protocols_are_runtime_checkable():
