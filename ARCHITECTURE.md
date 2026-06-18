@@ -454,24 +454,30 @@ workflow `.md`.
   *recorded* values in the StateStore and replayed — never re-derived. (Temporal's
   Workflow/Activity discipline, applied even to the hand-built backend.)
 - **Secrets / egress:** sandbox `network:` allowlist is the egress contract; secrets injected per
-  agent, never in the manifest. Two secret surfaces, one principle (resolve at the point of
-  execution, never serialize):
+  agent, never in the manifest. **Three secret surfaces, one principle** (resolve at the point of
+  execution, never serialize) — each with its own home so the layers don't bleed into one another:
   - **Agent/workload secrets** — defined at the **sandbox** (`env_file` reference), resolved by a
     `SecretsResolver` at run time, injected as the sandbox's `env_vars` (the trust boundary).
   - **Sensor secrets** — a single runner-wide **`sensors/.env`** (`load_sensor_env`), merged into
     the engine's process env at `loopy run` so in-process `@sensor` functions read them via
     `os.environ`. Sensors are in-repo and trusted-by-co-location today, so they share the process
-    env rather than carry per-sensor references; keep **infra creds** (`DAYTONA_API_KEY`,
-    `REDIS_URL` — read from process env by the engine itself) *out* of this file. Per-sensor
-    `env_file` scoping and isolation from the engine's process env are deferred until sensors
-    externalize (the same boundary as producer-auth, §3.2).
-- **Runtime config (`loopy.yaml`):** deployment defaults for `loopy run` (the `sensor_server`
-  host/port and the `bus` backend) live in an optional `loopy.yaml`, mapping ~1:1 to CLI flags.
-  Resolution precedence is **explicit flag > `loopy.yaml` > built-in default**; an absent file
-  changes nothing. Connection strings stay out of the file — `redis_url` resolves from
-  `--redis-url` > the `REDIS_URL` env var > default. `sandbox` is *not* a config key (it's
-  registry-owned, per-agent); `state:`/`limits:` are reserved for the durable StateStore (B10) and
-  spend caps. See `DEPLOYMENT.md` §5.
+    env rather than carry per-sensor references. Per-sensor `env_file` scoping and isolation from
+    the engine's process env are deferred until sensors externalize (the same boundary as
+    producer-auth, §3.2).
+  - **Control-plane / infra creds** — the creds the *engine itself* needs (`REDIS_URL`,
+    `DAYTONA_API_KEY`/`DAYTONA_API_URL`). In production these are the deployment's process env; for
+    local dev they may be supplied from **`loopy.env`** at the project root
+    (`load_control_plane_env`), merged with `setdefault` (real/platform env always wins). This is
+    the secret companion to `loopy.yaml`; the explicit name keeps its scope unambiguous —
+    connection strings / provider keys only, never agent or sensor secrets.
+- **Runtime config (`loopy.yaml` + `loopy.env`):** deployment defaults for `loopy run` (the
+  `sensor_server` host/port and the `bus` backend) live in an optional `loopy.yaml`, mapping ~1:1
+  to CLI flags. Resolution precedence is **explicit flag > `loopy.yaml` > built-in default**; an
+  absent file changes nothing. Connection strings/secrets stay out of the YAML — `redis_url`
+  resolves from `--redis-url` > the `REDIS_URL` env var > default, where that env var may itself be
+  seeded for local dev from `loopy.env` (the secret companion, loaded before resolution).
+  `sandbox` is *not* a config key (it's registry-owned, per-agent); `state:`/`limits:` are reserved
+  for the durable StateStore (B10) and spend caps. See `DEPLOYMENT.md` §5.
 
 ---
 
