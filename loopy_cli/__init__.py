@@ -23,6 +23,32 @@ def main() -> None:
     """Author, compile, and run durable agent workflows."""
 
 
+def _print_workflows(project) -> None:  # noqa: ANN001 - loopy_core.compile.model.Project
+    """Print every compiled workflow (its trigger and steps) to stdout."""
+    workflows = project.workflows
+    typer.echo(f"workflows ({len(workflows)}):")
+    for name, wf in sorted(workflows.items()):
+        entry = wf.steps.get(wf.entry) if wf.entry else None
+        trigger = entry.trigger if entry else None
+        if trigger and trigger.kind == "event":
+            trig = f"on event {trigger.event}"
+        elif trigger and trigger.kind == "cron":
+            trig = f"on cron({trigger.expr})"
+        else:
+            trig = "no trigger"
+        typer.echo(f"  {name} — {trig}")
+        for step in wf.steps.values():
+            parts = []
+            if step.agent:
+                parts.append(f"agent={step.agent}")
+            if step.after:
+                parts.append(f"after={','.join(step.after)}")
+            if step.emits:
+                parts.append(f"emits={','.join(step.emits)}")
+            suffix = f"  ({'; '.join(parts)})" if parts else ""
+            typer.echo(f"    - {step.name}{suffix}")
+
+
 @app.command()
 def compile(
     path: Path = typer.Argument(Path("."), help="Project directory to compile."),
@@ -39,6 +65,9 @@ def compile(
     result = compile_project(path)
     for diagnostic in result.diagnostics.items:
         typer.echo(diagnostic.render(), err=True)
+
+    if result.project is not None:
+        _print_workflows(result.project)
 
     if not result.diagnostics.has_errors() and result.project is not None:
         write_events(result.project.registry, path)
