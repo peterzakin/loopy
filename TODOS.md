@@ -11,10 +11,11 @@ plan/source. When an item ships, check its box (`- [x]`) and strike the heading
   — `plans/future/cost-budget/2026-06-17-usage-contract-and-cumulative-spend.md`
   No real terminator for runaway loop-back cascades today (`ResultRejected → propose`,
   `GoalReopened → arbitrate`): each step stays within its per-step budget while cumulative cost
-  grows unbounded — only `max_iterations` (a count, not money) stops it. Make `Usage` (tokens +
-  optional `cost_usd`) a harness-contract output, accumulate per-drain, raise
-  `CascadeBudgetExceeded` before each step, expose `--max-spend`. Design-complete; best
-  value-to-effort ratio. **Pick up first.**
+  grows unbounded — only `max_iterations` (a count, not money) stops it. Make `Usage` (tokens
+  required, `cost_usd` optional) a harness-contract output, accumulate per-drain, raise
+  `CascadeBudgetExceeded` before each step, expose `--max-tokens`. **v1 is a token-based cap only**;
+  the dollar `--max-spend` cap is deferred (tokens are the only universally-reported signal — see the
+  plan's harness survey). Design-complete; best value-to-effort ratio. **Pick up first.**
 
 - [ ] **2. Durability — DurableLite backend (B7 + B10), Phase 11**
   — `ARCHITECTURE.md` §5 (phase 11), §8, §9

@@ -75,6 +75,14 @@ claude-code does this; the CLI's `total_cost_usd` is **aggregated across models*
   message → surfaced via `status()` / `failed_runs` / WARNING log / `loopy trigger` exit 1. No new
   observability plumbing.
 
+## v1 scope (decided 2026-06-18)
+**v1 is a token-based cumulative cap only.** A dollar `--max-spend` cap is explicitly **out of v1**
+(captured below under "Deferred: dollar cap"). Rationale: tokens are the one signal every harness
+reports (survey below); a dollar cap only works for cost-reporting harnesses and needs the
+harness-capability gating machinery, which isn't worth building until there's demand. `cost_usd`
+still rides along in the contract as optional metadata (claude-code fills it for free) — v1 simply
+does not *enforce* on it.
+
 ## Proposed shape (for when we build it)
 ```
 # contract.py
@@ -82,7 +90,9 @@ claude-code does this; the CLI's `total_cost_usd` is **aggregated across models*
 class Usage:
     input_tokens: int = 0
     output_tokens: int = 0
-    cost_usd: float | None = None          # filled when the harness knows it (claude CLI); else runtime-priced
+    cost_usd: float | None = None          # optional metadata; filled when the harness knows it
+                                           # (claude CLI). NOT enforced in v1; reserved for the
+                                           # deferred dollar cap / runtime pricing layer.
     # per_model: tuple[ModelUsage, ...] = ()  # ADD LATER, with pricing/observability — non-breaking
 
 @dataclass(frozen=True)
@@ -91,21 +101,50 @@ class StepResult:
     emits: Mapping[EventName, Mapping[str, Any]] = field(default_factory=dict)
     usage: Usage = Usage()                 # NEW: required of real harnesses (stubs may report zeros)
 ```
-- `AgentHarness.run` docstring states reporting `usage` is part of the contract.
-- `ClaudeCodeHarness` maps the `--output-format json` envelope (`usage` block + `total_cost_usd`) → `Usage`.
-- Runtime: `cascade_budget_usd` knob; reset `_cascade_spend` at drain start; before each step raise
-  `CascadeBudgetExceeded` if `_cascade_spend >= cap`; after each step add `result.usage.cost_usd`.
-- CLI: `--max-spend` on `run` and `trigger`.
+- `AgentHarness.run` docstring states reporting `usage` (tokens) is part of the contract; `cost_usd`
+  is optional.
+- `ClaudeCodeHarness` maps the `--output-format json` envelope (`usage` block → tokens;
+  `total_cost_usd` → optional `cost_usd`) → `Usage`.
+- Runtime (v1): `cascade_token_budget` knob; reset `_cascade_tokens` at drain start; before each step
+  raise `CascadeBudgetExceeded` if `_cascade_tokens >= cap`; after each step add
+  `input_tokens + output_tokens`.
+- CLI (v1): `--max-tokens` on `run` and `trigger`.
 
-## Steps (high-level — flesh out when scheduled)
-- [ ] `Usage` type + `StepResult.usage`; document the harness contract obligation.
-- [ ] `ClaudeCodeHarness` fills `Usage` from the envelope (tokens + cost).
-- [ ] `CascadeBudgetExceeded`; runtime accumulator + per-step check + reset; `cascade_budget_usd` knob.
-- [ ] `--max-spend` CLI flag (run + trigger).
-- [ ] Tests: looping cascade trips the cap and winds down (not via `max_iterations`); under-budget
-      cascade completes; stub harness reports zero usage.
+## Steps (v1 — high-level, flesh out when scheduled)
+- [ ] `Usage` type (tokens required, `cost_usd` optional) + `StepResult.usage`; document the harness
+      contract obligation (tokens required).
+- [ ] `ClaudeCodeHarness` fills `Usage` from the envelope (tokens; `cost_usd` as optional metadata).
+- [ ] `CascadeBudgetExceeded`; runtime token accumulator + per-step check + reset;
+      `cascade_token_budget` knob.
+- [ ] `--max-tokens` CLI flag (run + trigger).
+- [ ] Tests: looping cascade trips the token cap and winds down (not via `max_iterations`);
+      under-budget cascade completes; stub harness reports zero usage.
+
+## Deferred: dollar cap (`--max-spend`) — NOT v1
+A dollar-denominated cap is a clean later layer on the same accumulator, but it cannot be universal
+because some harnesses report no cost (Codex; opencode for custom providers — see survey). The hard
+requirement is that it must **never silently no-op** (the "report 0 → cap silently broken" footgun).
+Design, for when it's built:
+
+- **Static capability flag.** Each harness adapter declares `reports_cost: bool` (`ClaudeCodeHarness`
+  → True; a `CodexHarness` → False). A static property, known from the manifest's agent→harness map.
+- **Compile/startup gate, all-or-nothing over the cascade.** If `--max-spend` is set, **every agent
+  reachable in the run/cascade** must use a `reports_cost=True` harness; otherwise reject before
+  anything runs with a clear error (*"step `resolve/fix` uses a harness that doesn't report cost; use
+  `--max-tokens`"*). All-or-nothing because one cost-blind step in a cascade makes its spend invisible
+  and lets the runaway slip the cap.
+- **Runtime `None`-is-an-error.** Even a `reports_cost=True` harness can return `cost_usd is None` for
+  a specific call (opencode, custom provider, no price config). Under an active dollar cap, treat a
+  `None` as a **recorded failed run** (existing run-failure path) — never accumulate it as 0.
+- Shape: `cascade_budget_usd` knob + `--max-spend` flag, sitting beside the v1 token cap.
+- Open: a runtime pricing table (tokens × rate) could later derive cost for cost-blind harnesses,
+  making `--max-spend` universal without per-harness cost — but that's its own deferred milestone
+  (see Non-goals).
 
 ## Non-goals / deferred (explicitly)
+- **Dollar cap (`--max-spend`) and its harness-capability gating** (`reports_cost` flag,
+  all-reachable-agents compile gate, `None`-is-an-error) — designed above under "Deferred: dollar
+  cap", but **not in v1**. v1 enforces tokens only.
 - Cumulative wall-clock cap (rejected — unnecessary).
 - `window`/`latency` day-scale budgets (durable-timer milestone).
 - Runtime pricing table (tokens × rate) and the `per_model` breakdown it requires.
@@ -138,9 +177,10 @@ implementations rather than memory. Researched 2026-06-18 (links below).
 
 ## Open questions
 - Cap unit: **tokens** (universally enforceable, no pricing table — see survey) vs **dollars** (only
-  works for harnesses that report cost; Codex doesn't). **Decision (2026-06-18): token-based cap for
-  v1; dollar cap layers on optionally for harnesses that report cost.** Flipped from the earlier
-  "dollars now" lean after the harness survey above.
+  works for harnesses that report cost; Codex doesn't). **Decision (2026-06-18): v1 ships the
+  token-based cap ONLY. The dollar cap (`--max-spend`) is out of v1** — its design is captured under
+  "Deferred: dollar cap" and "Non-goals". Flipped from the earlier "dollars now" lean after the
+  harness survey.
 - Cost source per invocation: harness-reported (when present) vs runtime-priced from tokens+`per_model`
   (later). Survey shows even harness-reported cost is client-side `tokens × table`, so a runtime
   pricing layer is the same mechanism centralized — cost stays purely derived/optional, never required.
@@ -159,3 +199,8 @@ implementations rather than memory. Researched 2026-06-18 (links below).
   usage-reporting survey". Tokens universal; cost native in 3/4 but Codex emits none, and even
   reported cost is client-side `tokens × table`. Decision: **token-based cumulative cap for v1**,
   `cost_usd` optional metadata, dollar cap as an optional later layer. Still design-only; no code.
+- 2026-06-18: Scope call — **the dollar `--max-spend` cap is explicitly NOT in v1.** v1 enforces a
+  token cap only. The harness-capability gating that a dollar cap needs (`reports_cost` flag,
+  all-reachable-agents compile gate, `None`-is-an-error) is designed and recorded under "Deferred:
+  dollar cap" but deferred until there's demand. `cost_usd` still rides the contract as optional
+  metadata; v1 just doesn't enforce on it.
