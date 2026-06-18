@@ -15,6 +15,7 @@ dependencies = [
     "jsonschema>=4.21",
     "fastapi>=0.110",
     "uvicorn>=0.29",
+    "pyjwt[crypto]>=2.8",
 ]
 
 [project.scripts]

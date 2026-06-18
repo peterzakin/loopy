@@ -372,6 +372,42 @@ DAYTONA_API_KEY=dt-...
 DAYTONA_API_URL=https://...
 ```
 
+#### Repo access — `loopy auth github`
+
+Agents need authenticated git access to operate on a codebase (clone, push, open PRs). loopy uses
+a **bring-your-own GitHub App**: each deployment registers its *own* App, and the runtime mints
+short-lived, repo-scoped **installation tokens** from it. The powerful long-lived secret — the App
+private key — stays at the control-plane and never enters a sandbox; only the ephemeral token
+crosses the trust boundary. There is **no loopy-owned central app and no persistent server**:
+minting is pure client-side (private key → JWT → installation token via `api.github.com`).
+
+`loopy auth github` runs GitHub's App Manifest flow so you don't register the App by hand:
+
+```bash
+loopy auth github            # create under your account
+loopy auth github --org acme # create under an org
+loopy auth status            # show + verify stored creds
+```
+
+It opens a browser to a local page that POSTs a manifest to GitHub; you confirm (~2 clicks);
+GitHub redirects back to a one-shot `127.0.0.1` listener with a temporary code, which loopy
+exchanges for the App's credentials. The private key lands in `./.loopy/github-app.pem` (mode
+`0600`, gitignored) and `loopy.env` gains:
+
+```ini
+# written by `loopy auth github`
+GITHUB_APP_ID=1234567
+GITHUB_APP_PRIVATE_KEY_FILE=.loopy/github-app.pem
+```
+
+The manifest *creates* the App but does not *install* it, so the command prints an install URL —
+visit it to choose exactly which repos the App can touch. The default permissions are the
+fix/PR baseline: `contents: write`, `pull_requests: write`, `metadata: read`.
+
+> **Deferred (next milestone):** the runtime `TokenProvider` that mints a token per run and injects
+> it into the sandbox via a git credential helper. `loopy auth github` lands the creds; wiring them
+> into a running workflow is the following step in this epic.
+
 ### C. Durable / distributed — the production target (design-complete, behind the same interfaces)
 
 ```

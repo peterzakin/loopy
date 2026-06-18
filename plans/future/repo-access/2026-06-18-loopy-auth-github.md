@@ -91,26 +91,26 @@ The browser/callback/manifest orchestration is onboarding-only and lives in the 
   redirect; uvicorn is already a runtime dep but spinning it up for one request is overkill.
 
 ## Steps
-- [ ] `loopy_runtime/scm/__init__.py` + `loopy_runtime/scm/github_app.py`:
+- [x] `loopy_runtime/scm/__init__.py` + `loopy_runtime/scm/github_app.py`:
       `AppCredentials` (app_id, private_key_pem); `app_jwt()` (RS256, ~9-min exp);
       `find_installation(repo)` (`GET /repos/{owner}/{repo}/installation`);
       `mint_installation_token(installation_id, repos=None, permissions=None)`
       (`POST /app/installations/{id}/access_tokens`, scoped). Thin GitHub API client (stdlib
       `urllib` or `httpx` if already transitive).
-- [ ] `loopy_runtime/secrets.py`: `write_control_plane_env(root, updates: Mapping[str,str])` —
+- [x] `loopy_runtime/secrets.py`: `write_control_plane_env(root, updates: Mapping[str,str])` —
       merge-write keys into `loopy.env` preserving existing lines/comments; never log values.
-- [ ] `loopy_cli/auth.py`: the manifest-flow orchestration — `build_manifest()`,
+- [x] `loopy_cli/auth.py`: the manifest-flow orchestration — `build_manifest()`,
       one-shot callback server, auto-submit HTML page, browser open, code→conversion exchange,
       PEM-file + `loopy.env` write, `.gitignore` ensure, install-URL guidance, verify.
-- [ ] `loopy_cli/__init__.py`: register an `auth` Typer group; add `loopy auth github`
+- [x] `loopy_cli/__init__.py`: register an `auth` Typer group; add `loopy auth github`
       (`--org`, `--name`, `--port`, `--force`) and `loopy auth status` (show + verify stored creds).
       Lazy imports, matching existing commands.
-- [ ] `.gitignore`: add `.loopy/` (PEM + future local state).
-- [ ] `pyproject.toml`: add the JWT/RS256 dep (`pyjwt[crypto]`), pinned; keep everything else.
-- [ ] Tests: manifest shape; `write_control_plane_env` merge/idempotency/no-clobber; conversion
+- [x] `.gitignore`: add `.loopy/` (PEM + future local state).
+- [x] `pyproject.toml`: add the JWT/RS256 dep (`pyjwt[crypto]`), pinned; keep everything else.
+- [x] Tests: manifest shape; `write_control_plane_env` merge/idempotency/no-clobber; conversion
       exchange + cred write against a faked GitHub endpoint; JWT claims; token-mint request shape
       (scoped to repos) with a stubbed API. No real network in tests.
-- [ ] Docs: a short `DEPLOYMENT.md` section on `loopy auth github` (the onboarding path) +
+- [x] Docs: a short `DEPLOYMENT.md` section on `loopy auth github` (the onboarding path) +
       note the deferred runtime injection milestone.
 
 ## Files likely to change
@@ -136,4 +136,19 @@ The browser/callback/manifest orchestration is onboarding-only and lives in the 
   install covers? (Leaning: presence + mint-test + installed-repo count.)
 
 ## Notes / decisions
-- (log as we build)
+- **Built** (status: draft → implemented). Resolved the open questions as follows:
+  - *Org vs personal:* optional `--org`, default personal account (no prompt).
+  - *Default permissions:* shipped the `contents:write` + `pull_requests:write` + `metadata:read`
+    fix/PR baseline; per-permission scoping stays the deferred "complex permissioning."
+  - *HTTP client:* stdlib `urllib` for all GitHub API calls — zero new HTTP dep. The single network
+    boundary is `github_app._request_json`, which tests stub.
+  - *`loopy auth status`:* presence + mint-test + per-installation reachable-repo count.
+- `app_jwt` uses a 9-min exp with `iat` backdated 60s for clock skew (GitHub caps JWTs at 10 min).
+- `_SUCCESS_PAGE` keeps `.encode()` (non-ASCII ✓/→) while `_ERROR_PAGE` is a bytes literal — ruff
+  UP012 only rewrites pure-ASCII.
+- One new dep: `pyjwt[crypto]>=2.8`, imported lazily inside `app_jwt` so a bare
+  `import loopy_runtime.scm.github_app` stays cheap.
+- Added `loopy auth status`; the `--name`/`--port`/`--force`/`--no-browser` flags landed as planned.
+- Tests in `tests/test_auth_github.py` (13) cover manifest shape, the env writer
+  (merge/idempotency/no-clobber), JWT claims, conversion+cred-write, and scoped/unscoped token mint;
+  no live network. Full suite green (239 passed, 1 pre-existing skip).

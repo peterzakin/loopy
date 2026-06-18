@@ -15,7 +15,14 @@ from pathlib import Path
 
 import typer
 
+from loopy_cli.auth import auth_app
+
 app = typer.Typer(add_completion=False, help="Loopy — compile and run durable agent workflows.")
+
+# `loopy auth ...` — onboarding for external creds (GitHub App manifest flow). The
+# sub-app's heavy imports are deferred into its command bodies, so registering it
+# here keeps `loopy compile` runtime-free.
+app.add_typer(auth_app, name="auth")
 
 
 @app.callback()
