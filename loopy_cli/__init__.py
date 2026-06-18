@@ -10,6 +10,7 @@ Heavy deps are imported lazily per command so `loopy compile` stays runtime-free
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import typer
@@ -77,7 +78,7 @@ def run(
     from loopy_runtime.receiver import LocalEventReceiver
     from loopy_runtime.runtime.inmemory import InMemoryRuntime
     from loopy_runtime.sandbox.factory import make_sandbox_provider
-    from loopy_runtime.secrets import EnvFileSecretsResolver
+    from loopy_runtime.secrets import EnvFileSecretsResolver, load_sensor_env
     from loopy_runtime.sensors.loader import load_poll_sensor, load_webhook_sensor
     from loopy_runtime.sensors.runner import FastAPISensorRunner, synthesizing_publisher
     from loopy_runtime.sensors.scheduler import PollScheduler, parse_interval
@@ -91,6 +92,14 @@ def run(
     resolved_redis_url = resolve_redis_url(redis_url)
 
     m = load_manifest(manifest)
+    # Sensor-layer secrets: a single runner-wide `sensors/.env`, merged into the process env so
+    # in-process @sensor functions read them via os.environ. Non-override (setdefault) so a value
+    # explicitly set in the real environment wins, matching dotenv convention.
+    sensor_env = load_sensor_env(root)
+    for key, value in sensor_env.items():
+        os.environ.setdefault(key, value)
+    if sensor_env:
+        typer.echo(f"loaded {len(sensor_env)} sensor secret(s) from {root}/sensors/.env")
     # One StateStore shared by the runtime (run history/watermarks) and the bus (at-least-once
     # dedupe by Event.id) — a networked bus consumes off the broker, so it needs its own dedupe.
     state = InMemoryStateStore()

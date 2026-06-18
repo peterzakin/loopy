@@ -15,3 +15,7 @@ build/
 **/loopy/events.py
 **/loopy/events.pyi
 **/loopy/__init__.py
+
+# Secrets — referenced env files, resolved at run time, never committed
+**/sensors/.env   # sensor-layer secrets (runner-wide dotenv)
+**/secrets/       # sandbox env_file(s)

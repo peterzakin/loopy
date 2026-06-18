@@ -105,6 +105,7 @@ outside world it integrates with on the edges. Solid arrows are the live request
 | **AgentHarness** | Runs a step's prose body against its bound agent (model + tools + skills) and validates the result against the step's typed `output:`/`emits:`. | `ClaudeCodeHarness` — runs the headless `claude -p … --output-format json` CLI *inside the sandbox*, parses the envelope, and feeds `total_cost_usd` to the budget enforcer. |
 | **SandboxProvider** | Provisions the compute + egress an agent runs in, from the sandbox spec (image build + `network:` allowlist). The trust boundary. | `local` (subprocess, for dev) or `daytona` (isolated cloud container). Selected with `--sandbox`. |
 | **Secrets** | Resolves a sandbox's `env_file`(s) at run time and injects them into the sandbox as env vars. Never written to the manifest, never logged. | `EnvFileSecretsResolver` — reads dotenv files relative to the project root (and refuses paths that escape it). |
+| **Sensor secrets** | Supplies credentials to in-process `@sensor` functions (poll + webhook). | A single runner-wide **`sensors/.env`** (`load_sensor_env`) merged into the process env at `loopy run`, so sensors read them via `os.environ`. Optional, gitignored, never in the manifest. |
 | **StateStore** | Holds run history (event-sourced), step outputs, and cron/poll watermarks. | `InMemoryStateStore` — process-lifetime only. |
 | **RetryPolicy** | Wraps side-effecting calls with backoff + an idempotency key (`run_id:step_id`) so retries/replays don't double-fire. | `ExponentialBackoffRetry`; budget trips are terminal (not retried). |
 
@@ -385,18 +386,25 @@ What you actually need in place for a successful run, in order:
    acyclic, every sensor declares a registered `emits`. Run it in CI.
 2. **The manifest, shipped.** `manifest.json` is the deploy artifact. Carry the project root
    alongside it (needed only for sensor module source + `env_file`s).
-3. **Secrets, as `env_file`s.** Each sandbox's `env_file` must exist under the project root and
-   contain the keys the harness needs — at minimum the model API key for the agent's runtime
-   (e.g. `ANTHROPIC_API_KEY` for `claude-code`). The runtime refuses to start a step if its
-   sandbox can't supply the harness's required keys, and refuses `env_file` paths that escape
-   the root.
-4. **Sandbox access.** For `--sandbox daytona`: `DAYTONA_API_KEY` / `DAYTONA_API_URL` in the
-   server's environment, and `loopy-core[daytona]` installed. For `--sandbox local`: nothing —
-   but agents run as subprocesses on the host, so it's dev-only.
-5. **Egress allowlist.** Each sandbox's `network:` list is the egress contract — it must include
+3. **Agent secrets, as sandbox `env_file`s.** Each sandbox's `env_file` must exist under the
+   project root and contain the keys the harness needs — at minimum the model API key for the
+   agent's runtime (e.g. `ANTHROPIC_API_KEY` for `claude-code`). The runtime refuses to start a
+   step if its sandbox can't supply the harness's required keys, and refuses `env_file` paths that
+   escape the root.
+4. **Sensor secrets, as `sensors/.env`.** Credentials an in-process `@sensor` needs (a poll API
+   key, a webhook-signing secret) go in a single runner-wide `sensors/.env` under the project
+   root. `loopy run` merges them into the process env (non-override: a value already set in the
+   real environment wins), so sensors read them via `os.environ`. Optional and gitignored. Keep
+   infra creds (`DAYTONA_API_KEY`, `REDIS_URL`) *out* of it — those are the server's own env
+   (item 5), and sensors share the engine's process env today.
+5. **Sandbox + infra access.** For `--sandbox daytona`: `DAYTONA_API_KEY` / `DAYTONA_API_URL` in
+   the server's environment, and `loopy-core[daytona]` installed. For `--bus redis`: a reachable
+   `--redis-url`. For `--sandbox local`: nothing — but agents run as subprocesses on the host, so
+   it's dev-only.
+6. **Egress allowlist.** Each sandbox's `network:` list is the egress contract — it must include
    every host an agent's tools reach (e.g. `github.com` for `open_pr`/`merge_pr`). The model
    API endpoint must be reachable from inside the sandbox.
-6. **Sensor sources pointed at the server.** Each external source's webhook must POST to the
+7. **Sensor sources pointed at the server.** Each external source's webhook must POST to the
    matching `@sensor(webhook="/hooks/…")` path on `host:port`. `loopy run` prints the hosted
    webhook paths on startup — verify the count and paths match what you expect.
 
