@@ -1,0 +1,168 @@
+"""Shared harness machinery (B4).
+
+A loopy harness runs `step.agent` as a headless CLI **inside the sandbox** (the sandbox
+is the security boundary — see the per-harness bypass flags), then parses a small JSON
+protocol the agent is asked to emit: `{"output": {...}, "emits": {"<Event>": {...}}}`.
+That protocol — the prompt instruction, result parsing, and output/emit validation — is
+identical across providers, so it lives here; a concrete harness only supplies the CLI
+argv and how to read the agent's final message + USD cost out of that CLI's stdout.
+
+The base also enforces the two per-harness rules:
+
+* **Model eligibility** — at construction, every agent this harness owns must name a
+  model the runtime is allowed to drive (`providers.validate_model`). Fail-fast.
+* **No silently-ignored spend budget** — at run, a step with a `spend.usd` budget on a
+  harness that reports no USD cost (Codex) is a hard error, not a silent no-op.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from collections.abc import Mapping
+
+from loopy_runtime.budget import BudgetEnforcer
+from loopy_runtime.contract import Sandbox, StepContext, StepOutput, StepResult
+from loopy_runtime.manifest_model import AgentSpec, EventContract, StepSpec
+from loopy_runtime.providers import provider, required_model_key, validate_model
+from loopy_runtime.render import TemplateRenderer
+
+
+class HarnessError(Exception):
+    """Transient failure — the RetryPolicy may retry."""
+
+
+class JsonProtocolHarness:
+    """Base for CLI harnesses that speak the loopy JSON output protocol."""
+
+    RUNTIME: str  # the harness.runtime id this harness implements (set by subclass)
+
+    def __init__(
+        self,
+        agents: Mapping[str, AgentSpec],
+        events: Mapping[str, EventContract] | None = None,
+        renderer: TemplateRenderer | None = None,
+    ):
+        self._agents = dict(agents)
+        self._events = dict(events or {})
+        self._renderer = renderer or TemplateRenderer()
+        # Fail fast: every agent this harness is responsible for must name a model the
+        # runtime is eligible to drive. Agents bound to a *different* runtime are left to
+        # their own harness (the router only ever dispatches our runtime's steps to us).
+        for name, agent in self._agents.items():
+            if agent.harness.runtime == self.RUNTIME:
+                try:
+                    validate_model(self.RUNTIME, agent.harness.model)
+                except ValueError as exc:
+                    raise ValueError(f"agent '{name}': {exc}") from exc
+
+    def required_keys(self, agent: AgentSpec) -> set[str]:
+        return {required_model_key(agent.harness.runtime)}
+
+    async def run(self, step: StepSpec, ctx: StepContext, sandbox: Sandbox) -> StepResult:
+        if step.agent is None or step.agent not in self._agents:
+            raise HarnessError(f"step '{step.id}' has no resolvable agent")
+        agent = self._agents[step.agent]
+
+        body = self._renderer.render(step, ctx.event, ctx.upstream)
+        prompt = body + self._instruction(step)
+        argv = self.build_argv(step, agent, prompt)
+
+        result = await self._exec(argv, step, sandbox)
+        if result.exit_code != 0:
+            raise HarnessError(
+                f"{self.RUNTIME} exited {result.exit_code}: {result.stderr.strip()}"
+            )
+
+        message, spent_usd = self._parse_response(result.stdout, step)
+        self._enforce_spend(step, spent_usd)
+
+        parsed = self._parse_result(message, step)
+        return StepResult(
+            output=StepOutput(fields=self._extract_output(parsed, step)),
+            emits=self._extract_emits(parsed, step),
+        )
+
+    async def _exec(self, argv: list[str], step: StepSpec, sandbox: Sandbox):
+        timeout = BudgetEnforcer.wall_clock_seconds(step.budget)
+        try:
+            return await asyncio.wait_for(sandbox.exec(argv), timeout=timeout)
+        except TimeoutError as exc:
+            raise HarnessError(f"step '{step.id}' exceeded wall_clock budget") from exc
+
+    def _enforce_spend(self, step: StepSpec, spent_usd: float) -> None:
+        spend = step.budget.spend if step.budget else None
+        has_usd_cap = bool(spend) and spend.get("usd") is not None
+        if has_usd_cap and not provider(self.RUNTIME).reports_cost:
+            # Refusing beats silently passing a budget we can't measure (Codex reports no
+            # USD cost — only token usage). Cap wall-clock instead, or pick a harness that
+            # reports cost. (The cascade-wide dollar cap is deferred — see cost-budget plan.)
+            raise HarnessError(
+                f"step '{step.id}': the {self.RUNTIME} harness reports no USD cost, so its "
+                "spend budget can't be enforced — use a wall_clock budget instead"
+            )
+        BudgetEnforcer.check_spend(step.budget, spent_usd)
+
+    # ── subclass hooks ──────────────────────────────────────────────────────────
+    def build_argv(self, step: StepSpec, agent: AgentSpec, prompt: str) -> list[str]:
+        raise NotImplementedError
+
+    def _parse_response(self, stdout: str, step: StepSpec) -> tuple[str, float]:
+        """Read the agent's final message text and the run's USD cost out of the CLI's
+        stdout. Cost is 0.0 for harnesses that report none."""
+        raise NotImplementedError
+
+    # ── shared JSON protocol ──────────────────────────────────────────────────────
+    def _instruction(self, step: StepSpec) -> str:
+        """Ask for a JSON object with `output` keys and an `emits` payload per emitted event."""
+        if not step.output and not step.emits:
+            return ""
+        parts = []
+        if step.output:
+            parts.append(f'"output" with keys {sorted(step.output)}')
+        for event_name in step.emits:
+            fields = sorted(self._events[event_name].fields) if event_name in self._events else []
+            parts.append(f'"emits.{event_name}" with keys {fields}')
+        return (
+            '\n\nReturn ONLY a JSON object {"output": {...}, "emits": {"<Event>": {...}}} '
+            f"providing {'; '.join(parts)}."
+        )
+
+    @staticmethod
+    def _parse_result(result_text: str, step: StepSpec) -> dict:
+        if not step.output and not step.emits:
+            return {}
+        try:
+            parsed = json.loads(result_text)
+        except json.JSONDecodeError as exc:
+            raise HarnessError(f"step '{step.id}': result was not JSON") from exc
+        if not isinstance(parsed, dict):
+            raise HarnessError(f"step '{step.id}': result JSON was not an object")
+        return parsed
+
+    @staticmethod
+    def _extract_output(parsed: dict, step: StepSpec) -> dict:
+        if not step.output:
+            return {}
+        obj = parsed.get("output")
+        missing = set(step.output) - set(obj) if isinstance(obj, dict) else set(step.output)
+        if missing:
+            raise HarnessError(f"step '{step.id}': output missing keys {sorted(missing)}")
+        return {key: obj[key] for key in step.output}
+
+    def _extract_emits(self, parsed: dict, step: StepSpec) -> dict[str, dict]:
+        emits_obj = parsed.get("emits") if isinstance(parsed.get("emits"), dict) else {}
+        out: dict[str, dict] = {}
+        for event_name in step.emits:
+            payload = emits_obj.get(event_name)
+            if not isinstance(payload, dict):
+                raise HarnessError(f"step '{step.id}': no payload for emits '{event_name}'")
+            contract = self._events.get(event_name)
+            if contract is not None:
+                missing = set(contract.fields) - set(payload)
+                if missing:
+                    raise HarnessError(
+                        f"step '{step.id}': emit '{event_name}' missing {sorted(missing)}"
+                    )
+            out[event_name] = payload
+        return out

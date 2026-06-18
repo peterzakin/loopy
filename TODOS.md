@@ -49,7 +49,7 @@ B7/B10. Legend: ✅ shipped · ⚠️ partial · ❌ not built / deferred.
 | **B1** | Trigger → run instantiation | ✅ | in-memory |
 | **B2** | DAG execution honoring `after:` | ✅ | |
 | **B3** | Runtime template resolution (`{{ event.* }}`/`{{ step.* }}`) | ✅ | |
-| **B4** | Agent invocation + typed output capture | ✅ | |
+| **B4** | Agent invocation + typed output capture | ✅ | `claude-code` + `codex` harnesses, dispatched per agent runtime by `HarnessRouter` with per-harness model eligibility |
 | **B5** | Event emission onto the bus | ✅ | in-proc + Redis bus |
 | **B6** | Budget enforcement | ⚠️ | `wall_clock` + per-step `spend.usd` done; `window`/`latency` need durable timers (B7) |
 | **B7** | Durable timers | ❌ | poll scheduler is in-process only → TODO #2 (DurableLite) |

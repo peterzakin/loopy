@@ -359,7 +359,8 @@ class Runtime(Protocol):
 runtime = DurableLiteRuntime(                 # ← swap for InMemoryRuntime / TemporalRuntime
     manifest = load_manifest("manifest.json"),
     state    = PostgresStateStore(dsn),       # ← or InMemoryStateStore / SQLite / Temporal history
-    harness  = ClaudeCodeHarness(),           # ← AgentHarness axis
+    harness  = HarnessRouter(agents),         # ← AgentHarness axis: dispatch per agent runtime
+                                              #   (claude-code → ClaudeCodeHarness, codex → CodexHarness)
     sandboxes= DaytonaProvider(),             # ← or LocalSandboxProvider in tests
     bus      = NatsEventBus(...),             # ← in-proc (single node) vs networked (distributed)
     retry    = ExponentialBackoff(max_attempts=5),
