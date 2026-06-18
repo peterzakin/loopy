@@ -56,12 +56,22 @@ def test_create_app_url_personal_vs_org():
     assert auth.create_app_url("acme") == "https://github.com/organizations/acme/settings/apps/new"
 
 
-def test_submit_page_embeds_escaped_manifest_and_state():
+def test_submit_page_sets_manifest_via_js_and_round_trips():
+    import json
+    import re
+
     manifest = auth.build_manifest("loopy", "http://127.0.0.1:1/callback")
     page = auth.render_submit_page(auth.create_app_url("acme"), manifest, "st&te")
     assert "organizations/acme/settings/apps/new?state=st&amp;te" in page
-    assert "name='manifest'" in page  # the JSON rides a hidden field
+    assert "name='manifest'" in page  # the field the JS fills
     assert "submit()" in page  # auto-submits via JS
+
+    # The manifest must survive the JS-literal embedding intact, url included — that's
+    # the field GitHub rejected when it didn't arrive ("url wasn't supplied").
+    literal = re.search(r"\.value = (\".*?\");document", page).group(1)
+    recovered = json.loads(json.loads(literal))  # JS string literal → JSON string → dict
+    assert recovered == manifest
+    assert recovered["url"]
 
 
 # --- write_control_plane_env: merge / idempotency / no-clobber --------------
