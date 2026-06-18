@@ -68,17 +68,26 @@ def default_app_name(org: str | None) -> str:
 
 
 def render_submit_page(action_url: str, manifest: dict, state: str) -> str:
-    """A tiny local page that auto-POSTs the manifest to GitHub's create-app URL."""
-    manifest_value = html.escape(json.dumps(manifest), quote=True)
+    """A tiny local page that auto-POSTs the manifest to GitHub's create-app URL.
+
+    Follows GitHub's documented manifest-flow pattern: the `manifest` field value is
+    set in JavaScript via `JSON.stringify`, not baked into the HTML attribute. Setting
+    it in the DOM avoids attribute-escaping pitfalls — embedding escaped JSON in the
+    `value` attribute is what made GitHub reject the manifest ("url wasn't supplied").
+    """
+    action = f"{html.escape(action_url, quote=True)}?state={html.escape(state, quote=True)}"
+    # A JS string literal of the manifest JSON; <-escape so a "</script>" in any value
+    # (e.g. an app name) can't break out of the script element.
+    manifest_literal = json.dumps(json.dumps(manifest)).replace("<", "\\u003c")
     return (
         "<!doctype html><html><head><meta charset='utf-8'><title>loopy → GitHub</title>"
         "</head><body style='font-family:system-ui;text-align:center;padding:48px'>"
         "<p>Redirecting you to GitHub to create your loopy App…</p>"
-        f"<form id='f' method='post' action='{html.escape(action_url, quote=True)}"
-        f"?state={html.escape(state, quote=True)}'>"
-        f"<input type='hidden' name='manifest' value='{manifest_value}'>"
+        f"<form id='f' method='post' action='{action}'>"
+        "<input type='hidden' name='manifest' id='manifest'>"
         "<noscript><button type='submit'>Continue to GitHub</button></noscript>"
-        "</form><script>document.getElementById('f').submit();</script>"
+        f"</form><script>document.getElementById('manifest').value = {manifest_literal};"
+        "document.getElementById('f').submit();</script>"
         "</body></html>"
     )
 
