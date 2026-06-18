@@ -455,6 +455,13 @@ workflow `.md`.
   Workflow/Activity discipline, applied even to the hand-built backend.)
 - **Secrets / egress:** sandbox `network:` allowlist is the egress contract; secrets injected per
   agent, never in the manifest.
+- **Runtime config (`loopy.yaml`):** deployment defaults for `loopy run` (the `sensor_server`
+  host/port and the `bus` backend) live in an optional `loopy.yaml`, mapping ~1:1 to CLI flags.
+  Resolution precedence is **explicit flag > `loopy.yaml` > built-in default**; an absent file
+  changes nothing. Connection strings stay out of the file — `redis_url` resolves from
+  `--redis-url` > the `REDIS_URL` env var > default. `sandbox` is *not* a config key (it's
+  registry-owned, per-agent); `state:`/`limits:` are reserved for the durable StateStore (B10) and
+  spend caps. See `DEPLOYMENT.md` §5.
 
 ---
 
