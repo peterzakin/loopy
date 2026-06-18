@@ -26,9 +26,11 @@ from loopy_runtime.contract import (
     StepContext,
     StepOutput,
     StepResult,
+    TriggerId,
 )
 from loopy_runtime.manifest_model import Manifest, SandboxSpec, StepSpec, WorkflowSpec
 from loopy_runtime.retry import ExponentialBackoffRetry
+from loopy_runtime.sensors.scheduler import cron_prev
 from loopy_runtime.state.inmemory import InMemoryStateStore
 
 logger = logging.getLogger(__name__)
@@ -117,8 +119,37 @@ class InMemoryRuntime:
         one-shot CLI and observability — a failed run is recorded, not raised."""
         return [s for s in self._runs.values() if s.state == "failed"]
 
-    async def tick(self, t, scheduled_at):  # pragma: no cover - cron is deferred (B7/B8)
-        raise NotImplementedError("cron ticks land with durable timers (B7/B8)")
+    async def tick(self, t: TriggerId, scheduled_at: datetime) -> RunId | None:
+        """Fire a cron tick for trigger `t` (a workflow's `on: cron(...)` entry step id): build
+        the tick event (`scheduled_at` + `last_run`) and instantiate a run rooted at that entry.
+
+        Watermark (`last_run`) semantics mirror the poll path's cold start, but advance here
+        rather than in the scheduler: a cron tick has no upstream fetch that can fail, so the
+        tick *fired* the moment we build its event — we record that (advance to `scheduled_at`)
+        before draining. A per-run failure is recorded in history (B12), not a reason to re-fire
+        the same instant; re-scan-on-failure is durable-retry territory (B9/B10), deferred.
+
+        Returns the run started, or None if no workflow has a cron entry with id `t`. In the
+        server, the background `serve()` consumer may win the drain (the guard makes this a
+        no-op that returns None) — the run still executes and the watermark already advanced."""
+        match = self.manifest.workflow_for_cron(t)
+        if match is None:
+            return None
+        wf_name, entry = match
+        last_run = await self.state.get_watermark(t)
+        if last_run is None and entry.trigger and entry.trigger.expr:  # cold start: one window back
+            last_run = cron_prev(entry.trigger.expr, scheduled_at, entry.trigger.tz)
+        self._event_seq += 1
+        event = Event(
+            name=f"cron:{t}",
+            fields={"scheduled_at": scheduled_at, "last_run": last_run},
+            id=f"tick-{t}-{scheduled_at.isoformat()}",
+            emitted_at=scheduled_at,
+        )
+        await self.state.set_watermark(t, scheduled_at)  # the tick fired
+        self._queue.append((wf_name, event))
+        self._work.set()
+        return await self._drain()
 
     async def resume(self, run_id):  # pragma: no cover - durability deferred (B10)
         raise NotImplementedError("resume requires a durable StateStore (B10)")
