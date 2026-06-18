@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>loopy auth github — Manifest Flow</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2330;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #2f81f7;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --purple: #a371f7;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(1200px 600px at 50% -10%, #16203a 0%, var(--bg) 55%);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.55;
+    padding: 48px 20px 80px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 8px; }
+  header h1 {
+    font-size: 30px; margin: 0 0 6px;
+    font-family: var(--mono); letter-spacing: -0.5px;
+  }
+  header h1 .cmd { color: var(--accent); }
+  header p.sub { color: var(--muted); margin: 0 0 4px; font-size: 16px; }
+  .badges { display: flex; gap: 8px; justify-content: center; margin: 14px 0 40px; flex-wrap: wrap; }
+  .badge {
+    font-family: var(--mono); font-size: 12px; padding: 4px 10px;
+    border: 1px solid var(--border); border-radius: 999px; color: var(--muted);
+    background: var(--panel);
+  }
+  .badge.ok { color: var(--green); border-color: #2ea04340; }
+
+  /* the vertical flow rail */
+  .flow { position: relative; padding-left: 56px; }
+  .flow::before {
+    content: ""; position: absolute; left: 19px; top: 6px; bottom: 40px;
+    width: 2px; background: linear-gradient(var(--accent), var(--purple), var(--green));
+    opacity: 0.45;
+  }
+  .step { position: relative; margin-bottom: 30px; }
+  .step .dot {
+    position: absolute; left: -56px; top: 0;
+    width: 40px; height: 40px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--panel); border: 2px solid var(--accent);
+    font-family: var(--mono); font-weight: 700; font-size: 15px; color: var(--accent);
+    z-index: 1;
+  }
+  .step.actor-github .dot { border-color: var(--purple); color: var(--purple); }
+  .step.actor-done .dot { border-color: var(--green); color: var(--green); }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+  }
+  .card .head {
+    padding: 12px 16px; display: flex; align-items: center; gap: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .card .head h3 { margin: 0; font-size: 16px; }
+  .who {
+    margin-left: auto; font-family: var(--mono); font-size: 11px;
+    padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+  }
+  .who.cli { background: #2f81f71a; color: var(--accent); }
+  .who.browser { background: #a371f71a; color: var(--purple); }
+  .who.github { background: #a371f71a; color: var(--purple); }
+  .who.local { background: #3fb9501a; color: var(--green); }
+  .card .body { padding: 14px 16px; font-size: 14.5px; color: var(--text); }
+  .card .body p { margin: 0 0 8px; }
+  .card .body p:last-child { margin-bottom: 0; }
+  .muted { color: var(--muted); }
+  code.k { font-family: var(--mono); color: #ffa657; background: #ffa6571a; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+
+  /* mock terminal */
+  .term, .mock {
+    margin-top: 12px; border-radius: 8px; overflow: hidden;
+    border: 1px solid var(--border); font-family: var(--mono); font-size: 12.5px;
+  }
+  .chrome {
+    display: flex; align-items: center; gap: 6px; padding: 7px 10px;
+    background: var(--panel-2); border-bottom: 1px solid var(--border);
+  }
+  .chrome .lights { display: flex; gap: 6px; }
+  .chrome .lights i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .chrome .lights i:nth-child(1){ background:#ff5f56; }
+  .chrome .lights i:nth-child(2){ background:#ffbd2e; }
+  .chrome .lights i:nth-child(3){ background:#27c93f; }
+  .chrome .title { color: var(--muted); font-size: 11.5px; margin-left: 4px; }
+  .chrome .url {
+    flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 3px 10px; color: var(--muted); font-size: 11.5px; margin-left: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .term .screen { background: #010409; padding: 12px 14px; color: #d1d7e0; white-space: pre-wrap; }
+  .term .screen .p { color: var(--green); }
+  .term .screen .c { color: #79c0ff; }
+  .term .screen .g { color: var(--muted); }
+  .term .screen .ok { color: var(--green); }
+  .term .screen .warn { color: var(--yellow); }
+
+  .mock .screen { background: #ffffff; color: #1f2328; padding: 18px; }
+  .gh-card {
+    border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; max-width: 460px; margin: 0 auto;
+    font-family: var(--sans);
+  }
+  .gh-card h4 { margin: 0 0 4px; font-size: 16px; color: #1f2328; }
+  .gh-card .perm { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eaeef2; font-size: 13px; }
+  .gh-card .perm:last-of-type { border-bottom: none; }
+  .gh-card .perm b { font-weight: 600; }
+  .gh-card .perm .lvl { color: #57606a; font-family: var(--mono); font-size: 12px; }
+  .gh-btn {
+    display: inline-block; margin-top: 12px; background: #1f883d; color: #fff;
+    border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; border: 0;
+  }
+  .gh-btn.secondary { background: #f6f8fa; color: #1f2328; border: 1px solid #d0d7de; }
+
+  .data-flow {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px;
+    font-family: var(--mono); font-size: 12px;
+  }
+  .pill { padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-2); }
+  .pill.key { color: var(--yellow); border-color: #d2992240; }
+  .pill.tok { color: var(--green); border-color: #3fb95040; }
+  .arrow { color: var(--muted); }
+
+  .note {
+    margin-top: 10px; padding: 10px 12px; border-left: 3px solid var(--accent);
+    background: #2f81f70d; border-radius: 0 6px 6px 0; font-size: 13px; color: var(--muted);
+  }
+  .note.warn { border-left-color: var(--yellow); background: #d299220d; }
+  .note.green { border-left-color: var(--green); background: #3fb9500d; }
+  .note b { color: var(--text); }
+
+  /* trust boundary diagram */
+  .trust { margin: 48px 0 0; }
+  .trust h2 { font-size: 20px; margin: 0 0 16px; text-align: center; }
+  .boundary {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
+  }
+  .zone { border: 1px solid var(--border); border-radius: 12px; padding: 16px; background: var(--panel); }
+  .zone.control { border-color: #d2992240; }
+  .zone.sandbox { border-color: #3fb95040; }
+  .zone h3 { margin: 0 0 4px; font-size: 15px; }
+  .zone .tag { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .zone ul { margin: 12px 0 0; padding-left: 18px; font-size: 13.5px; }
+  .zone li { margin-bottom: 6px; }
+  .zone .secret { color: var(--yellow); font-family: var(--mono); font-size: 12.5px; }
+  .zone .ephem { color: var(--green); font-family: var(--mono); font-size: 12.5px; }
+  .cross {
+    text-align: center; margin: 14px 0 0; font-size: 13px; color: var(--muted);
+  }
+  .cross .ok { color: var(--green); }
+  .cross .no { color: #f85149; }
+
+  footer { margin-top: 48px; text-align: center; color: var(--muted); font-size: 12.5px; }
+  footer code { font-family: var(--mono); color: #ffa657; }
+
+  @media (max-width: 680px) {
+    .boundary { grid-template-columns: 1fr; }
+    .flow { padding-left: 44px; }
+    .step .dot { left: -44px; width: 34px; height: 34px; }
+    .flow::before { left: 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1><span class="cmd">loopy auth github</span></h1>
+    <p class="sub">One-command GitHub App onboarding — the manifest flow</p>
+    <p class="sub muted" style="font-size:13px">Bring-your-own GitHub App · no central app · no persistent server</p>
+    <div class="badges">
+      <span class="badge">~2 clicks</span>
+      <span class="badge ok">serverless</span>
+      <span class="badge ok">private key never enters sandbox</span>
+      <span class="badge">status: draft</span>
+    </div>
+  </header>
+
+  <div class="flow">
+
+    <!-- STEP 1 -->
+    <div class="step actor-cli">
+      <div class="dot">1</div>
+      <div class="card">
+        <div class="head">
+          <h3>Run the command &amp; build a manifest</h3>
+          <span class="who cli">CLI · local</span>
+        </div>
+        <div class="body">
+          <p>The CLI assembles a GitHub App <b>manifest</b> (name, minimal permissions, no webhook) and
+             starts a one-shot <code class="k">127.0.0.1</code> callback listener — the <code class="k">gh auth login</code> pattern.</p>
+          <div class="term">
+            <div class="chrome"><div class="lights"><i></i><i></i><i></i></div><span class="title">zsh — loopy</span></div>
+            <div class="screen"><span class="p">$</span> <span class="c">loopy auth github</span> <span class="g">--org acme-labs</span>
+
+<span class="g">→</span> building app manifest (contents:write, pull_requests:write, metadata:read)
+<span class="g">→</span> listening on http://127.0.0.1:<span class="c">8765</span>/callback  <span class="g">(one-shot)</span>
+<span class="g">→</span> opening browser to create the app…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 2 -->
+    <div class="step actor-cli">
+      <div class="dot">2</div>
+      <div class="card">
+        <div class="head">
+          <h3>Browser auto-submits the manifest to GitHub</h3>
+          <span class="who browser">browser · local page</span>
+        </div>
+        <div class="body">
+          <p>A tiny locally-served HTML page auto-submits a form, POSTing the manifest to GitHub's
+             create-app URL. The user doesn't fill anything in.</p>
+          <div class="mock">
+            <div class="chrome"><div class="lights"><i></i><i></i><i></i></div><span class="url">127.0.0.1:8765/start  →  github.com/organizations/acme-labs/settings/apps/new</span></div>
+            <div class="screen">
+              <div style="text-align:center;color:#57606a;font-family:var(--mono);font-size:13px;padding:18px">
+                ⟳ Redirecting you to GitHub to create the app…<br>
+                <span style="font-size:11px">(form auto-submits the manifest)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 3 -->
+    <div class="step actor-github">
+      <div class="dot">3</div>
+      <div class="card">
+        <div class="head">
+          <h3>GitHub shows the create-app confirmation</h3>
+          <span class="who github">github.com</span>
+        </div>
+        <div class="body">
+          <p>GitHub renders a pre-filled confirmation from the manifest. The user clicks once to create
+             the App <b>under their own account/org</b> — loopy owns nothing.</p>
+          <div class="mock">
+            <div class="chrome"><div class="lights"><i></i><i></i><i></i></div><span class="url">https://github.com/organizations/acme-labs/settings/apps/new?...</span></div>
+            <div class="screen">
+              <div class="gh-card">
+                <h4>Create GitHub App: <span style="color:#0969da">loopy-acme-labs</span></h4>
+                <p style="font-size:12px;color:#57606a;margin:2px 0 12px">Owned by acme-labs · private · no webhook</p>
+                <div class="perm"><b>Repository contents</b><span class="lvl">Read &amp; write</span></div>
+                <div class="perm"><b>Pull requests</b><span class="lvl">Read &amp; write</span></div>
+                <div class="perm"><b>Metadata</b><span class="lvl">Read-only</span></div>
+                <button class="gh-btn">Create GitHub App</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 4 -->
+    <div class="step actor-cli">
+      <div class="dot">4</div>
+      <div class="card">
+        <div class="head">
+          <h3>Redirect back &amp; exchange the temporary code</h3>
+          <span class="who cli">CLI · GitHub API</span>
+        </div>
+        <div class="body">
+          <p>GitHub redirects to the local callback with a temporary <code class="k">?code=</code>. The CLI
+             exchanges it for the App's permanent credentials.</p>
+          <div class="data-flow">
+            <span class="pill">?code=abc123</span>
+            <span class="arrow">──▶</span>
+            <span class="pill">POST /app-manifests/{code}/conversions</span>
+            <span class="arrow">──▶</span>
+            <span class="pill key">{ id, pem, client_id }</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 5 -->
+    <div class="step actor-done">
+      <div class="dot">5</div>
+      <div class="card">
+        <div class="head">
+          <h3>Persist credentials locally</h3>
+          <span class="who local">control-plane · local</span>
+        </div>
+        <div class="body">
+          <p>The private key is written to a gitignored file (mode <code class="k">0600</code>); the app id and
+             key-file path are merged into the existing <code class="k">loopy.env</code>.</p>
+          <div class="term">
+            <div class="chrome"><div class="lights"><i></i><i></i><i></i></div><span class="title">written to disk</span></div>
+            <div class="screen"><span class="ok">✓</span> .loopy/github-app.pem        <span class="g">(0600, gitignored)</span>
+<span class="ok">✓</span> loopy.env
+    <span class="c">GITHUB_APP_ID</span>=1234567
+    <span class="c">GITHUB_APP_PRIVATE_KEY_FILE</span>=.loopy/github-app.pem
+<span class="ok">✓</span> .gitignore  <span class="g">(+ .loopy/)</span></div>
+          </div>
+          <div class="note warn"><b>Note:</b> the App still exists but isn't <i>installed</i> on any repos yet — the manifest creates, it doesn't install.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 6 -->
+    <div class="step actor-github">
+      <div class="dot">6</div>
+      <div class="card">
+        <div class="head">
+          <h3>Guide installation — pick the repos</h3>
+          <span class="who github">github.com</span>
+        </div>
+        <div class="body">
+          <p>The CLI prints (and optionally opens) the install URL so the user chooses exactly which
+             repos the App can touch.</p>
+          <div class="mock">
+            <div class="chrome"><div class="lights"><i></i><i></i><i></i></div><span class="url">https://github.com/apps/loopy-acme-labs/installations/new</span></div>
+            <div class="screen">
+              <div class="gh-card">
+                <h4>Install loopy-acme-labs</h4>
+                <p style="font-size:13px;color:#57606a;margin:4px 0 10px">Where do you want to install this app?</p>
+                <div class="perm"><b>○ All repositories</b><span class="lvl"></span></div>
+                <div class="perm"><b>● Only select repositories</b><span class="lvl">acme-labs/api, acme-labs/web</span></div>
+                <button class="gh-btn">Install</button>
+                <button class="gh-btn secondary">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 7 -->
+    <div class="step actor-done">
+      <div class="dot">7</div>
+      <div class="card">
+        <div class="head">
+          <h3>Verify — mint a token, get a green check</h3>
+          <span class="who local">CLI · GitHub API</span>
+        </div>
+        <div class="body">
+          <p>Best-effort: the CLI mints a scoped installation token from the stored key and reports what it can see.</p>
+          <div class="term">
+            <div class="chrome"><div class="lights"><i></i><i></i><i></i></div><span class="title">loopy auth status</span></div>
+            <div class="screen"><span class="p">$</span> <span class="c">loopy auth github</span>  <span class="g"># final verify step</span>
+
+<span class="ok">✓</span> minted installation token  <span class="g">(repo-scoped, ~1h)</span>
+<span class="ok">✓</span> installation #4815 can access 2 repos:
+    acme-labs/api
+    acme-labs/web
+
+<span class="ok">✓ GitHub App ready.</span> loopy can now mint short-lived tokens for agents.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /flow -->
+
+  <!-- TRUST BOUNDARY -->
+  <div class="trust">
+    <h2>Why an App, not a PAT — the trust boundary</h2>
+    <div class="boundary">
+      <div class="zone control">
+        <h3>🔐 Control-plane <span class="tag">(your machine)</span></h3>
+        <p class="tag">long-lived secret lives here, only here</p>
+        <ul>
+          <li><span class="secret">github-app.pem</span> — the App private key</li>
+          <li>Mints JWTs (RS256, ~9&nbsp;min)</li>
+          <li>Exchanges JWT → installation token</li>
+        </ul>
+      </div>
+      <div class="zone sandbox">
+        <h3>📦 Sandbox <span class="tag">(where agents run)</span></h3>
+        <p class="tag">only ephemeral, repo-scoped creds enter</p>
+        <ul>
+          <li><span class="ephem">installation token</span> — short-lived, ~1h</li>
+          <li>Scoped to selected repos only</li>
+          <li>Used for clone / push / open PR</li>
+        </ul>
+      </div>
+    </div>
+    <div class="cross">
+      <span class="no">✗</span> private key never crosses into the sandbox &nbsp;·&nbsp;
+      <span class="ok">✓</span> only the disposable token does
+    </div>
+  </div>
+
+  <footer>
+    Visualizes <code>plans/future/repo-access/2026-06-18-loopy-auth-github.md</code> · status: draft<br>
+    Token minting &amp; sandbox injection (the <code>TokenProvider</code>) are a deferred next milestone.
+  </footer>
+
+</div>
+</body>
+</html>
