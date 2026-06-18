@@ -121,29 +121,44 @@ def run(
             continue
         scheduler.register(sensor.name, interval, poll_fn)
 
+    # Cron entry steps (`on: cron(...)`) ride the same scheduler: each fires `runtime.tick`,
+    # which instantiates a run rooted at that entry (no event/bus — the tick *is* the trigger).
+    for _wf_name, entry in m.cron_entries():
+        if not entry.trigger or not entry.trigger.expr:
+            continue
+
+        def _fire(scheduled_at, _id=entry.id):  # bind entry.id per-iteration
+            return runtime.tick(_id, scheduled_at)
+
+        scheduler.register_cron(entry.id, entry.trigger.expr, entry.trigger.tz, _fire)
+
     if sensor_runner.webhook_paths:
         typer.echo(
             f"serving {len(sensor_runner.webhook_paths)} webhook(s) on {host}:{port}: "
             f"{', '.join(sensor_runner.webhook_paths)}"
         )
     else:
-        typer.echo("no webhook sensors; web server not started (poll-only)")
+        typer.echo("no webhook sensors; web server not started (poll/cron-only)")
     typer.echo(
         f"polling {len(scheduler.poll_names)} sensor(s): "
         f"{', '.join(scheduler.poll_names) or '(none)'}"
+    )
+    typer.echo(
+        f"cron triggers ({len(scheduler.cron_names)}): "
+        f"{', '.join(scheduler.cron_names) or '(none)'}"
     )
     typer.echo(f"event bus: {bus}" + (f" ({redis_url})" if bus == "redis" else ""))
 
     async def _serve() -> None:  # pragma: no cover - exercised by running the server
         consumer = asyncio.create_task(runtime.serve())  # drain runs in the background
         broker = asyncio.create_task(event_bus.run())  # networked bus consume loop (no-op inproc)
-        poller = asyncio.create_task(scheduler.start())  # poll sensors fire on their tasks
+        poller = asyncio.create_task(scheduler.start())  # poll + cron triggers fire on their tasks
         background = [consumer, broker, poller]
         try:
             if sensor_runner.webhook_paths:
                 await sensor_runner.start(host, port)  # uvicorn owns the foreground
             else:
-                # Poll-only (or no sensors): no inbound HTTP, so don't spin up uvicorn —
+                # Poll/cron-only (or no sensors): no inbound HTTP, so don't spin up uvicorn —
                 # stay alive on the background tasks (the scheduler/consumer) until cancelled.
                 await asyncio.gather(*background)
         finally:

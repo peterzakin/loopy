@@ -125,6 +125,25 @@ class Manifest(_Model):
                     return wf_name, entry
         return None
 
+    def workflow_for_cron(self, trigger_id: str) -> tuple[str, StepSpec] | None:
+        """The (workflow_name, entry_step) whose cron entry has id `trigger_id`, if any. The
+        cron trigger is keyed by its entry step id (one cron entry per workflow)."""
+        for wf_name, wf in self.workflows.items():
+            entry = wf.steps.get(wf.entry) if wf.entry else None
+            if entry and entry.trigger and entry.trigger.kind == "cron" and entry.id == trigger_id:
+                return wf_name, entry
+        return None
+
+    def cron_entries(self) -> list[tuple[str, StepSpec]]:
+        """Every workflow's cron entry step, as (workflow_name, entry_step). For wiring the
+        scheduler at startup."""
+        out: list[tuple[str, StepSpec]] = []
+        for wf_name, wf in self.workflows.items():
+            entry = wf.steps.get(wf.entry) if wf.entry else None
+            if entry and entry.trigger and entry.trigger.kind == "cron":
+                out.append((wf_name, entry))
+        return out
+
 
 def load_manifest(path: str | Path) -> Manifest:
     return Manifest.model_validate(json.loads(Path(path).read_text()))
