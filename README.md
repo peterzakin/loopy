@@ -95,6 +95,8 @@ more agents and events.)
 
 ```yaml
 # Defaults — every agent inherits these; override a field only when needed.
+# `harness.runtime` picks the agent runner: `claude-code` (Claude Code, claude-* models) or
+# `codex` (OpenAI Codex, gpt-*/o-series/codex-* models). Model must match the runtime.
 defaults:
   agent:
     sandbox: default
@@ -114,6 +116,7 @@ agents:
   Fixer:        { harness: { model: claude-opus-4-8 }, tools: [open_pr], skills: [testing] }
   Reviewer:     { tools: [run_evals], skills: [rubrics/fix-quality] }   # a judge — no write tools
   Releaser:     { tools: [merge_pr, set_flags], skills: [rollout] }
+  Scout:        { harness: { runtime: codex, model: gpt-5 }, skills: [triage] }   # runs on OpenAI Codex
 
 # Events — the bus contract. A step's `on:` may only name an event registered here.
 # Typed field maps.

@@ -115,7 +115,7 @@ modular" = swap the `Runtime`; the rest give modularity along orthogonal axes.
 |---|---|---|---|
 | **`Runtime`** | Orchestration: walk the DAG, schedule steps, record outputs, drive timers, resume. The durable-execution core. | B1–B3, B7, B10, B11 | InMemory · DurableLite (sqlite/pg) · Temporal adapter |
 | **`StateStore`** | Persist run history (event-sourced log), step outputs, watermarks (`last_run`). | B8, B10, B11 | dict (in-mem) · SQLite · Postgres · Temporal history |
-| **`AgentHarness`** | Run a step's prose against a model + tools + skills inside a sandbox; return structured output. | B4 | claude-code runtime · (future: other runtimes) |
+| **`AgentHarness`** | Run a step's prose against a model + tools + skills inside a sandbox; return structured output. | B4 | claude-code (Claude Code) · codex (OpenAI Codex) |
 | **`SandboxProvider`** | Provision compute + egress from a sandbox spec (image build, network allowlist). | B4 | Daytona · local subprocess · container |
 | **`EventBus`** | Route registered events to `on:` subscribers. In-proc = single machine; networked = distributed. | B5 | in-process · **Redis (Streams)** · NATS · Kafka |
 | **`SensorRunner`** | The **language-pluggable** ingress edge: hosts + runs the developer's `@sensor` code, normalizes returns into `Event`s, and delivers them to the `EventReceiver`. Stateless. | B1 (ingress) | Python (FastAPI) · (future) Node/TS |
@@ -431,7 +431,7 @@ are frontend-validated, execution is backend.
 | **5** | `loopy compile` → **manifest** (+ sensor compile checks) | frontend |
 | **6** | Define backend interfaces (§3.2) + manifest schema v1 | boundary |
 | **7** | **InMemory backend** — satisfies B1–B6, stubs B7/B10; prove README example end-to-end | backend |
-| **8** | `AgentHarness` (claude-code) + `SandboxProvider` (daytona) behind interfaces | backend |
+| **8** | `AgentHarness` (claude-code, codex) + `SandboxProvider` (daytona) behind interfaces | backend |
 | **9** | `SensorRunner` (webhook) + `EventBus` | backend |
 | **10** | Cron triggers + watermarks (B7, B8) | backend |
 | **11** | **DurableLite backend** — event-sourced StateStore, retries, durable timers (B7–B11) | backend |
@@ -517,7 +517,9 @@ mapping, not the plumbing.
 
 1. **`AgentHarness` = Claude Agent SDK (`claude-agent-sdk`).** The README's `harness.runtime:
    claude-code` maps directly onto it — tool loop, subagents, MCP, **skills**, human-in-the-loop.
-   `tools:`/`skills:` registry fields become SDK config. Do not build an agent loop.
+   `tools:`/`skills:` registry fields become SDK config. Do not build an agent loop. The `codex`
+   runtime (OpenAI's headless `codex exec`) is a sibling behind the same interface — pick it per
+   agent with `harness.runtime: codex` and an OpenAI model.
 2. **`DurableLite` ≈ DBOS, not hand-built.** DBOS is a Postgres-backed durable-execution
    *library* (no cluster) — matches loopy's self-contained aesthetic and delivers B7–B11 for free.
    Revises Phase 11 from "reimplement event-sourcing" to "map manifest steps onto DBOS

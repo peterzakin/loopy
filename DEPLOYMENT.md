@@ -404,7 +404,7 @@ What you actually need in place for a successful run, in order:
    alongside it (needed only for sensor module source + `env_file`s).
 3. **Agent secrets, as sandbox `env_file`s.** Each sandbox's `env_file` must exist under the
    project root and contain the keys the harness needs — at minimum the model API key for the
-   agent's runtime (e.g. `ANTHROPIC_API_KEY` for `claude-code`). The runtime refuses to start a
+   agent's runtime (`ANTHROPIC_API_KEY` for `claude-code`, `OPENAI_API_KEY` for `codex`). The runtime refuses to start a
    step if its sandbox can't supply the harness's required keys, and refuses `env_file` paths that
    escape the root.
 4. **Sensor secrets, as `sensors/.env`.** Credentials an in-process `@sensor` needs (a poll API
