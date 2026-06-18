@@ -66,5 +66,9 @@ Open backend work clusters into the items above: **B7 + B10** (+ remaining B6/B8
 
 - Sensor-ingress Stage 3: HTTP `POST /events` intake, producer auth, contract distribution to
   remote sensors — deferred until a real developer-hosted consumer exists.
+- Sensor-secret scoping: per-sensor `env_file` references and isolating sensor secrets from the
+  engine's process env. Shipped the runner-wide `sensors/.env` (`load_sensor_env`, merged into
+  `os.environ` at `loopy run`); finer-grained, isolated delivery is deferred to the same boundary
+  as producer auth (when sensors externalize / go polyglot). See `ARCHITECTURE.md` §6.
 - Cumulative wall-clock cap, runtime pricing table + `per_model` breakdown, declared
   (frontmatter/registry) cascade budgets — see the cost-budget plan's non-goals.

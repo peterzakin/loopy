@@ -212,6 +212,7 @@ effects originate from the <code>Sandbox</code> and are governed by its <code>ne
   <tr><td><strong>AgentHarness</strong></td><td>Runs a step's prose against its agent (model + tools + skills); validates against the typed <code>output:</code>/<code>emits:</code>.</td><td><code>ClaudeCodeHarness</code> — runs headless <code>claude -p … --output-format json</code> <em>inside the sandbox</em>, parses the envelope, feeds <code>total_cost_usd</code> to the budget enforcer.</td></tr>
   <tr><td><strong>SandboxProvider</strong></td><td>Provisions compute + egress from the sandbox spec (image build + <code>network:</code> allowlist). The trust boundary.</td><td><code>local</code> (subprocess, dev) or <code>daytona</code> (isolated cloud container). Selected with <code>--sandbox</code>.</td></tr>
   <tr><td><strong>Secrets</strong></td><td>Resolves a sandbox's <code>env_file</code>(s) at run time and injects them into the sandbox. Never in the manifest, never logged.</td><td><code>EnvFileSecretsResolver</code> — reads dotenv relative to the project root; refuses paths that escape it.</td></tr>
+  <tr><td><strong>Sensor secrets</strong></td><td>Supplies credentials to in-process <code>@sensor</code> functions (poll + webhook).</td><td>A single runner-wide <code>sensors/.env</code> (<code>load_sensor_env</code>) merged into the process env at <code>loopy run</code>, so sensors read them via <code>os.environ</code>. Optional, gitignored, never in the manifest.</td></tr>
   <tr><td><strong>StateStore</strong></td><td>Run history (event-sourced), step outputs, poll watermarks (<code>last_run</code>), event-id dedupe.</td><td><code>InMemoryStateStore</code> — process-lifetime only. Now actively used: poll watermarks and the Redis bus's at-least-once dedupe.</td></tr>
   <tr><td><strong>RetryPolicy</strong></td><td>Wraps side-effecting calls with backoff + idempotency key (<code>run_id:step_id</code>) so retries/replays don't double-fire.</td><td><code>ExponentialBackoffRetry</code>; budget trips are terminal.</td></tr>
 </table>
@@ -463,13 +464,18 @@ are reserved for B10/B-cost and not yet read.</p>
     the DAG is acyclic, every sensor declares a registered <code>emits</code>. Run it in CI.</li>
   <li><strong>The manifest, shipped.</strong> <code>manifest.json</code> is the deploy artifact; carry the
     project root alongside it (for sensor source + <code>env_file</code>s).</li>
-  <li><strong>Secrets, as <code>env_file</code>s.</strong> Each sandbox's <code>env_file</code> must exist under
+  <li><strong>Agent secrets, as sandbox <code>env_file</code>s.</strong> Each sandbox's <code>env_file</code> must exist under
     the project root and hold the keys the harness needs — at minimum the model API key
     (<code>ANTHROPIC_API_KEY</code> for <code>claude-code</code>). The runtime refuses to start a step whose
     sandbox can't supply the harness's required keys, and refuses paths that escape the root.</li>
-  <li><strong>Sandbox access.</strong> For <code>--sandbox daytona</code>: <code>DAYTONA_API_KEY</code> /
-    <code>DAYTONA_API_URL</code> in the server env, and <code>loopy-core[daytona]</code> installed.
-    For <code>--sandbox local</code>: nothing — but agents run as host subprocesses, so it's dev-only.</li>
+  <li><strong>Sensor secrets, as <code>sensors/.env</code>.</strong> Credentials an in-process <code>@sensor</code> needs
+    (a poll API key, a webhook-signing secret) go in a single runner-wide <code>sensors/.env</code> under the
+    project root; <code>loopy run</code> merges them into the process env (non-override) so sensors read them via
+    <code>os.environ</code>. Optional and gitignored. Keep infra creds (<code>DAYTONA_API_KEY</code>, <code>REDIS_URL</code>)
+    out of it — those are the server's own env.</li>
+  <li><strong>Sandbox + infra access.</strong> For <code>--sandbox daytona</code>: <code>DAYTONA_API_KEY</code> /
+    <code>DAYTONA_API_URL</code> in the server env, and <code>loopy-core[daytona]</code> installed. For <code>--bus redis</code>:
+    a reachable <code>--redis-url</code>. For <code>--sandbox local</code>: nothing — but agents run as host subprocesses, so it's dev-only.</li>
   <li><strong>Egress allowlist.</strong> Each sandbox's <code>network:</code> list is the egress contract — it
     must include every host an agent's tools reach (e.g. <code>github.com</code> for <code>open_pr</code>),
     and the model API endpoint must be reachable from inside the sandbox.</li>

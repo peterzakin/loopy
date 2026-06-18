@@ -454,7 +454,17 @@ workflow `.md`.
   *recorded* values in the StateStore and replayed — never re-derived. (Temporal's
   Workflow/Activity discipline, applied even to the hand-built backend.)
 - **Secrets / egress:** sandbox `network:` allowlist is the egress contract; secrets injected per
-  agent, never in the manifest.
+  agent, never in the manifest. Two secret surfaces, one principle (resolve at the point of
+  execution, never serialize):
+  - **Agent/workload secrets** — defined at the **sandbox** (`env_file` reference), resolved by a
+    `SecretsResolver` at run time, injected as the sandbox's `env_vars` (the trust boundary).
+  - **Sensor secrets** — a single runner-wide **`sensors/.env`** (`load_sensor_env`), merged into
+    the engine's process env at `loopy run` so in-process `@sensor` functions read them via
+    `os.environ`. Sensors are in-repo and trusted-by-co-location today, so they share the process
+    env rather than carry per-sensor references; keep **infra creds** (`DAYTONA_API_KEY`,
+    `REDIS_URL` — read from process env by the engine itself) *out* of this file. Per-sensor
+    `env_file` scoping and isolation from the engine's process env are deferred until sensors
+    externalize (the same boundary as producer-auth, §3.2).
 - **Runtime config (`loopy.yaml`):** deployment defaults for `loopy run` (the `sensor_server`
   host/port and the `bus` backend) live in an optional `loopy.yaml`, mapping ~1:1 to CLI flags.
   Resolution precedence is **explicit flag > `loopy.yaml` > built-in default**; an absent file
