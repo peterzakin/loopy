@@ -27,13 +27,8 @@ plan/source. When an item ships, check its box (`- [x]`) and strike the heading
 
 ## Secondary
 
-- [ ] **3a. Sensor ingress — `loopy trigger` bypasses the validation gate**
-  — `plans/future/sensor-ingress/2026-06-16-receiver-validation-and-decoupling.md` (open #2)
-  The operator one-shot calls `Runtime.trigger` directly, so `--fields` events skip registry
-  validation. Route it through the receiver, or validate in `trigger`.
-
-- [ ] **3b. Sensor ingress — no terminal-vs-transient failure distinction**
-  — same plan (open #7)
+- [ ] **3. Sensor ingress — no terminal-vs-transient failure distinction**
+  — `plans/future/sensor-ingress/2026-06-16-receiver-validation-and-decoupling.md` (open #7)
   A misconfig becomes a recorded failed run; under `serve()` a server re-produces identical
   failures forever. Add a fail-fast / classify pass for config vs transient errors.
 

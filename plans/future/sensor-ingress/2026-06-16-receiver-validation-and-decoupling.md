@@ -113,9 +113,12 @@ servers, or dev-hosted → the validation gate runs in untrusted code). The spli
 Found during the Stage 1/2 review. **Fixed now:** #1 (run-failure handling) and #3 (webhook 422).
 **Still open** (none block single-node; revisit with the developer-hosted milestone):
 
-- **[open] #2 — `loopy trigger` bypasses the validation gate.** The operator one-shot calls
+- **[wontfix] #2 — `loopy trigger` bypasses the validation gate.** The operator one-shot calls
   `Runtime.trigger` directly, so `--fields` events aren't validated against the registry; only the
-  `EventReceiver` path is. Fix: validate in `trigger`, or route it through the receiver.
+  `EventReceiver` path is. Closed 2026-06-18: `trigger` is a hand-run testing convenience, not a
+  production ingress path, so it's outside the gate's untrusted-producer threat model. Validating
+  there would only be a CLI DX nicety (clearer error on a typo'd `--event`), not a correctness or
+  security fix — not worth tracking.
 - **[open] #4 — validation is structural only.** No `format` enforcement (`loopy-id`, `uri` are just
   "is a string"); extra fields are allowed and flow into the recorded event. Intended; documented so
   no one expects format/strict checks.
