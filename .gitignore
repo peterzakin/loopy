@@ -20,3 +20,4 @@ build/
 loopy.env         # control-plane infra creds (REDIS_URL, DAYTONA_API_KEY/URL)
 **/sensors/.env   # sensor-layer secrets (runner-wide dotenv)
 **/secrets/       # sandbox env_file(s)
+.loopy/           # local state: GitHub App private key (loopy auth github)

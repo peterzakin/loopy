@@ -136,6 +136,18 @@ class SecretsResolver(Protocol):
         ...
 
 
+# ── TokenProvider ─ SCM creds for the sandbox (repo-access milestone) ──────────────────
+@runtime_checkable
+class TokenProvider(Protocol):
+    async def token_env(self, spec: SandboxSpec) -> Mapping[str, str]:
+        """Mint short-lived SCM credentials for this sandbox and return env to inject —
+        the token plus its git credential-helper wiring. The long-lived secret (e.g. a
+        GitHub App private key) stays at the control-plane; only this ephemeral, scoped
+        token crosses into the sandbox. Returns an empty mapping when no SCM creds apply.
+        Merged into the sandbox env after `SecretsResolver`, so it wins on key conflicts."""
+        ...
+
+
 # ── StateStore ─ B8, B10, B11 ───────────────────────────────────────────────────────
 @runtime_checkable
 class StateStore(Protocol):

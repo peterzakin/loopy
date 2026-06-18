@@ -15,7 +15,14 @@ from pathlib import Path
 
 import typer
 
+from loopy_cli.auth import auth_app
+
 app = typer.Typer(add_completion=False, help="Loopy — compile and run durable agent workflows.")
+
+# `loopy auth ...` — onboarding for external creds (GitHub App manifest flow). The
+# sub-app's heavy imports are deferred into its command bodies, so registering it
+# here keeps `loopy compile` runtime-free.
+app.add_typer(auth_app, name="auth")
 
 
 @app.callback()
@@ -148,6 +155,19 @@ def run(
     if control_env:
         typer.echo(f"loaded {len(control_env)} control-plane var(s) from {root}/loopy.env")
 
+    # SCM token injection: if a GitHub App is configured (via `loopy auth github`), mint a
+    # scoped installation token per step and inject it into the sandbox. The App private key
+    # stays here at the control-plane; only the ephemeral token crosses into the sandbox.
+    from loopy_runtime.scm.github_app import AppCredentials, GitHubAppError
+    from loopy_runtime.scm.token_provider import GitHubAppTokenProvider
+
+    tokens = None
+    try:
+        tokens = GitHubAppTokenProvider(AppCredentials.from_env(os.environ, root=root))
+        typer.echo("github app: minting scoped tokens for sandboxes (key stays control-plane)")
+    except GitHubAppError:
+        pass  # no App configured → no token injection (unchanged behavior)
+
     try:
         cfg = resolve(load_config(config), host=host, port=port, bus=bus)
     except ConfigError as exc:
@@ -175,6 +195,7 @@ def run(
         secrets=EnvFileSecretsResolver(root),
         bus=event_bus,
         state=state,
+        tokens=tokens,
     )
     receiver = LocalEventReceiver(event_bus, m.registry.events)  # shared gate for webhooks + polls
     sensor_runner = FastAPISensorRunner(receiver)

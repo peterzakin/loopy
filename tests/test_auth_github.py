@@ -1,0 +1,187 @@
+"""`loopy auth github` manifest flow — unit coverage with no live network.
+
+Stubs `github_app._request_json` (the module's single network boundary) and
+signs/decodes JWTs with a throwaway RSA key, so nothing here touches GitHub.
+"""
+
+from __future__ import annotations
+
+import stat
+
+import jwt
+import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+
+from loopy_cli import auth
+from loopy_runtime.scm import github_app
+from loopy_runtime.secrets import load_control_plane_env, write_control_plane_env
+
+
+@pytest.fixture(scope="module")
+def rsa_keys() -> tuple[str, str]:
+    """A private/public PEM pair for signing and verifying App JWTs in-process."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    public_pem = (
+        key.public_key()
+        .public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+        .decode()
+    )
+    return private_pem, public_pem
+
+
+# --- manifest shape ---------------------------------------------------------
+
+
+def test_build_manifest_shape():
+    manifest = auth.build_manifest("loopy-acme", "http://127.0.0.1:8765/callback")
+    assert manifest["name"] == "loopy-acme"
+    assert manifest["redirect_url"] == "http://127.0.0.1:8765/callback"
+    assert manifest["public"] is False
+    assert manifest["hook_attributes"] == {"active": False}  # no webhook → serverless
+    assert manifest["default_permissions"] == {
+        "contents": "write",
+        "pull_requests": "write",
+        "metadata": "read",
+    }
+
+
+def test_create_app_url_personal_vs_org():
+    assert auth.create_app_url(None) == "https://github.com/settings/apps/new"
+    assert auth.create_app_url("acme") == "https://github.com/organizations/acme/settings/apps/new"
+
+
+def test_submit_page_embeds_escaped_manifest_and_state():
+    manifest = auth.build_manifest("loopy", "http://127.0.0.1:1/callback")
+    page = auth.render_submit_page(auth.create_app_url("acme"), manifest, "st&te")
+    assert "organizations/acme/settings/apps/new?state=st&amp;te" in page
+    assert "name='manifest'" in page  # the JSON rides a hidden field
+    assert "submit()" in page  # auto-submits via JS
+
+
+# --- write_control_plane_env: merge / idempotency / no-clobber --------------
+
+
+def test_write_env_creates_file(tmp_path):
+    write_control_plane_env(tmp_path, {"GITHUB_APP_ID": "42"})
+    assert load_control_plane_env(tmp_path) == {"GITHUB_APP_ID": "42"}
+
+
+def test_write_env_preserves_comments_and_unrelated_keys(tmp_path):
+    (tmp_path / "loopy.env").write_text("# infra\nREDIS_URL=redis://x\n\nDAYTONA_API_KEY=abc\n")
+    write_control_plane_env(tmp_path, {"GITHUB_APP_ID": "42"})
+    text = (tmp_path / "loopy.env").read_text()
+    assert "# infra" in text  # comment kept
+    assert "REDIS_URL=redis://x" in text  # unrelated key untouched
+    assert "DAYTONA_API_KEY=abc" in text
+    assert "GITHUB_APP_ID=42" in text  # new key appended
+
+
+def test_write_env_updates_in_place_and_is_idempotent(tmp_path):
+    write_control_plane_env(tmp_path, {"GITHUB_APP_ID": "1", "REDIS_URL": "redis://x"})
+    write_control_plane_env(tmp_path, {"GITHUB_APP_ID": "2"})  # rewrite in place
+    first = (tmp_path / "loopy.env").read_text()
+    assert load_control_plane_env(tmp_path) == {"GITHUB_APP_ID": "2", "REDIS_URL": "redis://x"}
+    assert first.count("GITHUB_APP_ID=") == 1  # not duplicated
+    write_control_plane_env(tmp_path, {"GITHUB_APP_ID": "2"})  # same value again
+    assert (tmp_path / "loopy.env").read_text() == first  # no churn
+
+
+# --- JWT claims -------------------------------------------------------------
+
+
+def test_app_jwt_claims(rsa_keys):
+    private_pem, public_pem = rsa_keys
+    creds = github_app.AppCredentials(app_id="98765", private_key_pem=private_pem)
+    token = github_app.app_jwt(creds)
+    decoded = jwt.decode(token, public_pem, algorithms=["RS256"])
+    assert decoded["iss"] == "98765"
+    # ~9-min window, backdated 60s for clock skew → 600s total span.
+    assert decoded["exp"] - decoded["iat"] == 600
+
+
+# --- conversion exchange + credential write ---------------------------------
+
+
+def test_exchange_manifest_code_hits_conversions_endpoint(monkeypatch):
+    seen = {}
+
+    def fake(method, url, **kwargs):
+        seen["method"], seen["url"] = method, url
+        return {"id": 7, "pem": "PEMDATA", "slug": "loopy-acme"}
+
+    monkeypatch.setattr(github_app, "_request_json", fake)
+    result = github_app.exchange_manifest_code("the-code")
+    assert seen["method"] == "POST"
+    assert seen["url"].endswith("/app-manifests/the-code/conversions")
+    assert result["slug"] == "loopy-acme"
+
+
+def test_write_app_credentials_lands_pem_and_env_and_gitignore(tmp_path):
+    conversion = {"id": 1234567, "pem": "-----BEGIN KEY-----\nabc\n-----END\n", "slug": "x"}
+    pem_path = auth.write_app_credentials(tmp_path, conversion)
+
+    assert pem_path == tmp_path / auth.PEM_RELPATH
+    assert pem_path.read_text() == conversion["pem"]
+    assert stat.S_IMODE(pem_path.stat().st_mode) == 0o600  # owner-only
+
+    env = load_control_plane_env(tmp_path)
+    assert env["GITHUB_APP_ID"] == "1234567"
+    assert env["GITHUB_APP_PRIVATE_KEY_FILE"] == auth.PEM_RELPATH
+
+    assert ".loopy/" in (tmp_path / ".gitignore").read_text()
+
+
+def test_credentials_round_trip_from_env(tmp_path):
+    conversion = {"id": 42, "pem": "PEMBODY", "slug": "x"}
+    auth.write_app_credentials(tmp_path, conversion)
+    env = load_control_plane_env(tmp_path)
+    creds = github_app.AppCredentials.from_env(env, root=tmp_path)
+    assert creds.app_id == "42"
+    assert creds.private_key_pem == "PEMBODY"
+
+
+def test_from_env_raises_without_id():
+    with pytest.raises(github_app.MissingCredentials):
+        github_app.AppCredentials.from_env({})
+
+
+# --- token mint request shape (scoped to repos) -----------------------------
+
+
+def test_mint_installation_token_scopes_to_repos(monkeypatch, rsa_keys):
+    private_pem, _ = rsa_keys
+    creds = github_app.AppCredentials(app_id="1", private_key_pem=private_pem)
+    captured = {}
+
+    def fake(method, url, *, headers=None, payload=None):
+        captured.update(method=method, url=url, headers=headers, payload=payload)
+        return {"token": "ghs_xyz", "expires_at": "2026-06-18T12:00:00Z"}
+
+    monkeypatch.setattr(github_app, "_request_json", fake)
+    result = github_app.mint_installation_token(creds, 4815, repositories=["api", "web"])
+
+    assert captured["method"] == "POST"
+    assert captured["url"].endswith("/app/installations/4815/access_tokens")
+    assert captured["payload"] == {"repositories": ["api", "web"]}  # scoped, least privilege
+    assert captured["headers"]["Authorization"].startswith("Bearer ")  # App JWT auth
+    assert result["token"] == "ghs_xyz"
+
+
+def test_mint_installation_token_unscoped_sends_no_body(monkeypatch, rsa_keys):
+    private_pem, _ = rsa_keys
+    creds = github_app.AppCredentials(app_id="1", private_key_pem=private_pem)
+    captured = {}
+
+    def fake(method, url, *, headers=None, payload=None):
+        captured["payload"] = payload
+        return {"token": "t"}
+
+    monkeypatch.setattr(github_app, "_request_json", fake)
+    github_app.mint_installation_token(creds, 1)
+    assert captured["payload"] is None  # whole-installation token when unscoped

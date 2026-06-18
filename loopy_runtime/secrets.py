@@ -88,6 +88,36 @@ def load_sensor_env(root: str | Path) -> dict[str, str]:
     return _parse_dotenv(path.read_text())
 
 
+def write_control_plane_env(root: str | Path, updates: Mapping[str, str]) -> Path:
+    """Merge `updates` into the control-plane dotenv (`loopy.env`), in place.
+
+    Used by onboarding (`loopy auth github`) to land creds without a manual edit.
+    Existing keys are rewritten in place; new keys are appended; comments,
+    blank lines, and unrelated keys are preserved untouched (no clobber).
+    Idempotent — re-running with the same values is a no-op on content. Returns
+    the file path. Values are never logged.
+    """
+    path = Path(root) / CONTROL_PLANE_ENV_FILE
+    existing = path.read_text().splitlines() if path.is_file() else []
+    remaining = dict(updates)
+    lines: list[str] = []
+    for line in existing:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.partition("=")[0].strip()
+            if key in remaining:
+                lines.append(f"{key}={remaining.pop(key)}")
+                continue
+        lines.append(line)
+    lines.extend(f"{key}={value}" for key, value in remaining.items())
+    text = "\n".join(lines)
+    if text and not text.endswith("\n"):
+        text += "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
 def load_control_plane_env(root: str | Path) -> dict[str, str]:
     """Load the control-plane dotenv (`loopy.env` under the project root) into an env map.
 
