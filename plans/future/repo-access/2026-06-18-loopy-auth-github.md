@@ -152,3 +152,16 @@ The browser/callback/manifest orchestration is onboarding-only and lives in the 
 - Tests in `tests/test_auth_github.py` (13) cover manifest shape, the env writer
   (merge/idempotency/no-clobber), JWT claims, conversion+cred-write, and scoped/unscoped token mint;
   no live network. Full suite green (239 passed, 1 pre-existing skip).
+- **Follow-up milestone — runtime token injection — also built** (was a non-goal of this plan):
+  - `loopy_runtime/contract.py`: new `TokenProvider` Protocol (`token_env(spec)`), merged into the
+    sandbox env after `SecretsResolver` so minted creds win on conflict.
+  - `loopy_runtime/scm/token_provider.py`: `GitHubAppTokenProvider` mints a scoped installation
+    token (resolves the sole installation, or an explicit id), caches it until ~2 min before expiry,
+    and returns `git_credential_env()` — `GITHUB_TOKEN` plus a per-host git credential helper via
+    `GIT_CONFIG_*` (token never lands in `git config` output).
+  - `loopy_runtime/runtime/inmemory.py`: optional `tokens=` param; `None` preserves prior behavior.
+  - `loopy_cli/__init__.py`: `loopy run` builds the provider when a GitHub App is configured.
+  - Tests in `tests/test_token_injection.py` (11): git wiring, mint/scope, caching + refresh,
+    install resolution, and the runtime seam reaching the sandbox. Full suite: 250 passed, 1 skipped.
+  - The per-sandbox `repos:` scoping field + `network:`-membership compile check remain deferred;
+    today the token is scoped to the installation (the repos chosen at install time).

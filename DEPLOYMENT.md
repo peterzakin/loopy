@@ -404,9 +404,14 @@ The manifest *creates* the App but does not *install* it, so the command prints 
 visit it to choose exactly which repos the App can touch. The default permissions are the
 fix/PR baseline: `contents: write`, `pull_requests: write`, `metadata: read`.
 
-> **Deferred (next milestone):** the runtime `TokenProvider` that mints a token per run and injects
-> it into the sandbox via a git credential helper. `loopy auth github` lands the creds; wiring them
-> into a running workflow is the following step in this epic.
+**Token injection.** Once an App is configured, `loopy run` mints a short-lived installation token
+per step and injects it into the sandbox — the App private key stays at the control-plane; only the
+ephemeral, scoped token crosses the boundary. The token rides `GITHUB_TOKEN`, and git is wired to it
+via env-based config (a per-host credential helper), so `git clone`/`push` inside the sandbox just
+work. Tokens are cached until shortly before they expire, so a burst of steps shares one mint. With
+no App configured, nothing is injected (unchanged behavior). The token is scoped to the App's
+installation — i.e. the repos you selected at install time — which is the least-privilege boundary
+until a per-sandbox `repos:` field narrows it further (a sibling milestone).
 
 ### C. Durable / distributed — the production target (design-complete, behind the same interfaces)
 

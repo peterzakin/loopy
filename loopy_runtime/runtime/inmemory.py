@@ -51,6 +51,7 @@ class InMemoryRuntime:
         bus,
         retry=None,
         state=None,
+        tokens=None,
         max_iterations: int = 100_000,
     ):
         self.manifest = manifest
@@ -58,6 +59,10 @@ class InMemoryRuntime:
         self.sandboxes = sandboxes
         self.secrets = secrets
         self.bus = bus
+        # Optional SCM TokenProvider: when set, a fresh scoped token is minted and
+        # injected into each sandbox's env (the App key stays at the control-plane).
+        # None preserves the original behavior — no token, no extra network.
+        self.tokens = tokens
         self.retry = retry or ExponentialBackoffRetry()
         self.state = state or InMemoryStateStore()
         # Backstop against an unbounded event loop. The *real* terminator is budgets
@@ -272,7 +277,7 @@ class InMemoryRuntime:
         agent = self.manifest.registry.agents.get(step.agent) if step.agent else None
         sandbox_name = (agent.sandbox if agent and agent.sandbox else "default") or "default"
         spec = self.manifest.registry.sandboxes.get(sandbox_name) or SandboxSpec()
-        secrets = self.secrets.resolve(sandbox_name, spec)
+        secrets = dict(self.secrets.resolve(sandbox_name, spec))
 
         # Provider-key rule: the sandbox must supply whatever keys the harness needs.
         if agent is not None:
@@ -282,6 +287,11 @@ class InMemoryRuntime:
                     f"sandbox '{sandbox_name}' provides no {', '.join(sorted(missing))} "
                     f"required by agent '{step.agent}'"
                 )
+
+        # Mint + inject scoped SCM creds last, so they win over any env_file key and so
+        # the ephemeral token is freshly minted for this step (the App key never enters).
+        if self.tokens is not None:
+            secrets.update(await self.tokens.token_env(spec))
 
         sandbox = await self.sandboxes.acquire(spec, secrets)
         try:
