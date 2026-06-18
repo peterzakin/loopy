@@ -24,29 +24,51 @@ def main() -> None:
 
 
 def _print_workflows(project) -> None:  # noqa: ANN001 - loopy_core.compile.model.Project
-    """Print every compiled workflow (its trigger and steps) to stdout."""
+    """Print every compiled workflow (its trigger and steps) to stdout, with flair."""
     workflows = project.workflows
-    typer.echo(f"workflows ({len(workflows)}):")
+    count = len(workflows)
+    plural = "workflow" if count == 1 else "workflows"
+    typer.echo()
+    typer.echo(typer.style(f"  🔁  Loopy compiled {count} {plural}", fg=typer.colors.CYAN, bold=True))
+    typer.echo(typer.style("  " + "─" * 40, fg=typer.colors.BRIGHT_BLACK))
+
     for name, wf in sorted(workflows.items()):
         entry = wf.steps.get(wf.entry) if wf.entry else None
         trigger = entry.trigger if entry else None
         if trigger and trigger.kind == "event":
-            trig = f"on event {trigger.event}"
+            icon, trig = "⚡", f"on event {trigger.event}"
         elif trigger and trigger.kind == "cron":
-            trig = f"on cron({trigger.expr})"
+            icon, trig = "⏰", f"on cron({trigger.expr})"
         else:
-            trig = "no trigger"
-        typer.echo(f"  {name} — {trig}")
-        for step in wf.steps.values():
-            parts = []
+            icon, trig = "❓", "no trigger"
+
+        typer.echo()
+        typer.echo(
+            f"  {icon}  "
+            + typer.style(name, fg=typer.colors.BRIGHT_WHITE, bold=True)
+            + "  "
+            + typer.style(trig, fg=typer.colors.YELLOW)
+        )
+
+        steps = list(wf.steps.values())
+        for i, step in enumerate(steps):
+            connector = "└─" if i == len(steps) - 1 else "├─"
+            line = "      " + typer.style(connector, fg=typer.colors.BRIGHT_BLACK)
+            line += " " + typer.style(step.name, fg=typer.colors.GREEN)
+            meta = []
             if step.agent:
-                parts.append(f"agent={step.agent}")
+                meta.append("🤖 " + typer.style(step.agent, fg=typer.colors.BLUE))
             if step.after:
-                parts.append(f"after={','.join(step.after)}")
+                meta.append(
+                    typer.style("after ", fg=typer.colors.BRIGHT_BLACK)
+                    + typer.style(", ".join(step.after), fg=typer.colors.CYAN)
+                )
             if step.emits:
-                parts.append(f"emits={','.join(step.emits)}")
-            suffix = f"  ({'; '.join(parts)})" if parts else ""
-            typer.echo(f"    - {step.name}{suffix}")
+                meta.append("📡 " + typer.style(", ".join(step.emits), fg=typer.colors.MAGENTA))
+            if meta:
+                line += typer.style("  ·  ", fg=typer.colors.BRIGHT_BLACK).join([""] + meta)
+            typer.echo(line)
+    typer.echo()
 
 
 @app.command()
