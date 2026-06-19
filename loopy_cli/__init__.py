@@ -162,6 +162,19 @@ def build_runtime(manifest, *, root: Path, sandbox: str, bus, state=None, tokens
     )
 
 
+def _run_record(run_id, runtime, outputs) -> dict:
+    """A JSON-serializable record of a finished `trigger` run: the step order, emitted events,
+    each completed step's output fields, and any recorded run failures. Pure (no I/O) so the
+    CLI's two render paths (human + `--json`) share one shape and it's unit-testable."""
+    return {
+        "run": run_id,
+        "steps": list(runtime.execution_log),
+        "emitted": list(runtime.emitted_log),
+        "outputs": {name: dict(out.fields) for name, out in outputs.items()},
+        "failed": [{"run_id": s.run_id, "error": s.error} for s in runtime.failed_runs],
+    }
+
+
 @app.command()
 def run(
     manifest: Path = typer.Argument(..., help="Path to manifest.json."),
@@ -326,6 +339,9 @@ def trigger(
     no_tokens: bool = typer.Option(
         False, "--no-tokens", help="Skip GitHub App token injection (for fully offline tests)."
     ),
+    as_json: bool = typer.Option(
+        False, "--json", help="Emit the full run record (steps, outputs, emits, failures) as JSON."
+    ),
 ) -> None:
     """Fire one event at the manifest and run the cascade to completion (for testing)."""
     import asyncio
@@ -358,12 +374,25 @@ def trigger(
     if run_id is None:
         typer.echo(f"no workflow subscribes to event '{event}'", err=True)
         raise typer.Exit(code=1)
-    typer.echo(f"run: {run_id}")
-    typer.echo(f"steps: {' -> '.join(runtime.execution_log)}")
-    typer.echo(f"emitted: {', '.join(runtime.emitted_log) or '(none)'}")
-    if runtime.failed_runs:  # a recorded run failure → report and exit non-zero
-        for status in runtime.failed_runs:
-            typer.echo(f"FAILED {status.run_id}: {status.error}", err=True)
+
+    # The per-step outputs are the point of a test run (e.g. a created PR URL), so surface
+    # them — the engine records each completed step's output in the StateStore.
+    outputs = asyncio.run(runtime.state.outputs(run_id))
+    record = _run_record(run_id, runtime, outputs)
+
+    if as_json:
+        typer.echo(json.dumps(record, indent=2, default=str))
+    else:
+        typer.echo(f"run: {record['run']}")
+        typer.echo(f"steps: {' -> '.join(record['steps'])}")
+        typer.echo(f"emitted: {', '.join(record['emitted']) or '(none)'}")
+        for name, fields in record["outputs"].items():
+            if fields:
+                typer.echo(f"output[{name}]: {json.dumps(fields, default=str)}")
+        for status in record["failed"]:  # a recorded run failure → report on stderr
+            typer.echo(f"FAILED {status['run_id']}: {status['error']}", err=True)
+
+    if record["failed"]:
         raise typer.Exit(code=1)
 
 
