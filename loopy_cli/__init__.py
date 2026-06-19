@@ -36,7 +36,8 @@ def _print_workflows(project) -> None:  # noqa: ANN001 - loopy_core.compile.mode
     count = len(workflows)
     plural = "workflow" if count == 1 else "workflows"
     typer.echo()
-    typer.echo(typer.style(f"  🔁  Loopy compiled {count} {plural}", fg=typer.colors.CYAN, bold=True))
+    summary = f"  🔁  Loopy compiled {count} {plural}"
+    typer.echo(typer.style(summary, fg=typer.colors.CYAN, bold=True))
     typer.echo(typer.style("  " + "─" * 40, fg=typer.colors.BRIGHT_BLACK))
 
     for name, wf in sorted(workflows.items()):
