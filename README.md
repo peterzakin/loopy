@@ -109,13 +109,13 @@ sandboxes:
     image: { debian_slim: "3.12", apt: [git], workdir: /home/daytona, user: daytona }
     network: [github.com]
 
-# Agents — a judge = no write tools + run_evals. Tools are plain capability names;
-# numeric caps live in budget, not in the tool name.
+# Agents — capability comes from the sandbox (image + egress), skills, injected creds, and
+# budget; numeric caps live in budget, not in a tool name.
 agents:
   Investigator: { skills: [triage, repro-authoring] }                  # inherits default harness
-  Fixer:        { harness: { model: claude-opus-4-8 }, tools: [open_pr], skills: [testing] }
-  Reviewer:     { tools: [run_evals], skills: [rubrics/fix-quality] }   # a judge — no write tools
-  Releaser:     { tools: [merge_pr, set_flags], skills: [rollout] }
+  Fixer:        { harness: { model: claude-opus-4-8 }, skills: [testing] }
+  Reviewer:     { skills: [rubrics/fix-quality] }                       # a judge — review-only skill
+  Releaser:     { skills: [rollout] }
   Scout:        { harness: { runtime: codex, model: gpt-5 }, skills: [triage] }   # runs on OpenAI Codex
 
 # Events — the bus contract. A step's `on:` may only name an event registered here.

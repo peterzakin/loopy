@@ -15,12 +15,13 @@ sandboxes:
     network: [github.com]
     env_file: secrets/default.env   # referenced, gitignored; resolved by the backend at run time
 
-# Agents — tools are plain capability names; numeric caps live in budget, not the tool name.
+# Agents — capability comes from the sandbox (image + egress), skills, injected creds, and
+# budget; numeric caps live in budget, not in a tool name.
 agents:
   Investigator: { skills: [triage, repro-authoring] }
-  Fixer: { harness: { model: claude-opus-4-8 }, tools: [open_pr], skills: [testing] }
-  Reviewer: { tools: [run_evals], skills: [rubrics/fix-quality] }
-  Releaser: { tools: [merge_pr, set_flags], skills: [rollout] }
+  Fixer: { harness: { model: claude-opus-4-8 }, skills: [testing] }
+  Reviewer: { skills: [rubrics/fix-quality] }
+  Releaser: { skills: [rollout] }
 
 # Events — the bus contract. A step's `on:` may only name an event registered here.
 events:

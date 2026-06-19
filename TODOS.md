@@ -48,16 +48,16 @@ failures debuggable) → 12, 13, 14 (polish)**. A single integration test that r
 
 ### P0 — Correctness (silently breaks real runs)
 
-- [ ] **5. `tools:` becomes `--allowed-tools`, restricting the agent to capability names that aren't real tools**
-  — `loopy_runtime/harness/claude_code.py:27-28`
-  `agent.tools` is passed verbatim to `claude --allowed-tools`, but the registry models tools as plain
-  capability names (`open_pr`, `merge_pr`, `run_evals` — `examples/incidents/registry.yml`). As an
-  allowlist these drop Claude's default `Bash`/`Edit`/`Write`, so the agent silently does nothing; the
-  canonical `incidents` example wouldn't act. Decided approach: **A + B together** — keep defaults
-  (treat `tools:` as additive intent, don't collapse into a bare allowlist that strips defaults) AND
-  validate `tools:` against known capability names at compile time so an unknown name is a loud error,
-  not a silent no-op. Capability→concrete-tool mapping (Option C) is a follow-up once the vocabulary
-  settles. **Pick up first.**
+- [x] ~~**5. `tools:` becomes `--allowed-tools`, restricting the agent to capability names that aren't real tools**~~
+  — `loopy_runtime/harness/claude_code.py`
+  `agent.tools` was passed verbatim to `claude --allowed-tools`, but the registry modeled tools as plain
+  capability names (`open_pr`, `merge_pr`, `run_evals`). As an allowlist these dropped Claude's default
+  `Bash`/`Edit`/`Write`, so the agent silently did nothing. **Resolved by removing the `tools:` field
+  entirely** — both harnesses are tool-heavy and run under bypass, so a capability allowlist did no work
+  (codex already ignored it). Capability now comes from the sandbox (image + egress), `skills:`, injected
+  SCM creds, and `budget`. Removed from the registry schema, manifest schema, both harnesses, the
+  `incidents` example, docs, and golden manifest. A future least-privilege story (restrict an agent's
+  built-in tools) can reintroduce a purpose-built field then.
 
 - [ ] **6. The local sandbox inherits no environment — agents start with an empty env**
   — `loopy_runtime/sandbox/local.py:51-52`
@@ -123,12 +123,11 @@ failures debuggable) → 12, 13, 14 (polish)**. A single integration test that r
   from the process env without being persisted. (Pairs with #7.)
 
 - [ ] **14. Docs/examples assume the Daytona + `run` happy path; the local path is undocumented**
-  The README + `incidents` example imply tokens are auto-injected and agents have capability tools —
-  both untrue on the `trigger`/`local` path (#5, #7, #8). `examples/codefix` was built during the run
-  but never committed, so there's nothing to mirror yet. Fix: commit a `codefix`-style example and add a
-  "Run locally" quickstart documenting the `env_file` needs (`PATH`, `HOME`, `ANTHROPIC_API_KEY`,
-  `GH_TOKEN`) and the no-`tools:` rule, plus a one-command CI smoke test that drives a tiny edit
-  end-to-end.
+  The README + `incidents` example imply tokens are auto-injected on every path — untrue on the
+  `trigger`/`local` path (#7, #8). `examples/codefix` was built during the run but never committed, so
+  there's nothing to mirror yet. Fix: commit a `codefix`-style example and add a "Run locally"
+  quickstart documenting the `env_file` needs (`PATH`, `HOME`, `ANTHROPIC_API_KEY`, `GH_TOKEN`), plus a
+  one-command CI smoke test that drives a tiny edit end-to-end.
 
 ## Backend capability status (B1–B12)
 

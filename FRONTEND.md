@@ -46,7 +46,7 @@ Pydantic models, one module per domain. Sketch (types abbreviated):
 # registry/model.py
 class Sandbox(BaseModel):   name: str; provider: str; image: dict; network: list[str]; span: Span
 class Harness(BaseModel):   runtime: str; model: str
-class Agent(BaseModel):     name: str; harness: Harness; sandbox: str; tools: list[str]; skills: list[str]; span: Span
+class Agent(BaseModel):     name: str; harness: Harness; sandbox: str; skills: list[str]; span: Span
 # field types are plain JSON Schema fragments (dict), not a custom type — see §3
 class Event(BaseModel):     name: str; fields: dict[str, dict]; span: Span
 class Registry(BaseModel):  sandboxes: dict[str,Sandbox]; agents: dict[str,Agent]; events: dict[str,Event]
@@ -255,7 +255,7 @@ content-hashed for caching / change-detection (dbt uses its manifest exactly thi
   "schema_version": "1",
   "registry": {
     "sandboxes": { "default": { "provider": "...", "image": {...}, "network": [...] } },
-    "agents":    { "Investigator": { "harness": {...}, "sandbox": "default", "tools": [...], "skills": [...] } },
+    "agents":    { "Investigator": { "harness": {...}, "sandbox": "default", "skills": [...] } },
     "events":    { "WorkItem": { "fields": { "source": {"type":"string","enum":["sentry","linear","..."]}, "link": {"type":"string","format":"uri"} } } }
   },
   "workflows": {

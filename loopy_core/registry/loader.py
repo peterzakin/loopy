@@ -114,8 +114,7 @@ def _load_agents(ag_map: Mapping, default_agent: Mapping, file: str) -> dict[str
         harness = {**(default_agent.get("harness") or {}), **(body.get("harness") or {})}
         # sandbox: scalar override, else inherit.
         sandbox = body.get("sandbox", default_agent.get("sandbox"))
-        # tools/skills: the agent's own list replaces the default wholesale.
-        tools = list(body["tools"]) if "tools" in body else list(default_agent.get("tools") or [])
+        # skills: the agent's own list replaces the default wholesale (no union).
         skills = (
             list(body["skills"]) if "skills" in body else list(default_agent.get("skills") or [])
         )
@@ -123,7 +122,6 @@ def _load_agents(ag_map: Mapping, default_agent: Mapping, file: str) -> dict[str
             name=name,
             harness=Harness(**harness),
             sandbox=sandbox,
-            tools=tools,
             skills=skills,
             span=span_at(file, _line_of(ag_map, name)),
         )

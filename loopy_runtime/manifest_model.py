@@ -32,7 +32,6 @@ class SandboxSpec(_Model):
 class AgentSpec(_Model):
     harness: HarnessSpec = Field(default_factory=HarnessSpec)
     sandbox: str | None = None
-    tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
 
 

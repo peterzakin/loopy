@@ -50,9 +50,7 @@ def _ctx():
     )
 
 
-AGENT = AgentSpec(
-    harness=HarnessSpec(runtime="codex", model="gpt-5-codex"), tools=["open_pr"]
-)
+AGENT = AgentSpec(harness=HarnessSpec(runtime="codex", model="gpt-5-codex"))
 
 
 def _harness(events=None):

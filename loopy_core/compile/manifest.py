@@ -51,7 +51,6 @@ def _agent(ag: Agent) -> dict:
     return {
         "harness": {"runtime": ag.harness.runtime, "model": ag.harness.model},
         "sandbox": ag.sandbox,
-        "tools": ag.tools,
         "skills": ag.skills,
     }
 

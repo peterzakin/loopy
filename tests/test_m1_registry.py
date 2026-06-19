@@ -36,30 +36,37 @@ def test_defaults_deep_merge_harness_replace_lists(tmp_path):
         "  agent:\n"
         "    sandbox: default\n"
         "    harness: { runtime: claude-code, model: claude-sonnet-4-6 }\n"
-        "    tools: [base_tool]\n"
+        "    skills: [base_skill]\n"
         "sandboxes:\n"
         "  default:\n"
         "    provider: daytona\n"
         "agents:\n"
-        "  Investigator: { skills: [triage] }\n"
-        "  Fixer: { harness: { model: claude-opus-4-8 }, tools: [open_pr] }\n"
+        "  Investigator: {}\n"
+        "  Fixer: { harness: { model: claude-opus-4-8 }, skills: [testing] }\n"
     )
-    write_project(tmp_path, {"registry.yml": registry})
+    write_project(
+        tmp_path,
+        {
+            "registry.yml": registry,
+            "skills/base_skill/SKILL.md": "x",
+            "skills/testing/SKILL.md": "x",
+        },
+    )
     agents = compile_project(tmp_path).project.registry.agents
 
-    # Investigator inherits the whole default harness, sandbox, and tools.
+    # Investigator inherits the whole default harness, sandbox, and skills.
     inv = agents["Investigator"]
     assert inv.harness.runtime == "claude-code"
     assert inv.harness.model == "claude-sonnet-4-6"
     assert inv.sandbox == "default"
-    assert inv.tools == ["base_tool"]
+    assert inv.skills == ["base_skill"]
 
     # Fixer: harness deep-merges (keeps inherited runtime, overrides model);
-    # tools REPLACE the default list (no union).
+    # skills REPLACE the default list (no union).
     fixer = agents["Fixer"]
     assert fixer.harness.runtime == "claude-code"
     assert fixer.harness.model == "claude-opus-4-8"
-    assert fixer.tools == ["open_pr"]
+    assert fixer.skills == ["testing"]
 
 
 def test_type_desugar_table(tmp_path):

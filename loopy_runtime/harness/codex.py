@@ -35,8 +35,7 @@ class CodexHarness(JsonProtocolHarness):
         if agent.harness.model:
             argv += ["--model", agent.harness.model]
         # The loopy sandbox is the boundary, so drop codex's own approval/sandbox layer —
-        # the analogue of claude's `bypassPermissions`. (codex has no per-call allowed-tools
-        # flag, so `agent.tools` are configured in the sandbox image, not on argv.)
+        # the analogue of claude's `bypassPermissions`.
         argv += ["--dangerously-bypass-approvals-and-sandbox"]
         return argv
 
