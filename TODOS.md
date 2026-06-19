@@ -94,25 +94,27 @@ failures debuggable) → 12, 13, 14 (polish)**. A single integration test that r
 
 ### P1 — Observability (when it breaks you're flying blind)
 
-- [ ] **9. `loopy trigger` doesn't print step outputs**
-  — `loopy_cli/__init__.py:320-322`
-  Prints `run`/`steps`/`emitted` only; a step's `output: {pr_url, summary}` is never shown, so the PR
-  URL has to be fished out of the GitHub API. For a test command the outputs are the point. Fix: print
-  each completed step's outputs, or add `--json` to dump the full run record (outputs, emits, per-step
-  status, spend).
+- [x] ~~**9. `loopy trigger` doesn't print step outputs**~~
+  — `loopy_cli/__init__.py`
+  Printed `run`/`steps`/`emitted` only; a step's `output: {pr_url, summary}` was never shown. **Resolved:**
+  `trigger` now prints each completed step's output fields (queried from the StateStore), and a new
+  `--json` flag dumps the full run record (steps, outputs, emits, failures) via a pure, unit-tested
+  `_run_record` helper shared by both render paths.
 
-- [ ] **10. Agent stdout/stderr is discarded on failure**
-  — `loopy_runtime/harness/base.py:73-75` and `:138`
-  Non-zero exit surfaces a one-line `stderr.strip()`; the JSON-parse failure path reports only "result
-  was not JSON" — no transcript of what the agent did/decided. Fix: persist raw stdout/stderr to run
-  history (or a `--verbose`/per-run log file), and surface the offending output on JSON-parse errors.
+- [x] ~~**10. Agent stdout/stderr is discarded on failure**~~
+  — `loopy_runtime/harness/base.py`
+  Non-zero exit surfaced a one-line `stderr.strip()`; the JSON-parse path reported only "result was not
+  JSON". **Resolved:** the exit-code error now includes the transcript (stderr, falling back to stdout
+  for combined-stream sandboxes like Daytona), tail-truncated; the parse-failure error includes the
+  offending message text. (Full persistence to run history left for a `--verbose`/log-file follow-up.)
 
-- [ ] **11. The output JSON protocol is brittle (final message must be JSON-only)**
-  — `loopy_runtime/harness/base.py:136`
-  `json.loads(result_text)` runs on the agent's entire final message, so a ```` ```json ```` fence or a
-  trailing sentence fails the whole run even when the work succeeded. Fix: tolerant extraction — strip
-  code fences and parse the last balanced JSON object before failing; optionally validate against the
-  declared `output:`/`emits:` schema and re-prompt once on mismatch.
+- [x] ~~**11. The output JSON protocol is brittle (final message must be JSON-only)**~~
+  — `loopy_runtime/harness/base.py`
+  `json.loads` ran on the agent's entire final message, so a ```` ```json ```` fence or a trailing
+  sentence failed the whole run. **Resolved:** tolerant `_extract_json_object` tries the whole message,
+  then a fenced block, then the last brace-balanced (string-aware) `{...}` object before failing. Schema
+  validation already happens downstream in `_extract_output`/`_extract_emits`; re-prompting on mismatch
+  is a possible future add.
 
 ### P2 — Ergonomics & examples
 

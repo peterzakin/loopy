@@ -12,8 +12,9 @@ from __future__ import annotations
 
 from typer.testing import CliRunner
 
-from loopy_cli import _make_token_provider, app, build_runtime
+from loopy_cli import _make_token_provider, _run_record, app, build_runtime
 from loopy_runtime.bus.inproc import InProcessEventBus
+from loopy_runtime.contract import RunStatus, StepOutput
 from loopy_runtime.runtime.inmemory import InMemoryRuntime
 from loopy_runtime.scm.token_provider import GitHubAppTokenProvider
 from loopy_runtime.secrets import EnvFileSecretsResolver
@@ -80,6 +81,41 @@ def test_trigger_exposes_no_tokens_opt_out():
     result = runner.invoke(app, ["trigger", "--help"])
     assert result.exit_code == 0
     assert "--no-tokens" in result.stdout
+
+
+def test_trigger_exposes_json_flag():
+    result = runner.invoke(app, ["trigger", "--help"])
+    assert result.exit_code == 0
+    assert "--json" in result.stdout
+
+
+# --- run record (#9: surface step outputs) -----------------------------------
+
+
+class _FakeRun:
+    """The bits of InMemoryRuntime that `_run_record` reads."""
+
+    def __init__(self, execution_log, emitted_log, failed_runs):
+        self.execution_log = execution_log
+        self.emitted_log = emitted_log
+        self.failed_runs = failed_runs
+
+
+def test_run_record_collects_steps_outputs_and_emits():
+    rt = _FakeRun(["fix"], ["WorkItem"], [])
+    outputs = {"fix": StepOutput({"pr_url": "https://pr/1"})}
+    assert _run_record("r1", rt, outputs) == {
+        "run": "r1",
+        "steps": ["fix"],
+        "emitted": ["WorkItem"],
+        "outputs": {"fix": {"pr_url": "https://pr/1"}},
+        "failed": [],
+    }
+
+
+def test_run_record_includes_failures():
+    rt = _FakeRun(["fix"], [], [RunStatus(run_id="r1", state="failed", error="boom")])
+    assert _run_record("r1", rt, {})["failed"] == [{"run_id": "r1", "error": "boom"}]
 
 
 def _manifest():

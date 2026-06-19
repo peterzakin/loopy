@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Mapping
 
 from loopy_runtime.budget import BudgetEnforcer
@@ -26,6 +27,62 @@ from loopy_runtime.contract import Sandbox, StepContext, StepOutput, StepResult
 from loopy_runtime.manifest_model import AgentSpec, EventContract, StepSpec
 from loopy_runtime.providers import provider, required_model_key, validate_model
 from loopy_runtime.render import TemplateRenderer
+
+# How much agent output to keep in an error message — enough to debug, not a flood.
+_TRANSCRIPT_LIMIT = 2000
+_FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
+
+
+def _tail(text: str, limit: int = _TRANSCRIPT_LIMIT) -> str:
+    """The last `limit` chars of `text` (the end is where errors usually surface)."""
+    text = text.strip()
+    return text if len(text) <= limit else "…" + text[-limit:]
+
+
+def _balanced_json_objects(text: str) -> list[str]:
+    """Every top-level `{...}` span in `text`, brace-balanced and string-aware (so braces
+    inside JSON strings don't throw off the depth count). Used to recover a JSON object an
+    LLM wrapped in prose."""
+    spans: list[str] = []
+    depth = start = 0
+    in_str = esc = False
+    for i, ch in enumerate(text):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}" and depth > 0:
+            depth -= 1
+            if depth == 0:
+                spans.append(text[start : i + 1])
+    return spans
+
+
+def _extract_json_object(text: str) -> dict | None:
+    """Best-effort JSON object out of an agent's final message: try the whole thing, then a
+    fenced ```json block, then the last balanced `{...}` (LLMs love a trailing sentence or a
+    code fence). Returns the object, or None if nothing parses to one."""
+    stripped = text.strip()
+    fenced = _FENCE.match(stripped)
+    candidates = [stripped] + ([fenced.group(1).strip()] if fenced else [])
+    candidates += reversed(_balanced_json_objects(text))  # last balanced object first
+    for chunk in candidates:
+        try:
+            obj = json.loads(chunk)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    return None
 
 
 class HarnessError(Exception):
@@ -75,9 +132,10 @@ class JsonProtocolHarness:
 
         result = await self._exec(argv, step, sandbox)
         if result.exit_code != 0:
-            raise HarnessError(
-                f"{self.RUNTIME} exited {result.exit_code}: {result.stderr.strip()}"
-            )
+            # Surface the transcript: stderr if the CLI separated streams, else stdout (the
+            # Daytona sandbox returns combined output there), so a failure isn't a bare code.
+            detail = _tail(result.stderr) or _tail(result.stdout) or "(no output)"
+            raise HarnessError(f"{self.RUNTIME} exited {result.exit_code}: {detail}")
 
         message, spent_usd = self._parse_response(result.stdout, step)
         self._enforce_spend(step, spent_usd)
@@ -137,12 +195,14 @@ class JsonProtocolHarness:
     def _parse_result(result_text: str, step: StepSpec) -> dict:
         if not step.output and not step.emits:
             return {}
-        try:
-            parsed = json.loads(result_text)
-        except json.JSONDecodeError as exc:
-            raise HarnessError(f"step '{step.id}': result was not JSON") from exc
-        if not isinstance(parsed, dict):
-            raise HarnessError(f"step '{step.id}': result JSON was not an object")
+        parsed = _extract_json_object(result_text)
+        if parsed is None:
+            # Tolerant extraction already tried fences + trailing prose; if nothing parsed,
+            # show what the agent actually returned so the mismatch is debuggable.
+            raise HarnessError(
+                f"step '{step.id}': no JSON object in result; got: "
+                f"{_tail(result_text) or '(empty)'}"
+            )
         return parsed
 
     @staticmethod

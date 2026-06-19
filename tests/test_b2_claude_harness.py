@@ -80,6 +80,37 @@ def test_run_parses_typed_output():
     assert result.emits == {}
 
 
+def test_run_tolerates_fenced_json_result():
+    # The agent wrapped its JSON in a ```json fence and added a sentence — still parses.
+    step = StepSpec(id="w/s", agent="Fixer", output={"goal": {"type": "string"}}, body="b")
+    message = 'Done!\n```json\n{"output": {"goal": "ship it"}, "emits": {}}\n```'
+    envelope = {"result": message, "total_cost_usd": 0.0}
+    result = asyncio.run(_harness().run(step, _ctx(), CaptureSandbox(envelope)))
+    assert result.output.fields == {"goal": "ship it"}
+
+
+def test_run_surfaces_offending_text_on_non_json_result():
+    step = StepSpec(id="w/s", agent="Fixer", output={"goal": {"type": "string"}}, body="b")
+    envelope = {"result": "I was unable to finish the task.", "total_cost_usd": 0.0}
+    with pytest.raises(HarnessError, match="unable to finish"):
+        asyncio.run(_harness().run(step, _ctx(), CaptureSandbox(envelope)))
+
+
+def test_run_surfaces_stderr_on_nonzero_exit():
+    class FailingSandbox:
+        id = "fail"
+
+        async def exec(self, cmd):
+            return ExecResult(1, "", "boom: credentials rejected")
+
+        async def release(self):
+            pass
+
+    step = StepSpec(id="w/s", agent="Fixer", output={"goal": {"type": "string"}}, body="b")
+    with pytest.raises(HarnessError, match="credentials rejected"):
+        asyncio.run(_harness().run(step, _ctx(), FailingSandbox()))
+
+
 def test_run_produces_agent_emit_payload():
     # The agent generates the emitted event's fields (decision #3 = B).
     step = StepSpec(id="w/s", agent="Fixer", emits=["WorkItem"], body="b")
