@@ -142,12 +142,17 @@ failures debuggable) → 12, 13, 14 (polish)**. A single integration test that r
   gitignore requirement in the "Run locally" quickstart (#14), and consider a `doctor`-style warning if
   an env_file appears to be tracked by git.
 
-- [ ] **14. Docs/examples assume the Daytona + `run` happy path; the local path is undocumented**
-  The README + `incidents` example imply tokens are auto-injected on every path — untrue on the
-  `trigger`/`local` path (#7, #8). `examples/codefix` was built during the run but never committed, so
-  there's nothing to mirror yet. Fix: commit a `codefix`-style example and add a "Run locally"
-  quickstart documenting the `env_file` needs (`PATH`, `HOME`, `ANTHROPIC_API_KEY`, `GH_TOKEN`), plus a
-  one-command CI smoke test that drives a tiny edit end-to-end.
+- [x] ~~**14. Docs/examples assume the Daytona + `run` happy path; the local path is undocumented**~~
+  The README + `incidents` example implied tokens are auto-injected on every path — untrue on the
+  `trigger`/`local` path (#7, #8). **Resolved:** committed [`examples/codefix`](examples/codefix/) — a
+  single repo-touching step (`CodeTask` → edit a checkout → open a PR → `PROpened`) with a **"Run
+  locally" quickstart**: a per-`--sandbox` `env_file` matrix (`ANTHROPIC_API_KEY`/`GITHUB_TOKEN`, plus
+  `PATH`/`HOME` for bare `local`), the `loopy auth github` path for token injection, and a
+  `dev.env.example` template. README + `DEPLOYMENT.md` §5A now point at it and correct the
+  "tokens are ambient" impression. CI smoke test is two-tier: an always-on, no-creds offline test
+  (`tests/conformance/test_codefix.py`, compile + trigger on the stub harness) and a live one-command
+  `examples/codefix/smoke.sh` (real edit against a throwaway repo). Still local-only on egress
+  enforcement (same gap as Daytona); the live `smoke.sh` is not wired into CI (it needs real creds).
 
 ## Backend capability status (B1–B12)
 
