@@ -30,10 +30,8 @@ import typer
 
 auth_app = typer.Typer(no_args_is_help=True, help="Authenticate loopy with external services.")
 
-# Suggested App homepage (required by the manifest schema) and the local cred home.
+# Suggested App homepage (required by the manifest schema).
 HOMEPAGE_URL = "https://github.com/peterzakin/loopy"
-LOOPY_DIR = ".loopy"
-PEM_RELPATH = f"{LOOPY_DIR}/github-app.pem"
 DEFAULT_PORT = 8765
 CALLBACK_TIMEOUT_SECONDS = 300
 
@@ -199,29 +197,32 @@ def obtain_manifest_code(
     return code
 
 
-def write_app_credentials(root: str | Path, conversion: dict) -> Path:
-    """Persist a manifest conversion locally: PEM file (0600) + ids in loopy.env.
+def _escape_pem(pem: str) -> str:
+    """Collapse a multi-line PEM to one dotenv-safe line (newlines → literal `\\n`)."""
+    return pem.replace("\r\n", "\n").replace("\n", "\\n")
 
-    The multi-line PEM doesn't fit the simple KEY=value dotenv, so it's stored as
-    a gitignored file and referenced by path. Returns the PEM file path.
+
+def write_app_credentials(root: str | Path, conversion: dict) -> Path:
+    """Persist a manifest conversion locally: App id + private key, inline in loopy.env.
+
+    The key is stored inline (`GITHUB_APP_PRIVATE_KEY`, newlines escaped) rather than as a
+    file referenced by a relative path. A path resolves against whatever `--root` a later
+    command uses, so `trigger --root <subdir>` silently failed to find a key written
+    relative to the project root — an inline key has no such dependency. Because loopy.env
+    now carries the private key, it's added to .gitignore. Returns the loopy.env path.
     """
-    from loopy_runtime.secrets import write_control_plane_env
+    from loopy_runtime.secrets import CONTROL_PLANE_ENV_FILE, write_control_plane_env
 
     root = Path(root)
     app_id = str(conversion["id"])
     pem = conversion["pem"]
 
-    pem_path = root / PEM_RELPATH
-    pem_path.parent.mkdir(parents=True, exist_ok=True)
-    pem_path.write_text(pem)
-    os.chmod(pem_path, 0o600)
-
-    write_control_plane_env(
+    env_path = write_control_plane_env(
         root,
-        {"GITHUB_APP_ID": app_id, "GITHUB_APP_PRIVATE_KEY_FILE": PEM_RELPATH},
+        {"GITHUB_APP_ID": app_id, "GITHUB_APP_PRIVATE_KEY": _escape_pem(pem)},
     )
-    _ensure_gitignored(root, f"{LOOPY_DIR}/")
-    return pem_path
+    _ensure_gitignored(root, CONTROL_PLANE_ENV_FILE)
+    return env_path
 
 
 def _ensure_gitignored(root: Path, entry: str) -> None:
@@ -311,9 +312,11 @@ def github(
         typer.echo(f"error: failed to exchange manifest code: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
-    pem_path = write_app_credentials(root, conversion)
-    typer.echo(typer.style("  ✓", fg=typer.colors.GREEN) + f" wrote {pem_path} (0600)")
-    typer.echo(typer.style("  ✓", fg=typer.colors.GREEN) + f" updated {root}/loopy.env")
+    env_path = write_app_credentials(root, conversion)
+    typer.echo(
+        typer.style("  ✓", fg=typer.colors.GREEN)
+        + f" wrote App id + private key to {env_path} (gitignored)"
+    )
 
     slug = conversion.get("slug")
     if slug:

@@ -127,13 +127,23 @@ def _make_token_provider(root: Path, *, enabled: bool, announce: bool):
     merged = dict(os.environ)
     for key, value in load_control_plane_env(root).items():
         merged.setdefault(key, value)  # real/platform env wins over loopy.env
+    if not merged.get("GITHUB_APP_ID"):
+        return None  # no App configured at all → no token injection (offline-friendly)
     try:
-        provider = GitHubAppTokenProvider(AppCredentials.from_env(merged, root=root))
-    except GitHubAppError:
-        return None  # no App configured → no token injection
+        creds = AppCredentials.from_env(merged, root=root)
+    except GitHubAppError as exc:
+        # The App *is* configured (GITHUB_APP_ID is set) but its key won't load. Fail loudly
+        # with the real reason rather than silently skipping injection — the latter resurfaces
+        # downstream as a misleading "no GitHub auth is configured" at preflight, sending the
+        # user to re-run `loopy auth github` when the actual problem is the key itself.
+        raise RuntimeError(
+            f"a GitHub App is configured (GITHUB_APP_ID is set) but its private key could not "
+            f"be loaded: {exc}. Re-run `loopy auth github`, or set GITHUB_APP_PRIVATE_KEY "
+            f"(or GITHUB_APP_PRIVATE_KEY_FILE) in the environment."
+        ) from exc
     if announce:
         typer.echo("github app: minting scoped tokens for sandboxes (key stays control-plane)")
-    return provider
+    return GitHubAppTokenProvider(creds)
 
 
 def build_runtime(manifest, *, root: Path, sandbox: str, bus, state=None, tokens=None):
@@ -216,11 +226,6 @@ def run(
     if control_env:
         typer.echo(f"loaded {len(control_env)} control-plane var(s) from {root}/loopy.env")
 
-    # SCM token injection: if a GitHub App is configured (via `loopy auth github`), mint a
-    # scoped installation token per step and inject it into the sandbox. The App private key
-    # stays here at the control-plane; only the ephemeral token crosses into the sandbox.
-    tokens = _make_token_provider(root, enabled=True, announce=True)
-
     try:
         cfg = resolve(load_config(config), host=host, port=port, bus=bus)
     except ConfigError as exc:
@@ -241,10 +246,14 @@ def run(
     # dedupe by Event.id) — a networked bus consumes off the broker, so it needs its own dedupe.
     state = InMemoryStateStore()
     event_bus = make_event_bus(cfg.bus, redis_url=resolved_redis_url, state=state)
-    runtime = build_runtime(
-        m, root=root, sandbox=sandbox, bus=event_bus, state=state, tokens=tokens
-    )
     try:
+        # SCM token injection: if a GitHub App is configured (via `loopy auth github`), mint a
+        # scoped installation token per step and inject it into the sandbox. The App private key
+        # stays here at the control-plane; only the ephemeral token crosses into the sandbox.
+        tokens = _make_token_provider(root, enabled=True, announce=True)
+        runtime = build_runtime(
+            m, root=root, sandbox=sandbox, bus=event_bus, state=state, tokens=tokens
+        )
         runtime.preflight()  # fail fast at startup if any sandbox can't supply its harness keys
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         typer.echo(f"error: {exc}", err=True)
@@ -359,11 +368,6 @@ def trigger(
         id="trigger",
         emitted_at=datetime.now(UTC),
     )
-    # Like `run`, inject scoped GitHub App tokens when an App is configured (via
-    # `loopy auth github`), so the one-shot test path can exercise repo-touching workflows.
-    # `--no-tokens` opts out for fully offline tests.
-    tokens = _make_token_provider(root, enabled=not no_tokens, announce=True)
-
     async def _execute(runtime):
         """Fire the event, collect outputs, then tear the provider down — all in one event
         loop so a provider's HTTP client (e.g. Daytona's) is closed in the loop that created
@@ -378,6 +382,11 @@ def trigger(
             await runtime.sandboxes.aclose()
 
     try:
+        # Like `run`, inject scoped GitHub App tokens when an App is configured (via
+        # `loopy auth github`), so the one-shot test path can exercise repo-touching
+        # workflows. `--no-tokens` opts out for fully offline tests. Inside the try so a
+        # configured-but-broken App surfaces as a clean error, not a traceback.
+        tokens = _make_token_provider(root, enabled=not no_tokens, announce=True)
         runtime = build_runtime(
             m, root=root, sandbox=sandbox, bus=InProcessEventBus(), tokens=tokens
         )

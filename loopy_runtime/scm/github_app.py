@@ -65,15 +65,24 @@ class AppCredentials:
     def from_env(cls, env: Mapping[str, str], *, root: str | Path = ".") -> AppCredentials:
         """Build credentials from a control-plane env map.
 
-        Reads `GITHUB_APP_ID` plus either an inline `GITHUB_APP_PRIVATE_KEY` or a
-        `GITHUB_APP_PRIVATE_KEY_FILE` path (resolved relative to `root`). Raises
-        `MissingCredentials` with an actionable message when something's absent.
+        Reads `GITHUB_APP_ID` plus the private key, preferring an inline
+        `GITHUB_APP_PRIVATE_KEY` (what `loopy auth github` writes — newlines escaped to
+        survive the dotenv) and falling back to a `GITHUB_APP_PRIVATE_KEY_FILE` path
+        (resolved relative to `root`, for production secret mounts). Prefer the inline
+        form: a path resolves against whichever `--root` a later command uses, which is a
+        silent footgun. Raises `MissingCredentials` with an actionable message when
+        something's absent.
         """
         app_id = env.get("GITHUB_APP_ID")
         if not app_id:
             raise MissingCredentials("GITHUB_APP_ID is not set")
         pem = env.get("GITHUB_APP_PRIVATE_KEY")
-        if not pem:
+        if pem:
+            # An inline key is stored single-line with newlines escaped (the dotenv parser
+            # has no multi-line values); restore them. A genuine multi-line PEM — pasted
+            # straight into a real env var — has no literal "\n", so this is a no-op for it.
+            pem = pem.replace("\\n", "\n")
+        else:
             key_file = env.get("GITHUB_APP_PRIVATE_KEY_FILE")
             if not key_file:
                 raise MissingCredentials(
