@@ -506,7 +506,7 @@ mapping, not the plumbing.
 | Schemas / validation | `pydantic` v2 | registry, events, outputs; type DSL → pydantic types |
 | Template render + static `{{ }}` check | `Jinja2` | `env.parse()` + `meta.find_undeclared_variables()` for §4.4; renders at runtime |
 | DAG build / validate | `networkx` | topo sort, cycle detection, reachability for `after:` |
-| CLI | `Typer` | `loopy compile` / `run` / `dev` |
+| CLI | `Typer` | `loopy compile` / `run` / `trigger` / `admin` |
 | `loopy.events` stubs | `datamodel-code-generator` | `.pyi` from the registry |
 | Cron + scheduling | `croniter` + `APScheduler` | 5-field expr + tz; drives poll/cron ticks |
 | `SensorRunner` webhooks | `FastAPI` + `uvicorn` | mount `@sensor(webhook=…)` routes |

@@ -1,6 +1,6 @@
 # Control-plane dashboard (run observability frontend)
 
-**Status:** in progress — Stages 1–6 done; Stage 7 (archive) on merge
+**Status:** done — Stages 1–7 complete
 **Owner:** peter
 **Date:** 2026-06-19
 
@@ -209,7 +209,8 @@ from the resolved `state:` config / `--state` flag (default `inproc` → unchang
       `state:` config block); updated the `TODOS.md` B12 row; graduated the durable-store +
       dashboard decision into `ARCHITECTURE.md`. Verified hatchling ships the `static/` assets
       in the wheel (no packaging config needed).
-- [ ] **Stage 7 — On merge.** `git mv` this plan to `plans/past/observability/`.
+- [x] **Stage 7 — On merge.** `git mv` this plan to `plans/past/observability/`; user-facing docs
+      (README + codefix quickstart) updated alongside ARCHITECTURE/DEPLOYMENT/TODOS.
 
 ## Files likely to change
 

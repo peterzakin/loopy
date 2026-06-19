@@ -237,3 +237,18 @@ A few things worth knowing before the first run:
   `loopy trigger --event X` and no sensor produces `X`, compile flags it as a dead trigger. That's
   **expected** for the manual-trigger pattern — it's a warning, not an error, and the run proceeds.
 
+## Watching runs
+
+`loopy run` records every run to a durable on-disk store (`.loopy/state.db` by default), and
+`loopy admin` serves a small read-only dashboard over it — a run list with each run's step
+timeline, emitted events, outputs, and any failure:
+
+```bash
+loopy run manifest.json     # records runs as they execute
+loopy admin                 # in another terminal → http://127.0.0.1:9000
+```
+
+It reads the same DB `loopy run` writes, so no flags are needed in the common case. (The one-shot
+`loopy trigger` path is in-memory by default and isn't recorded — use `loopy run` to populate the
+dashboard.) See [`DEPLOYMENT.md`](DEPLOYMENT.md) for the `state:` config block and caveats.
+

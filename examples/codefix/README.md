@@ -107,6 +107,11 @@ It fires the event, runs the single step to completion, and prints the step orde
 `PROpened` event, and the step's outputs — including the `pr_url`. Add `--json` for the full
 run record (steps, outputs, emits, failures).
 
+> **Watching runs:** `loopy trigger` is the one-shot test path and runs in-memory, so it isn't
+> recorded. To see runs in the dashboard, drive the workflow through the server instead —
+> `loopy run manifest.json` records to `.loopy/state.db`, and `loopy admin` (in another terminal,
+> at http://127.0.0.1:9000) shows the run list, timeline, and outputs read-only.
+
 ## One-command smoke test
 
 `smoke.sh` drives the whole thing end-to-end against a throwaway repo (compile → trigger →
