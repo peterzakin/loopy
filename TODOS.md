@@ -128,12 +128,19 @@ failures debuggable) → 12, 13, 14 (polish)**. A single integration test that r
   templating yet; (b) an optional `workspace: <local path>` copy/mount for offline/local-only checkouts;
   (c) a `crosscheck` rule that `repos` hosts ⊆ `network`.
 
-- [ ] **13. Secrets must be written to a file on disk; no interpolation**
+- [ ] **13. Live secrets on disk in `env_file` (only `.gitignore` guards them)**
   — `loopy_runtime/secrets.py:32-40`
-  `env_file` values are parsed literally with no `${VAR}` expansion, so running the demo means writing a
-  live `ANTHROPIC_API_KEY` and GitHub token to disk with only `.gitignore` between them and a commit.
-  Fix: support env interpolation in `env_file` values (`GH_TOKEN=${GH_TOKEN}`) so secrets pass through
-  from the process env without being persisted. (Pairs with #7.)
+  `env_file` values are parsed literally, so running the demo means writing a live `ANTHROPIC_API_KEY`
+  (and historically a GitHub token) to disk with only `.gitignore` between them and a commit.
+  **Decided against `${VAR}` process-env interpolation**: explicit env_files are a feature — one file
+  tells you exactly what the sandbox sees, with no implicit coupling to the operator's shell env (which
+  #6 just worked to stop leaking into the local sandbox). The residual concern is narrower than first
+  framed, since the on-disk surface has already shrunk: **#7** mints scoped GitHub tokens at run time
+  (no `GH_TOKEN` in an env_file) and **#8** lets Claude Code OAuth creds satisfy the model key via
+  `HOME` (no `ANTHROPIC_API_KEY` on disk when subscription-authed). What's left is the API-key-authed
+  Anthropic case. Treat as a docs/guardrail item rather than interpolation: document the live-value /
+  gitignore requirement in the "Run locally" quickstart (#14), and consider a `doctor`-style warning if
+  an env_file appears to be tracked by git.
 
 - [ ] **14. Docs/examples assume the Daytona + `run` happy path; the local path is undocumented**
   The README + `incidents` example imply tokens are auto-injected on every path — untrue on the
