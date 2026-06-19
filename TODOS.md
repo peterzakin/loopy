@@ -153,21 +153,30 @@ failures debuggable) → 12, 13, 14 (polish)**. A single integration test that r
   `--network` + iptables/`--add-host` rules derived from `spec.network`); deny by default. Mirror the
   enforcement contract on Daytona so both providers honor `spec.network` identically.
 
-- [ ] **16. No harness toolchain contract — a sandbox image missing the harness CLI fails cryptically mid-run, not at preflight**
-  — `loopy_runtime/harness/base.py` (`required_keys`/`missing_keys`), `loopy_runtime/runtime/inmemory.py:100` (`preflight`)
+- [ ] **16. Harness toolchain contract — the harness contributes its toolchain as a layer; the sandbox image stays harness-agnostic**
+  — `loopy_runtime/harness/base.py`, `loopy_runtime/sandbox/{docker,daytona_image}.py`, `loopy_runtime/runtime/inmemory.py:100` (`preflight`)
   Env vars are necessary but not sufficient: `PATH`/`HOME` being set doesn't help if the binary the
   harness shells out to was never installed in the image. `ClaudeCodeHarness` runs `["claude", ...]`
-  (`claude_code.py:53`); a bare `python:3.12-slim` image has no `claude`, no `node`, and (per #6) the
-  agent fails deep in the run with a `command not found` the JSON parser then chokes on — when the real
-  problem is "this image can't host this harness." There are two layers: a **common substrate** any agent
-  needs (`git` — we now clone repos into the workspace, `ca-certificates`, a shell, `curl`) and a
-  **harness-specific toolchain** (the `claude`/`codex` CLI + its runtime). Fix, symmetric with the
-  existing credential preflight: add a harness `required_tools(agent)` contract (base returns the
-  substrate; `claude-code` adds `{claude, git}`, codex adds `{codex}`) and extend `preflight()` to probe
-  the sandbox (`which <tool>` via `sandbox.exec`, uniform across local/docker/Daytona) and aggregate
-  misses into the same fail-fast `PreflightError` with an actionable message. Keep provisioning
-  **declarative** — recommend/ship a `loopy-claude-code` base image or snapshot rather than auto-injecting
-  install layers (that would fight the hermetic-image principle from #6); preflight just enforces it.
+  (`claude_code.py:53`); a bare `python:3.12-slim` image has no `claude`/`node`, so (per #6) the agent
+  fails deep in the run with a `command not found` the JSON parser then chokes on — the real problem is
+  "this image can't host this harness." **Key requirement: the sandbox `image:` must stay harness-agnostic**
+  (one sandbox reusable across claude-code/codex), so do NOT make the base image harness-specific. Instead:
+
+  1. **Harness-contributed toolchain layer.** Each harness declares a `toolchain()` returning an
+     *additive-only* layer — never a base/snapshot, so it composes onto any user base:
+     `ToolchainLayer(apt=[...], pip=[...], run=[...], env={...}, probe=("claude","git"))`.
+     `claude-code` → node + `claude` CLI (version pinned in the harness); codex → `codex`. The provider
+     **prepends** these ahead of the user's `image:` layers through the existing `_setup_commands`/`plan_image`
+     machinery; the user still owns the base + their own deps. Snapshot the composed result keyed on
+     `(base digest + toolchain hash)` so the install runs once, not every acquire.
+  2. **Runtime validation (backstop).** Symmetric with the existing credential preflight: `required_tools()`
+     = the layer's `probe`; extend `preflight()` to probe the live sandbox (`which <tool>` via `sandbox.exec`,
+     uniform across local/docker/Daytona) and aggregate misses into the same fail-fast `PreflightError` with
+     an actionable message — so even a hand-rolled base override that defeats composition still can't reach
+     step one ill-equipped.
+
+  The single invariant that makes it work: the toolchain contract is purely additive (apt/pip/run/env),
+  never a base image. Composition guarantees the tools by construction; the probe enforces it at runtime.
 
 ## Backend capability status (B1–B12)
 
