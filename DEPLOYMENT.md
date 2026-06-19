@@ -344,6 +344,30 @@ is a genuine deployment for workloads that tolerate process-lifetime state — *
 restarts, in-flight runs are lost** (the InMemory runtime stubs durability). Good for
 short-lived cascades; not yet for day-spanning runs.
 
+**Fast inner loop on Daytona — `image: { snapshot: … }`.** A default `debian_slim` +
+`apt`/`pip` + `npm install -g @anthropic-ai/claude-code` build is the bulk of each *cold*
+Daytona run's wall-clock (several minutes), and you pay it on every `trigger` while iterating
+on a workflow. The escape hatch is a **snapshot**: bake the toolchain image once, then point the
+sandbox at it — Daytona skips the build entirely and boots from the prebuilt image, turning a
+~minutes inner loop into ~seconds.
+
+```yaml
+# registry.yml — iterating: build the toolchain once, reuse it every run
+sandboxes:
+  default:
+    provider: daytona
+    image: { snapshot: loopy-claude-code }   # prebuilt; no apt/npm on each run
+    network: [github.com]
+    env_file: secrets/default.env
+```
+
+Build the snapshot once from the same layers your `image:` would compose (a Python/Node base
+with `git` + the `claude` CLI), name it (e.g. `loopy-claude-code`), then reference it by name.
+A `snapshot:` is **exclusive of build layers** — it's expected to already bundle the harness
+toolchain, and the runtime's post-acquire probe (#16) is the backstop that fails fast with an
+actionable error if the snapshot is missing a required binary. Drop back to a declarative
+`image:` build whenever the toolchain changes (then re-bake the snapshot).
+
 **`loopy.yaml` — deployment defaults for `loopy run`.** The `run`-time wiring choices map to a
 small config file so they need not be retyped as flags. It is optional: absent the file,
 defaults apply unchanged.

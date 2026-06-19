@@ -16,8 +16,15 @@ build/
 **/loopy/events.pyi
 **/loopy/__init__.py
 
-# Secrets — referenced env files, resolved at run time, never committed
-loopy.env         # control-plane infra creds (REDIS_URL, DAYTONA_API_KEY/URL)
-**/sensors/.env   # sensor-layer secrets (runner-wide dotenv)
-**/secrets/       # sandbox env_file(s)
-.loopy/           # local state: GitHub App private key (loopy auth github)
+# Secrets — referenced env files, resolved at run time, never committed.
+# NOTE: git has no inline comments — a `#` after a pattern becomes part of the
+# pattern (matching nothing), silently disabling the rule. Keep each comment on
+# its own line; `tests/test_gitignore_secrets.py` guards against regressions.
+# control-plane infra creds (REDIS_URL, DAYTONA_API_KEY/URL)
+loopy.env
+# sensor-layer secrets (runner-wide dotenv)
+**/sensors/.env
+# sandbox env_file(s)
+**/secrets/
+# local state: GitHub App private key (loopy auth github)
+.loopy/

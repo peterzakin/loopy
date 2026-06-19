@@ -323,6 +323,7 @@ def run(
         finally:
             for task in background:
                 task.cancel()
+            await runtime.sandboxes.aclose()  # release provider HTTP clients (e.g. Daytona)
 
     asyncio.run(_serve())  # pragma: no cover
 
@@ -362,12 +363,26 @@ def trigger(
     # `loopy auth github`), so the one-shot test path can exercise repo-touching workflows.
     # `--no-tokens` opts out for fully offline tests.
     tokens = _make_token_provider(root, enabled=not no_tokens, announce=True)
+
+    async def _execute(runtime):
+        """Fire the event, collect outputs, then tear the provider down — all in one event
+        loop so a provider's HTTP client (e.g. Daytona's) is closed in the loop that created
+        it, avoiding `Unclosed client session` warnings after a green run."""
+        try:
+            run_id = await runtime.trigger(triggering)
+            # The per-step outputs are the point of a test run (e.g. a created PR URL), so
+            # surface them — the engine records each completed step's output in the StateStore.
+            outputs = await runtime.state.outputs(run_id) if run_id is not None else {}
+            return run_id, outputs
+        finally:
+            await runtime.sandboxes.aclose()
+
     try:
         runtime = build_runtime(
             m, root=root, sandbox=sandbox, bus=InProcessEventBus(), tokens=tokens
         )
         runtime.preflight()  # fail fast before firing the event if any sandbox lacks its keys
-        run_id = asyncio.run(runtime.trigger(triggering))
+        run_id, outputs = asyncio.run(_execute(runtime))
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -375,9 +390,6 @@ def trigger(
         typer.echo(f"no workflow subscribes to event '{event}'", err=True)
         raise typer.Exit(code=1)
 
-    # The per-step outputs are the point of a test run (e.g. a created PR URL), so surface
-    # them — the engine records each completed step's output in the StateStore.
-    outputs = asyncio.run(runtime.state.outputs(run_id))
     record = _run_record(run_id, runtime, outputs)
 
     if as_json:

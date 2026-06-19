@@ -31,6 +31,13 @@ class _RepoCloningProvider:
                 raise
         return sandbox
 
+    async def aclose(self) -> None:
+        """Tear down the wrapped provider, if it holds resources to release (e.g. the
+        Daytona client's HTTP session). Providers without an `aclose` are a no-op."""
+        inner_aclose = getattr(self.inner, "aclose", None)
+        if inner_aclose is not None:
+            await inner_aclose()
+
 
 def make_sandbox_provider(name: str = "local"):
     if name == "local":
