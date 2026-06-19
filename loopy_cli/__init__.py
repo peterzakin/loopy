@@ -171,7 +171,9 @@ def run(
     ),
     host: str | None = typer.Option(None, "--host", help="Override sensor_server.host."),
     port: int | None = typer.Option(None, "--port", help="Override sensor_server.port."),
-    sandbox: str = typer.Option("local", "--sandbox", help="Sandbox provider: local | daytona."),
+    sandbox: str = typer.Option(
+        "local", "--sandbox", help="Sandbox provider: local | docker | daytona."
+    ),
     bus: str | None = typer.Option(
         None, "--bus", help="EventBus: inproc | redis. Overrides config."
     ),
@@ -313,7 +315,9 @@ def trigger(
     event: str = typer.Option(..., "--event", help="Triggering event name."),
     fields: str | None = typer.Option(None, "--fields", help="Event fields as a JSON object."),
     root: Path = typer.Option(Path("."), "--root", help="Project root (for env_file resolution)."),
-    sandbox: str = typer.Option("local", "--sandbox", help="Sandbox provider: local | daytona."),
+    sandbox: str = typer.Option(
+        "local", "--sandbox", help="Sandbox provider: local | docker | daytona."
+    ),
     no_tokens: bool = typer.Option(
         False, "--no-tokens", help="Skip GitHub App token injection (for fully offline tests)."
     ),

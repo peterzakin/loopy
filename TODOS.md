@@ -63,10 +63,13 @@ failures debuggable) → 12, 13, 14 (polish)**. A single integration test that r
   — `loopy_runtime/sandbox/local.py:51-52`
   `create_subprocess_exec(..., env=secrets)` where `secrets` is only the resolved `env_file`, so
   `claude`/`git`/`curl` aren't on `PATH`, there's no `HOME` (no `~/.gitconfig`, no Claude creds).
-  Every local run fails until `PATH`+`HOME` are hand-copied into the `env_file`. Fix: for the **local**
-  provider, start from a curated host baseline (`PATH`, `HOME`, `TERM`, `LANG`) and overlay
-  `env_file`/secrets on top — or an explicit `inherit_env:` allowlist on the sandbox spec. Keep remote
-  sandboxes hermetic.
+  Every local run failed until `PATH`+`HOME` were hand-copied into the `env_file`. **Resolved with a
+  new hermetic `--sandbox docker` provider** (`loopy_runtime/sandbox/docker.py`) rather than leaking
+  host env: the agent runs in a container built from the spec's `image:`, so `PATH`/`HOME`/toolchain
+  come from the image — same isolation story as remote Daytona, but needing only a local Docker daemon.
+  Reuses `plan_image` for validation; `apt`/`pip`/`run` layers replay via `docker exec`; secrets/tokens
+  inject as `-e` env (secrets win). The bare-subprocess `local` provider stays as the no-Docker
+  fallback. (Per-host egress allowlisting still unenforced locally — same gap as Daytona.)
 
 - [x] ~~**7. `loopy trigger` doesn't inject GitHub tokens (only `loopy run` does)**~~
   — `loopy_cli/__init__.py`
