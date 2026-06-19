@@ -204,6 +204,12 @@ def run(
     redis_url: str | None = typer.Option(
         None, "--redis-url", help="Redis URL (or REDIS_URL env var; used when bus=redis)."
     ),
+    state: str | None = typer.Option(
+        None, "--state", help="StateStore: sqlite | inproc. Overrides config (default sqlite)."
+    ),
+    state_path: str | None = typer.Option(
+        None, "--state-path", help="SQLite state DB path (default .loopy/state.db, under --root)."
+    ),
 ) -> None:
     """Start the Loopy server: host sensor webhooks; incoming events drive workflow runs."""
     import asyncio
@@ -216,7 +222,7 @@ def run(
     from loopy_runtime.sensors.loader import load_poll_sensor, load_webhook_sensor
     from loopy_runtime.sensors.runner import FastAPISensorRunner, synthesizing_publisher
     from loopy_runtime.sensors.scheduler import PollScheduler, parse_interval
-    from loopy_runtime.state.inmemory import InMemoryStateStore
+    from loopy_runtime.state.factory import make_state_store
 
     # Control-plane infra creds (REDIS_URL, DAYTONA_API_KEY/URL): a local-dev convenience read
     # from `loopy.env`, merged with setdefault (real/platform env always wins). Must land before
@@ -228,7 +234,14 @@ def run(
         typer.echo(f"loaded {len(control_env)} control-plane var(s) from {root}/loopy.env")
 
     try:
-        cfg = resolve(load_config(config), host=host, port=port, bus=bus)
+        cfg = resolve(
+            load_config(config),
+            host=host,
+            port=port,
+            bus=bus,
+            state_backend=state,
+            state_path=state_path,
+        )
     except ConfigError as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -245,7 +258,8 @@ def run(
         typer.echo(f"loaded {len(sensor_env)} sensor secret(s) from {root}/sensors/.env")
     # One StateStore shared by the runtime (run history/watermarks) and the bus (at-least-once
     # dedupe by Event.id) — a networked bus consumes off the broker, so it needs its own dedupe.
-    state = InMemoryStateStore()
+    # Defaults to a durable SQLite file so history survives restarts and `loopy admin` can read it.
+    state = make_state_store(cfg.state_backend, cfg.state_path, root=root)
     event_bus = make_event_bus(cfg.bus, redis_url=resolved_redis_url, state=state)
     try:
         # SCM token injection: if a GitHub App is configured (via `loopy auth github`), mint a
@@ -317,6 +331,10 @@ def run(
         f"{', '.join(scheduler.cron_names) or '(none)'}"
     )
     typer.echo(f"event bus: {cfg.bus}" + (f" ({resolved_redis_url})" if cfg.bus == "redis" else ""))
+    typer.echo(
+        f"state store: {cfg.state_backend}"
+        + (f" ({cfg.state_path})" if cfg.state_backend == "sqlite" else "")
+    )
 
     async def _serve() -> None:  # pragma: no cover - exercised by running the server
         consumer = asyncio.create_task(runtime.serve())  # drain runs in the background

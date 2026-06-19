@@ -186,10 +186,11 @@ from the resolved `state:` config / `--state` flag (default `inproc` → unchang
       full `StateStore` Protocol (history/outputs/watermarks/seen/dedupe + `list_runs`), WAL
       mode, schema bootstrap on open. Maintain the `runs` summary row on `create_run` and on
       terminal `append`. Conformance tests run the *same* suite against both stores.
-- [ ] **Stage 3 — Wire into `loopy run`.** Parse the reserved `state:` config block (+ `--state`
-      / `--state-path` flags) in `config.py`/CLI; construct the chosen store; keep default
-      `inproc` behavior byte-for-byte. Smoke test: run a workflow with `--state sqlite`, confirm
-      rows land.
+- [x] **Stage 3 — Wire into `loopy run`.** Parse the `state:` config block (+ `--state` /
+      `--state-path` flags) in `config.py`/CLI via a `make_state_store` factory; `loopy run`
+      now **defaults to SQLite** (`.loopy/state.db` under `--root`), `--state inproc` opts out.
+      `trigger` + the library/test default stay in-memory. E2E test: a real cascade run lands in
+      SQLite and a read-only reader sees it via `list_runs` + `history`.
 - [ ] **Stage 4 — Read API.** `loopy_runtime/dashboard/app.py`: `create_app(db)` opens SQLite
       read-only; `RunView` builder (pure) turns history+outputs into the detail shape; wire the
       two `/api/...` routes. Unit-test the builder + routes with a seeded DB.
@@ -220,9 +221,11 @@ from the resolved `state:` config / `--state` flag (default `inproc` → unchang
   `f"{wf_name}-{seq}"` run id via `rpartition("-")`, guarded by `seq` being all-digits — robust
   even when the workflow name contains `-` (e.g. `my-cool-wf-7` → `my-cool-wf`). No
   `create_run` signature change, no runtime change. See `_workflow_of` in `state/inmemory.py`.
-- **Default DB path / discovery.** Should `loopy admin` default to a conventional path
-  (e.g. `./loopy-state.db`) so it pairs with a `loopy run --state sqlite` default, or always
-  require the path argument explicitly? (Leaning: explicit arg in v1.)
+- ~~**Default DB path / discovery.**~~ **Resolved (Stage 3, peter):** `loopy run` *defaults*
+  to SQLite at `.loopy/state.db` (already gitignored) — no flag needed for the dashboard to
+  work. `loopy admin` will default to the same conventional path so the common case is
+  zero-flag. In-memory is kept as `--state inproc` and as the default for one-shot `trigger`
+  (must not litter the cwd with a DB) and the library/test runtime.
 - **Live-ish refresh.** Is polling every ~3s acceptable for v1, or is SSE/WebSocket wanted
   soon enough to design the API for it now? (Leaning: poll v1, note SSE as follow-up.)
 - **In-flight visibility.** A `running` run only has a `runs` row + partial history mid-flight;
@@ -237,6 +240,13 @@ from the resolved `state:` config / `--state` flag (default `inproc` → unchang
 - 2026-06-19 — OTel explicitly **out of scope** for this milestone (per request).
 - 2026-06-19 — Dashboard is **read-only**; reuse existing `fastapi`/`uvicorn`; frontend is a
   static page (no JS build step).
+- 2026-06-19 — **Default to durable SQLite for `loopy run`** (peter). In-memory is NOT removed:
+  it stays the reference impl + library/test default and the `loopy trigger` default (one-shot,
+  must not write a `.db` to the cwd), and remains reachable via `--state inproc`. Rationale: the
+  dashboard should work with zero flags and a long-lived server shouldn't lose history on restart.
+- 2026-06-19 — **Stage 3 landed.** `state:` config block (`backend`/`path`) + `--state` /
+  `--state-path` flags resolved through `make_state_store` (mirrors the bus/sandbox factories).
+  `loopy run` defaults to `.loopy/state.db` (already gitignored); startup echoes the chosen store.
 - 2026-06-19 — **Stages 1–2 landed.** `RunSummary` + `StateStore.list_runs()` added (additive
   Protocol change); `SqliteStateStore` (WAL, single file, `read_only=` mode for the dashboard).
   Terminal state (`running`/`completed`/`failed` + `ended_at`/`error`) is single-sourced via

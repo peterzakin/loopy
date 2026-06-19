@@ -143,3 +143,70 @@ def test_sqlite_read_only_rejects_writes(tmp_path):
         s.close()
 
     asyncio.run(go())
+
+
+def test_runtime_persists_run_into_sqlite_for_the_dashboard(tmp_path):
+    """End-to-end: a real cascade run through InMemoryRuntime lands in the SQLite store such
+    that a separate read-only reader (the dashboard) sees it via list_runs + history."""
+    from loopy_runtime.bus.inproc import InProcessEventBus
+    from loopy_runtime.manifest_model import Manifest
+    from loopy_runtime.runtime.inmemory import InMemoryRuntime
+    from loopy_runtime.sandbox.local import LocalSandboxProvider
+    from loopy_runtime.secrets import StaticSecretsResolver
+    from tests.stub_harness import StubAgentHarness
+
+    db = tmp_path / "state.db"
+    manifest = Manifest.model_validate(
+        {
+            "schema_version": "1",
+            "registry": {"sandboxes": {}, "agents": {}, "events": {"Ping": {"fields": {}}}},
+            "workflows": {
+                "greet": {
+                    "entry": "x",
+                    "steps": {
+                        "x": {
+                            "id": "greet/x",
+                            "trigger": {"kind": "event", "event": "Ping"},
+                            "after": [],
+                            "agent": None,
+                            "output": {},
+                            "emits": [],
+                            "budget": None,
+                            "body": "do",
+                            "refs": [],
+                        }
+                    },
+                }
+            },
+            "sensors": [],
+            "lineage": {"events": {}},
+        }
+    )
+
+    async def run_one():
+        store = SqliteStateStore(db)
+        rt = InMemoryRuntime(
+            manifest,
+            harness=StubAgentHarness(manifest.registry.events),
+            sandboxes=LocalSandboxProvider(),
+            secrets=StaticSecretsResolver({}),
+            bus=InProcessEventBus(),
+            state=store,
+        )
+        await rt.trigger(_event())
+        store.close()
+
+    asyncio.run(run_one())
+
+    async def read_back():
+        reader = SqliteStateStore(db, read_only=True)
+        runs = await reader.list_runs()
+        history = await reader.history(runs[0].run_id) if runs else []
+        reader.close()
+        return runs, history
+
+    runs, history = asyncio.run(read_back())
+    assert len(runs) == 1
+    assert runs[0].workflow == "greet" and runs[0].state == "completed"
+    assert runs[0].entry_event == "Ping"
+    assert [e.kind for e in history] == ["run_started", "step_completed", "run_completed"]

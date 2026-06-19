@@ -24,17 +24,24 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from loopy_runtime.bus.factory import VALID_BUS  # single source of truth for bus names
+from loopy_runtime.state.factory import VALID_STATE  # single source of truth for state names
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 DEFAULT_BUS = "inproc"
 DEFAULT_REDIS_URL = "redis://localhost:6379"
+# `loopy run` defaults to a durable on-disk store so run history survives restarts and the
+# `loopy admin` dashboard can read it without any flag; `.loopy/` is already gitignored. The
+# in-memory store stays the opt-out (`--state inproc`) and the default for one-shot `trigger`.
+DEFAULT_STATE = "sqlite"
+DEFAULT_STATE_PATH = ".loopy/state.db"
 
-# Reserved-but-not-built keys (TODO #1 limits, TODO #2 state). Recognized so a forward-looking
-# config doesn't trip the unknown-key warning, but intentionally not parsed in v1.
-_RESERVED_TOP_LEVEL = ("state", "limits")
-_KNOWN_TOP_LEVEL = ("sensor_server", "bus", *_RESERVED_TOP_LEVEL)
+# Reserved-but-not-built keys (TODO #1 limits). Recognized so a forward-looking config doesn't
+# trip the unknown-key warning, but intentionally not parsed in v1.
+_RESERVED_TOP_LEVEL = ("limits",)
+_KNOWN_TOP_LEVEL = ("sensor_server", "bus", "state", *_RESERVED_TOP_LEVEL)
 _KNOWN_SENSOR_SERVER = ("host", "port")
+_KNOWN_STATE = ("backend", "path")
 
 _yaml = YAML(typ="safe")
 
@@ -48,6 +55,8 @@ class LoopyConfig:
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
     bus: str = DEFAULT_BUS
+    state_backend: str = DEFAULT_STATE
+    state_path: str = DEFAULT_STATE_PATH
 
 
 def _default_warn(msg: str) -> None:
@@ -96,7 +105,26 @@ def load_config(path: Path, *, on_warning: Callable[[str], None] = _default_warn
     if not isinstance(bus, str) or bus not in VALID_BUS:
         raise ConfigError(f"{path}: 'bus' must be one of {VALID_BUS} (got {bus!r})")
 
-    return LoopyConfig(host=host, port=port, bus=bus)
+    state_backend, state_path = DEFAULT_STATE, DEFAULT_STATE_PATH
+    state_cfg = data.get("state")
+    if state_cfg is not None:
+        if not isinstance(state_cfg, Mapping):
+            raise ConfigError(f"{path}: 'state' must be a mapping")
+        for key in state_cfg:
+            if key not in _KNOWN_STATE:
+                on_warning(f"{path}: unknown key 'state.{key}' ignored")
+        if "backend" in state_cfg:
+            state_backend = str(state_cfg["backend"])
+            if state_backend not in VALID_STATE:
+                raise ConfigError(
+                    f"{path}: 'state.backend' must be one of {VALID_STATE} (got {state_backend!r})"
+                )
+        if "path" in state_cfg:
+            state_path = str(state_cfg["path"])
+
+    return LoopyConfig(
+        host=host, port=port, bus=bus, state_backend=state_backend, state_path=state_path
+    )
 
 
 def resolve(
@@ -105,19 +133,26 @@ def resolve(
     host: str | None = None,
     port: int | None = None,
     bus: str | None = None,
+    state_backend: str | None = None,
+    state_path: str | None = None,
 ) -> LoopyConfig:
     """Overlay explicit CLI flags onto a loaded config (flag wins; None means 'not passed').
 
-    Validates the final `bus`, so an invalid `--bus` flag is reported as a ConfigError (the same
-    clean path as an invalid file value) rather than surfacing later as a factory ValueError.
+    Validates the final `bus`/`state_backend`, so an invalid `--bus`/`--state` flag is reported as
+    a ConfigError (the same clean path as an invalid file value) rather than surfacing later as a
+    factory ValueError.
     """
     resolved = LoopyConfig(
         host=host if host is not None else config.host,
         port=port if port is not None else config.port,
         bus=bus if bus is not None else config.bus,
+        state_backend=state_backend if state_backend is not None else config.state_backend,
+        state_path=state_path if state_path is not None else config.state_path,
     )
     if resolved.bus not in VALID_BUS:
         raise ConfigError(f"'bus' must be one of {VALID_BUS} (got {resolved.bus!r})")
+    if resolved.state_backend not in VALID_STATE:
+        raise ConfigError(f"'state' must be one of {VALID_STATE} (got {resolved.state_backend!r})")
     return resolved
 
 
