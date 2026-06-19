@@ -142,6 +142,33 @@ failures debuggable) → 12, 13, 14 (polish)**. A single integration test that r
   quickstart documenting the `env_file` needs (`PATH`, `HOME`, `ANTHROPIC_API_KEY`, `GH_TOKEN`), plus a
   one-command CI smoke test that drives a tiny edit end-to-end.
 
+- [ ] **15. Sandbox network isolation is unenforced — `spec.network` egress allowlist is a no-op locally and on Daytona**
+  — `loopy_runtime/sandbox/docker.py:121-122`, Daytona provider (same gap)
+  The Docker provider is hermetic for filesystem/toolchain/env, but the container is started with
+  `docker run` and no network controls, so the agent can reach any host the developer's machine can —
+  `spec.network` (the per-host egress allowlist) is parsed but never enforced. Daytona has the same gap.
+  This means "hermetic" today means *env/toolchain* isolation, not *network* isolation, so a compromised
+  or misbehaving agent has unrestricted egress. Fix (Docker): run the container on a locked-down user
+  network and enforce the allowlist (e.g. an egress proxy the container is forced through, or
+  `--network` + iptables/`--add-host` rules derived from `spec.network`); deny by default. Mirror the
+  enforcement contract on Daytona so both providers honor `spec.network` identically.
+
+- [ ] **16. No harness toolchain contract — a sandbox image missing the harness CLI fails cryptically mid-run, not at preflight**
+  — `loopy_runtime/harness/base.py` (`required_keys`/`missing_keys`), `loopy_runtime/runtime/inmemory.py:100` (`preflight`)
+  Env vars are necessary but not sufficient: `PATH`/`HOME` being set doesn't help if the binary the
+  harness shells out to was never installed in the image. `ClaudeCodeHarness` runs `["claude", ...]`
+  (`claude_code.py:53`); a bare `python:3.12-slim` image has no `claude`, no `node`, and (per #6) the
+  agent fails deep in the run with a `command not found` the JSON parser then chokes on — when the real
+  problem is "this image can't host this harness." There are two layers: a **common substrate** any agent
+  needs (`git` — we now clone repos into the workspace, `ca-certificates`, a shell, `curl`) and a
+  **harness-specific toolchain** (the `claude`/`codex` CLI + its runtime). Fix, symmetric with the
+  existing credential preflight: add a harness `required_tools(agent)` contract (base returns the
+  substrate; `claude-code` adds `{claude, git}`, codex adds `{codex}`) and extend `preflight()` to probe
+  the sandbox (`which <tool>` via `sandbox.exec`, uniform across local/docker/Daytona) and aggregate
+  misses into the same fail-fast `PreflightError` with an actionable message. Keep provisioning
+  **declarative** — recommend/ship a `loopy-claude-code` base image or snapshot rather than auto-injecting
+  install layers (that would fight the hermetic-image principle from #6); preflight just enforces it.
+
 ## Backend capability status (B1–B12)
 
 Live status of the backend capabilities defined in `ARCHITECTURE.md §3.1` (full definitions +
