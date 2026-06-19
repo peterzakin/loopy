@@ -143,3 +143,36 @@ def test_discovery_inventories_all_four_kinds(tmp_path):
     assert [p.name for p in inv.workflow_files] == ["investigate.md"]
     assert [p.name for p in inv.skill_dirs] == ["triage"]
     assert [p.name for p in inv.sensor_files] == ["sensors.py"]
+
+
+# ── Sandbox repos: clone targets (E212) ─────────────────────────────────────────
+
+
+def test_repos_parse_string_shorthand_and_object_form(tmp_path):
+    registry = (
+        "sandboxes:\n"
+        "  default:\n"
+        "    repos:\n"
+        "      - acme/runbooks\n"
+        "      - { url: acme/playbooks, ref: main, path: pb, depth: null }\n"
+    )
+    write_project(tmp_path, {"registry.yml": registry})
+    result = compile_project(tmp_path)
+    assert result.diagnostics.items == []
+    repos = result.project.registry.sandboxes["default"].repos
+    assert [(r.url, r.ref, r.path, r.depth) for r in repos] == [
+        ("acme/runbooks", None, None, 1),
+        ("acme/playbooks", "main", "pb", None),
+    ]
+
+
+def test_repos_missing_url_reports_e212(tmp_path):
+    registry = "sandboxes:\n  default:\n    repos:\n      - { ref: main }\n"
+    write_project(tmp_path, {"registry.yml": registry})
+    assert_code(compile_project(tmp_path), codes.E212)
+
+
+def test_repos_non_list_reports_e212(tmp_path):
+    registry = "sandboxes:\n  default:\n    repos: acme/runbooks\n"
+    write_project(tmp_path, {"registry.yml": registry})
+    assert_code(compile_project(tmp_path), codes.E212)

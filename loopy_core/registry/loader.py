@@ -16,7 +16,7 @@ from ruamel.yaml.error import MarkedYAMLError, YAMLError
 from loopy_core.compile import codes
 from loopy_core.compile.diagnostics import DiagnosticCollector
 from loopy_core.discovery import Inventory
-from loopy_core.registry.model import Agent, Event, Harness, Registry, Sandbox
+from loopy_core.registry.model import Agent, Event, Harness, Registry, Repo, Sandbox
 from loopy_core.registry.types import desugar
 from loopy_core.span import Span, span_at
 
@@ -82,7 +82,7 @@ def load_registry(inv: Inventory, diags: DiagnosticCollector) -> Registry:
     defaults = data.get("defaults") or {}
     default_agent = (defaults.get("agent") or {}) if isinstance(defaults, Mapping) else {}
 
-    sandboxes = _load_sandboxes(data.get("sandboxes") or {}, file)
+    sandboxes = _load_sandboxes(data.get("sandboxes") or {}, file, diags)
     agents = _load_agents(data.get("agents") or {}, default_agent, file)
     events = _load_events(data.get("events") or {}, file, diags)
 
@@ -91,7 +91,9 @@ def load_registry(inv: Inventory, diags: DiagnosticCollector) -> Registry:
     return Registry(sandboxes=sandboxes, agents=agents, events=events)
 
 
-def _load_sandboxes(sb_map: Mapping, file: str) -> dict[str, Sandbox]:
+def _load_sandboxes(
+    sb_map: Mapping, file: str, diags: DiagnosticCollector
+) -> dict[str, Sandbox]:
     out: dict[str, Sandbox] = {}
     for name, body in sb_map.items():
         body = body or {}
@@ -101,9 +103,50 @@ def _load_sandboxes(sb_map: Mapping, file: str) -> dict[str, Sandbox]:
             image=dict(body.get("image") or {}),
             network=list(body.get("network") or []),
             env_file=_as_str_list(body.get("env_file")),  # path reference only; not read here
+            repos=_load_repos(body.get("repos"), file, _line_of(sb_map, name), diags),
             span=span_at(file, _line_of(sb_map, name)),
         )
     return out
+
+
+def _load_repos(value: object, file: str, line: int, diags: DiagnosticCollector) -> list[Repo]:
+    """Normalize the `repos:` list to `Repo`s. Each item is an `owner/name`/URL string or a
+    mapping with at least `url`; anything else is E212. Returns the well-formed subset."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        diags.error(codes.E212, "sandbox 'repos' must be a list of repos", span=span_at(file, line))
+        return []
+    repos: list[Repo] = []
+    for item in value:
+        if isinstance(item, str):
+            if not item.strip():
+                diags.error(codes.E212, "a repo entry is an empty string", span=span_at(file, line))
+                continue
+            repos.append(Repo(url=item.strip()))
+        elif isinstance(item, Mapping):
+            url = item.get("url")
+            if not isinstance(url, str) or not url.strip():
+                diags.error(
+                    codes.E212, "a repo entry is missing a 'url'", span=span_at(file, line)
+                )
+                continue
+            depth = item.get("depth", 1)
+            repos.append(
+                Repo(
+                    url=url.strip(),
+                    ref=item.get("ref"),
+                    path=item.get("path"),
+                    depth=int(depth) if depth is not None else None,
+                )
+            )
+        else:
+            diags.error(
+                codes.E212,
+                "a repo entry must be an 'owner/name' string or a {url, ...} mapping",
+                span=span_at(file, line),
+            )
+    return repos
 
 
 def _load_agents(ag_map: Mapping, default_agent: Mapping, file: str) -> dict[str, Agent]:

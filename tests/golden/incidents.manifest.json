@@ -165,7 +165,15 @@
         "network": [
           "github.com"
         ],
-        "provider": "daytona"
+        "provider": "daytona",
+        "repos": [
+          {
+            "depth": 1,
+            "path": null,
+            "ref": null,
+            "url": "acme/runbooks"
+          }
+        ]
       }
     }
   },

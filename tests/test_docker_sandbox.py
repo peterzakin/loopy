@@ -132,5 +132,5 @@ def test_release_force_removes_container():
 
 
 def test_factory_selects_docker_provider():
-    assert isinstance(make_sandbox_provider("docker"), DockerSandboxProvider)
-    assert isinstance(make_sandbox_provider("local"), LocalSandboxProvider)
+    assert isinstance(make_sandbox_provider("docker").inner, DockerSandboxProvider)
+    assert isinstance(make_sandbox_provider("local").inner, LocalSandboxProvider)

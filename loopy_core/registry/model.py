@@ -16,6 +16,15 @@ class Harness(BaseModel):
     model: str | None = None
 
 
+class Repo(BaseModel):
+    # A GitHub repo to clone into the sandbox workspace at acquire time. `url` is an
+    # `owner/name` shorthand or a full https URL; the rest are optional checkout knobs.
+    url: str
+    ref: str | None = None  # branch/tag/SHA; the repo's default branch when omitted
+    path: str | None = None  # subdir under the workdir; defaults to the repo name
+    depth: int | None = 1  # shallow clone depth; None for full history
+
+
 class Sandbox(BaseModel):
     name: str
     provider: str | None = None
@@ -24,6 +33,9 @@ class Sandbox(BaseModel):
     # Path(s) to env file(s) supplying this sandbox's secrets. A *reference* only —
     # the compiler records it and never reads the file (values resolve at run time).
     env_file: list[str] = Field(default_factory=list)
+    # GitHub repos cloned into the workspace at acquire time (FRONTEND §2). Auth rides
+    # the credentials the runtime injects; egress must be allowed by `network`.
+    repos: list[Repo] = Field(default_factory=list)
     span: Span
 
 
