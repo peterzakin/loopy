@@ -53,6 +53,9 @@ class HarnessRouter:
     def required_keys(self, agent: AgentSpec) -> set[str]:
         return self._harness_for(agent).required_keys(agent)
 
+    def missing_keys(self, agent: AgentSpec, env: Mapping[str, str]) -> set[str]:
+        return self._harness_for(agent).missing_keys(agent, env)
+
     async def run(self, step: StepSpec, ctx: StepContext, sandbox: Sandbox) -> StepResult:
         agent = self._agents.get(step.agent) if step.agent else None
         if agent is None:

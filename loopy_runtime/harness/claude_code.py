@@ -10,15 +10,44 @@ argv and how to read its envelope.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
+from pathlib import Path
 
 from loopy_runtime.harness.base import HarnessError, JsonProtocolHarness
 from loopy_runtime.manifest_model import AgentSpec, StepSpec
+from loopy_runtime.providers import required_model_key
 
 __all__ = ["ClaudeCodeHarness", "HarnessError"]
+
+# Where the Claude Code CLI stores OAuth/subscription credentials under HOME. When present
+# and reachable, the agent authenticates without an ANTHROPIC_API_KEY.
+_OAUTH_CREDENTIALS = Path(".claude", ".credentials.json")
+
+
+def _claude_oauth_available(env: Mapping[str, str]) -> bool:
+    """True when Claude Code OAuth credentials are reachable, so no API key is needed.
+
+    Keyed strictly on the sandbox's own `HOME` (from the env_file / image) — not the
+    control-plane's — so the check is deterministic and never passes on creds the sandbox
+    can't actually read. To use OAuth, point the sandbox `HOME` at a dir holding
+    `.claude/.credentials.json` (for the bare `local` provider, your host home).
+    """
+    home = env.get("HOME")
+    return bool(home) and (Path(home) / _OAUTH_CREDENTIALS).is_file()
 
 
 class ClaudeCodeHarness(JsonProtocolHarness):
     RUNTIME = "claude-code"
+
+    def missing_keys(self, agent: AgentSpec, env: Mapping[str, str]) -> set[str]:
+        # Local Claude Code is usually OAuth/subscription-authed, not API-keyed. Treat the
+        # model key as satisfied when those credentials are reachable, so a runnable OAuth
+        # setup isn't rejected up front for lacking ANTHROPIC_API_KEY.
+        missing = super().missing_keys(agent, env)
+        model_key = required_model_key(self.RUNTIME)
+        if model_key in missing and _claude_oauth_available(env):
+            missing = missing - {model_key}
+        return missing
 
     def build_argv(self, step: StepSpec, agent: AgentSpec, prompt: str) -> list[str]:
         argv = ["claude", "-p", prompt, "--output-format", "json"]

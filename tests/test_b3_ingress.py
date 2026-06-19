@@ -188,6 +188,9 @@ class FailingHarness:
     def required_keys(self, agent):
         return set()
 
+    def missing_keys(self, agent, env):
+        return set()
+
     async def run(self, step, ctx, sandbox):
         if step.id == self.fail_step_id:
             raise RuntimeError("boom")

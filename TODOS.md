@@ -81,14 +81,16 @@ failures debuggable) → 12, 13, 14 (polish)**. A single integration test that r
   tokens when an App is configured, with a `--no-tokens` opt-out for fully offline tests. (Pairs with
   #13 — once tokens are minted here the manual-token workaround goes away.)
 
-- [ ] **8. `claude-code` harness hard-requires `ANTHROPIC_API_KEY` even when Claude is OAuth-authed**
-  — `loopy_runtime/harness/base.py:59-60` + `loopy_runtime/runtime/inmemory.py:283-289` + `loopy_runtime/providers.py:38`
-  The presence-only check runs before the agent starts; local Claude Code is typically OAuth/
-  subscription-authed (`~/.claude/.credentials.json`), so a runnable setup dies with `sandbox provides
-  no ANTHROPIC_API_KEY`. Fix: make the check provider/`HOME`-aware (if `HOME` is provided and
-  `~/.claude/.credentials.json` exists, don't require the key), or downgrade to a warning for the local
-  provider. At minimum the error should say how to satisfy it. Dovetails with #6 (once `HOME` is
-  inherited the OAuth creds are reachable).
+- [x] ~~**8. `claude-code` harness hard-requires `ANTHROPIC_API_KEY` even when Claude is OAuth-authed**~~
+  — `loopy_runtime/harness/claude_code.py` + `loopy_runtime/runtime/inmemory.py`
+  The presence-only check ran before the agent started; local Claude Code is typically OAuth/
+  subscription-authed (`~/.claude/.credentials.json`), so a runnable setup died with `sandbox provides
+  no ANTHROPIC_API_KEY`. **Resolved:** added an env-aware `missing_keys(agent, env)` to the harness
+  contract (alongside the static `required_keys`); `ClaudeCodeHarness` treats the model key as
+  satisfied when OAuth creds are reachable via the sandbox's own `HOME` (`$HOME/.claude/.credentials.json`)
+  — keyed on the sandbox env only, never the control-plane's, so it stays deterministic and never passes
+  on creds the sandbox can't read. The error now spells out both fixes (add the key to `env_file`, or
+  make OAuth creds reachable via `HOME`).
 
 ### P1 — Observability (when it breaks you're flying blind)
 

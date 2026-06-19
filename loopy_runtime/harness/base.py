@@ -59,6 +59,11 @@ class JsonProtocolHarness:
     def required_keys(self, agent: AgentSpec) -> set[str]:
         return {required_model_key(agent.harness.runtime)}
 
+    def missing_keys(self, agent: AgentSpec, env: Mapping[str, str]) -> set[str]:
+        """Required keys not satisfiable for `agent` given the sandbox `env`. Default: those
+        absent from `env`; a harness may override to honor other auth (e.g. OAuth creds)."""
+        return self.required_keys(agent) - set(env)
+
     async def run(self, step: StepSpec, ctx: StepContext, sandbox: Sandbox) -> StepResult:
         if step.agent is None or step.agent not in self._agents:
             raise HarnessError(f"step '{step.id}' has no resolvable agent")

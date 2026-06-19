@@ -279,13 +279,16 @@ class InMemoryRuntime:
         spec = self.manifest.registry.sandboxes.get(sandbox_name) or SandboxSpec()
         secrets = dict(self.secrets.resolve(sandbox_name, spec))
 
-        # Provider-key rule: the sandbox must supply whatever keys the harness needs.
+        # Provider-key rule: the sandbox must supply whatever keys the harness needs — unless
+        # the harness can satisfy them another way (e.g. Claude Code OAuth creds via HOME).
         if agent is not None:
-            missing = self.harness.required_keys(agent) - set(secrets)
+            missing = self.harness.missing_keys(agent, secrets)
             if missing:
+                keys = ", ".join(sorted(missing))
                 raise RuntimeError(
-                    f"sandbox '{sandbox_name}' provides no {', '.join(sorted(missing))} "
-                    f"required by agent '{step.agent}'"
+                    f"sandbox '{sandbox_name}' provides no {keys} required by agent "
+                    f"'{step.agent}'. Add {keys} to the sandbox's env_file, or authenticate the "
+                    f"CLI so its OAuth credentials are reachable via the sandbox HOME."
                 )
 
         # Mint + inject scoped SCM creds last, so they win over any env_file key and so

@@ -111,6 +111,13 @@ class AgentHarness(Protocol):
         The runtime asserts these are present before running; a stub returns an empty set."""
         ...
 
+    def missing_keys(self, agent: AgentSpec, env: Mapping[str, str]) -> set[str]:
+        """Required keys this harness cannot satisfy for `agent` given the sandbox `env`.
+        The runtime refuses to run a step when this is non-empty. Defaults to
+        `required_keys(agent) - env`, but a harness may honor alternative auth — e.g. Claude
+        Code OAuth credentials reachable via `HOME` satisfy the model key without it being set."""
+        ...
+
 
 # ── SandboxProvider ─ B4 ────────────────────────────────────────────────────────────
 @runtime_checkable
