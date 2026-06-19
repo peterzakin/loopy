@@ -10,6 +10,7 @@ simulated with a control-plane `loopy.env`; the provider is built, not exercised
 
 from __future__ import annotations
 
+import pytest
 from typer.testing import CliRunner
 
 from loopy_cli import _make_token_provider, _run_record, app, build_runtime
@@ -50,6 +51,19 @@ def test_token_provider_built_from_control_plane_env(tmp_path, monkeypatch):
     _configure_app(tmp_path)
     provider = _make_token_provider(tmp_path, enabled=True, announce=False)
     assert isinstance(provider, GitHubAppTokenProvider)
+
+
+def test_token_provider_raises_when_configured_but_key_unloadable(tmp_path, monkeypatch):
+    # GITHUB_APP_ID set but the key won't resolve → fail loudly with the real reason,
+    # not a silent None that later reads as a misleading "no GitHub auth is configured".
+    monkeypatch.delenv("GITHUB_APP_ID", raising=False)
+    monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY_FILE", raising=False)
+    (tmp_path / "loopy.env").write_text(
+        "GITHUB_APP_ID=123\nGITHUB_APP_PRIVATE_KEY_FILE=missing.pem\n"
+    )
+    with pytest.raises(RuntimeError, match="private key could not be loaded"):
+        _make_token_provider(tmp_path, enabled=True, announce=False)
 
 
 # --- build_runtime ------------------------------------------------------------

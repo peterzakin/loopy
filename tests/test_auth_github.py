@@ -6,8 +6,6 @@ signs/decodes JWTs with a throwaway RSA key, so nothing here touches GitHub.
 
 from __future__ import annotations
 
-import stat
-
 import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -145,28 +143,40 @@ def test_exchange_manifest_code_hits_conversions_endpoint(monkeypatch):
     assert result["slug"] == "loopy-acme"
 
 
-def test_write_app_credentials_lands_pem_and_env_and_gitignore(tmp_path):
+def test_write_app_credentials_inlines_key_and_gitignores_env(tmp_path):
     conversion = {"id": 1234567, "pem": "-----BEGIN KEY-----\nabc\n-----END\n", "slug": "x"}
-    pem_path = auth.write_app_credentials(tmp_path, conversion)
+    env_path = auth.write_app_credentials(tmp_path, conversion)
 
-    assert pem_path == tmp_path / auth.PEM_RELPATH
-    assert pem_path.read_text() == conversion["pem"]
-    assert stat.S_IMODE(pem_path.stat().st_mode) == 0o600  # owner-only
-
+    assert env_path == tmp_path / "loopy.env"
     env = load_control_plane_env(tmp_path)
     assert env["GITHUB_APP_ID"] == "1234567"
-    assert env["GITHUB_APP_PRIVATE_KEY_FILE"] == auth.PEM_RELPATH
+    # The multi-line PEM is stored single-line with newlines escaped (dotenv has no
+    # multi-line values); no path is stored.
+    assert "\n" not in env["GITHUB_APP_PRIVATE_KEY"]
+    assert env["GITHUB_APP_PRIVATE_KEY"] == "-----BEGIN KEY-----\\nabc\\n-----END\\n"
+    assert "GITHUB_APP_PRIVATE_KEY_FILE" not in (tmp_path / "loopy.env").read_text()
 
-    assert ".loopy/" in (tmp_path / ".gitignore").read_text()
+    # loopy.env now carries the private key, so it must be gitignored.
+    assert "loopy.env" in (tmp_path / ".gitignore").read_text()
 
 
-def test_credentials_round_trip_from_env(tmp_path):
-    conversion = {"id": 42, "pem": "PEMBODY", "slug": "x"}
-    auth.write_app_credentials(tmp_path, conversion)
+def test_credentials_round_trip_restores_multiline_pem(tmp_path):
+    pem = "-----BEGIN PRIVATE KEY-----\nMIIBline\nline2==\n-----END PRIVATE KEY-----\n"
+    auth.write_app_credentials(tmp_path, {"id": 42, "pem": pem, "slug": "x"})
     env = load_control_plane_env(tmp_path)
     creds = github_app.AppCredentials.from_env(env, root=tmp_path)
     assert creds.app_id == "42"
-    assert creds.private_key_pem == "PEMBODY"
+    assert creds.private_key_pem == pem  # newlines restored on read
+
+
+def test_from_env_still_supports_key_file(tmp_path):
+    # Inline is the default `loopy auth github` writes, but a file path stays valid for
+    # production secret mounts.
+    (tmp_path / "k.pem").write_text("REALPEM")
+    creds = github_app.AppCredentials.from_env(
+        {"GITHUB_APP_ID": "1", "GITHUB_APP_PRIVATE_KEY_FILE": "k.pem"}, root=tmp_path
+    )
+    assert creds.private_key_pem == "REALPEM"
 
 
 def test_from_env_raises_without_id():

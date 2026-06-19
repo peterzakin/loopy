@@ -423,14 +423,19 @@ loopy auth status            # show + verify stored creds
 
 It opens a browser to a local page that POSTs a manifest to GitHub; you confirm (~2 clicks);
 GitHub redirects back to a one-shot `127.0.0.1` listener with a temporary code, which loopy
-exchanges for the App's credentials. The private key lands in `./.loopy/github-app.pem` (mode
-`0600`, gitignored) and `loopy.env` gains:
+exchanges for the App's credentials. The App id and private key are written into `loopy.env`
+(which is added to `.gitignore`, since it now holds the key); the key is stored inline with its
+newlines escaped rather than referenced by a file path, so credential loading doesn't depend on
+which `--root` a later command uses:
 
 ```ini
-# written by `loopy auth github`
+# written by `loopy auth github` (loopy.env is gitignored)
 GITHUB_APP_ID=1234567
-GITHUB_APP_PRIVATE_KEY_FILE=.loopy/github-app.pem
+GITHUB_APP_PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY-----\n…\n-----END RSA PRIVATE KEY-----\n
 ```
+
+(A `GITHUB_APP_PRIVATE_KEY_FILE=<path>` is still honored if you set it yourself — e.g. a mounted
+secret file in production.)
 
 The manifest *creates* the App but does not *install* it, so the command prints an install URL —
 visit it to choose exactly which repos the App can touch. The default permissions are the

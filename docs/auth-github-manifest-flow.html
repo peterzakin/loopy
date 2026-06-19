@@ -301,15 +301,16 @@
           <span class="who local">control-plane · local</span>
         </div>
         <div class="body">
-          <p>The private key is written to a gitignored file (mode <code class="k">0600</code>); the app id and
-             key-file path are merged into the existing <code class="k">loopy.env</code>.</p>
+          <p>The app id and private key are merged into the existing <code class="k">loopy.env</code>. The
+             key is stored <i>inline</i> (newlines escaped) rather than referenced by a file path, so
+             credential loading never depends on which <code class="k">--root</code> a later command uses;
+             <code class="k">loopy.env</code> is added to <code class="k">.gitignore</code> since it now holds the key.</p>
           <div class="term">
             <div class="chrome"><div class="lights"><i></i><i></i><i></i></div><span class="title">written to disk</span></div>
-            <div class="screen"><span class="ok">✓</span> .loopy/github-app.pem        <span class="g">(0600, gitignored)</span>
-<span class="ok">✓</span> loopy.env
+            <div class="screen"><span class="ok">✓</span> loopy.env        <span class="g">(gitignored — now holds the key)</span>
     <span class="c">GITHUB_APP_ID</span>=1234567
-    <span class="c">GITHUB_APP_PRIVATE_KEY_FILE</span>=.loopy/github-app.pem
-<span class="ok">✓</span> .gitignore  <span class="g">(+ .loopy/)</span></div>
+    <span class="c">GITHUB_APP_PRIVATE_KEY</span>=-----BEGIN RSA PRIVATE KEY-----\n…\n-----END…\n
+<span class="ok">✓</span> .gitignore  <span class="g">(+ loopy.env)</span></div>
           </div>
           <div class="note warn"><b>Note:</b> the App still exists but isn't <i>installed</i> on any repos yet — the manifest creates, it doesn't install.</div>
         </div>
@@ -379,7 +380,7 @@
         <h3>🔐 Control-plane <span class="tag">(your machine)</span></h3>
         <p class="tag">long-lived secret lives here, only here</p>
         <ul>
-          <li><span class="secret">github-app.pem</span> — the App private key</li>
+          <li><span class="secret">GITHUB_APP_PRIVATE_KEY</span> (in gitignored <code>loopy.env</code>) — the App private key</li>
           <li>Mints JWTs (RS256, ~9&nbsp;min)</li>
           <li>Exchanges JWT → installation token</li>
         </ul>

@@ -103,11 +103,17 @@ defaults:
     harness: { runtime: claude-code, model: claude-sonnet-4-6 }
 
 # Sandbox — compute + egress. `image:` is the declarative build; `network:` the egress allowlist.
+# `env_file:` points at a gitignored dotenv whose keys are injected as the sandbox's environment
+# (the sandbox inherits *nothing* from your shell — secrets like `ANTHROPIC_API_KEY` must live
+# here). `repos:` are cloned into the workspace at acquire time, with git auth injected (see
+# "Examples / run it locally").
 sandboxes:
   default:
     provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/daytona, user: daytona }
     network: [github.com]
+    env_file: secrets/dev.env        # gitignored; injected as the sandbox's env
+    repos: [octocat/Hello-World]     # cloned into the workspace at acquire time (git auth injected)
 
 # Agents — capability comes from the sandbox (image + egress), skills, injected creds, and
 # budget; numeric caps live in budget, not in a tool name.
@@ -213,4 +219,21 @@ See `sensors/sensors.py` for the full example.
   with `loopy auth github`, and a one-command end-to-end smoke test. Tokens are injected only when
   a GitHub App is configured (on both `run` and `trigger`); they are **not** ambient on the
   `trigger`/`local` path — the quickstart spells out the difference.
+
+A few things worth knowing before the first run:
+
+- **`--sandbox` is a provider, not a sandbox name.** It takes `local | docker | daytona` and
+  selects the *provider* for the run; it is **not** the name of a sandbox in `registry.yml`. (Per-
+  sandbox provider selection from the registry isn't wired yet — the flag picks one provider for
+  the whole run.)
+- **The sandbox inherits nothing from your shell.** Everything an agent needs — the model key,
+  any git token — must be in the sandbox's `env_file`; exporting `ANTHROPIC_API_KEY` in your shell
+  is not enough. (The bare `local` provider also needs `PATH`/`HOME` there; `docker`/`daytona` get
+  those from the image.)
+- **`loopy compile <path>` generates a `loopy/` events package** under the project (`loopy/events.py`
+  + stubs, for your typechecker). It's already gitignored; pass `--out manifest.json` to also write
+  the manifest.
+- **A hand-fired event warns `LOOPY-W501 dead trigger`.** When you drive a workflow with
+  `loopy trigger --event X` and no sensor produces `X`, compile flags it as a dead trigger. That's
+  **expected** for the manual-trigger pattern — it's a warning, not an error, and the run proceeds.
 
