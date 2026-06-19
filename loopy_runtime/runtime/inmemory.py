@@ -40,6 +40,14 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+class PreflightError(RuntimeError):
+    """A credential/config problem found before any step runs.
+
+    Raised by `preflight()` (fail-fast) so a misconfigured project is reported up front,
+    in full, rather than failing mid-cascade on the first step that needs a missing key.
+    Subclasses RuntimeError so existing CLI error handling catches it."""
+
+
 class InMemoryRuntime:
     def __init__(
         self,
@@ -87,6 +95,42 @@ class InMemoryRuntime:
             entry = wf.steps.get(wf.entry) if wf.entry else None
             if entry and entry.trigger and entry.trigger.kind == "event":
                 self.bus.subscribe(entry.trigger.event, self._handler_for(wf_name))
+
+    # ── Pre-flight ────────────────────────────────────────────────────────────────
+    def preflight(self) -> None:
+        """Fail-fast credential check (B6): before any step runs, verify every agent a
+        step references can be authenticated — its sandbox must supply the provider keys
+        its harness requires (`ANTHROPIC_API_KEY` for `claude-code`, etc.). Aggregates
+        *all* missing keys across every agent into a single error so a misconfigured
+        project is reported up front, in full, instead of dying mid-cascade on the first
+        step that needs the key. The per-step check in `_run_step` remains as a backstop
+        for paths that don't run preflight (direct `drain`/`tick`, tests)."""
+        problems: list[str] = []
+        seen: set[str] = set()
+        for wf in self.manifest.workflows.values():
+            for step in wf.steps.values():
+                name = step.agent
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                agent = self.manifest.registry.agents.get(name)
+                if agent is None:
+                    continue  # an unresolvable agent is a compile-time error, not preflight's
+                sandbox_name = (agent.sandbox or "default") or "default"
+                spec = self.manifest.registry.sandboxes.get(sandbox_name) or SandboxSpec()
+                secrets = self.secrets.resolve(sandbox_name, spec)
+                missing = self.harness.required_keys(agent) - set(secrets)
+                if missing:
+                    problems.append(
+                        f"agent '{name}' (sandbox '{sandbox_name}'): "
+                        f"missing {', '.join(sorted(missing))}"
+                    )
+        if problems:
+            raise PreflightError(
+                "pre-flight failed — sandbox(es) cannot supply the harness's required "
+                "provider key(s):\n  " + "\n  ".join(problems) + "\n\nAdd the missing "
+                "key(s) to the sandbox's env_file (see ARCHITECTURE.md §6)."
+            )
 
     # ── Runtime Protocol ────────────────────────────────────────────────────────
     async def trigger(self, event: Event) -> RunId | None:

@@ -99,3 +99,32 @@ def test_runtime_missing_model_key_records_failed_run():
     status = asyncio.run(rt.status(run_id))
     assert status.state == "failed"
     assert "ANTHROPIC_API_KEY" in (status.error or "")
+
+
+def _runtime(secrets):
+    m = load_manifest(GOLDEN)
+    return InMemoryRuntime(
+        m,
+        harness=ClaudeCodeHarness(m.registry.agents),
+        sandboxes=LocalSandboxProvider(),
+        secrets=secrets,
+        bus=InProcessEventBus(),
+    )
+
+
+def test_preflight_raises_on_missing_provider_key():
+    # Fail fast before any step runs: a sandbox that can't supply ANTHROPIC_API_KEY is a
+    # PreflightError naming the agent + the missing key, not a mid-cascade failure.
+    from loopy_runtime.runtime.inmemory import PreflightError
+
+    rt = _runtime(StaticSecretsResolver({}))
+    with pytest.raises(PreflightError) as exc:
+        rt.preflight()
+    assert "ANTHROPIC_API_KEY" in str(exc.value)
+    assert "pre-flight failed" in str(exc.value)
+
+
+def test_preflight_passes_when_keys_present():
+    # With the required key supplied, preflight is a no-op (no run is instantiated).
+    rt = _runtime(StaticSecretsResolver({"ANTHROPIC_API_KEY": "sk-test"}))
+    rt.preflight()

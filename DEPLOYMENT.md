@@ -445,9 +445,10 @@ What you actually need in place for a successful run, in order:
    alongside it (needed only for sensor module source + `env_file`s).
 3. **Agent secrets, as sandbox `env_file`s.** Each sandbox's `env_file` must exist under the
    project root and contain the keys the harness needs — at minimum the model API key for the
-   agent's runtime (`ANTHROPIC_API_KEY` for `claude-code`, `OPENAI_API_KEY` for `codex`). The runtime refuses to start a
-   step if its sandbox can't supply the harness's required keys, and refuses `env_file` paths that
-   escape the root.
+   agent's runtime (`ANTHROPIC_API_KEY` for `claude-code`, `OPENAI_API_KEY` for `codex`). A pre-flight
+   check at startup (`loopy run`/`loopy trigger`) aggregates and reports every agent whose sandbox
+   can't supply its harness's required keys, failing fast before any step runs; `env_file` paths that
+   escape the root are rejected too.
 4. **Sensor secrets, as `sensors/.env`.** Credentials an in-process `@sensor` needs (a poll API
    key, a webhook-signing secret) go in a single runner-wide `sensors/.env` under the project
    root. `loopy run` merges them into the process env (non-override: a value already set in the
