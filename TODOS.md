@@ -37,6 +37,99 @@ plan/source. When an item ships, check its box (`- [x]`) and strike the heading
   `budget` covers wall_clock/spend but there's no failure-retry surface. Settle the decision
   (leaning: backend default + optional `retry:` step override).
 
+## Developer experience — from a real end-to-end run
+
+Findings from building a `codefix`-style example (one `CodeTask` event → a `claude-code` agent that
+clones a repo, edits, pushes a branch, opens a PR) and running it with `loopy trigger … --sandbox
+local` against a real GitHub repo. It works, but getting the first green run required solving several
+non-obvious issues. Suggested order: **5, 7, 8, 6 (unblock real local runs) → 9, 10, 11 (make
+failures debuggable) → 12, 13, 14 (polish)**. A single integration test that runs `compile` +
+`trigger` against a throwaway repo and asserts a PR/branch appears would catch #5–#8 mechanically.
+
+### P0 — Correctness (silently breaks real runs)
+
+- [ ] **5. `tools:` becomes `--allowed-tools`, restricting the agent to capability names that aren't real tools**
+  — `loopy_runtime/harness/claude_code.py:27-28`
+  `agent.tools` is passed verbatim to `claude --allowed-tools`, but the registry models tools as plain
+  capability names (`open_pr`, `merge_pr`, `run_evals` — `examples/incidents/registry.yml`). As an
+  allowlist these drop Claude's default `Bash`/`Edit`/`Write`, so the agent silently does nothing; the
+  canonical `incidents` example wouldn't act. Decided approach: **A + B together** — keep defaults
+  (treat `tools:` as additive intent, don't collapse into a bare allowlist that strips defaults) AND
+  validate `tools:` against known capability names at compile time so an unknown name is a loud error,
+  not a silent no-op. Capability→concrete-tool mapping (Option C) is a follow-up once the vocabulary
+  settles. **Pick up first.**
+
+- [ ] **6. The local sandbox inherits no environment — agents start with an empty env**
+  — `loopy_runtime/sandbox/local.py:51-52`
+  `create_subprocess_exec(..., env=secrets)` where `secrets` is only the resolved `env_file`, so
+  `claude`/`git`/`curl` aren't on `PATH`, there's no `HOME` (no `~/.gitconfig`, no Claude creds).
+  Every local run fails until `PATH`+`HOME` are hand-copied into the `env_file`. Fix: for the **local**
+  provider, start from a curated host baseline (`PATH`, `HOME`, `TERM`, `LANG`) and overlay
+  `env_file`/secrets on top — or an explicit `inherit_env:` allowlist on the sandbox spec. Keep remote
+  sandboxes hermetic.
+
+- [ ] **7. `loopy trigger` doesn't inject GitHub tokens (only `loopy run` does)**
+  — `loopy_cli/__init__.py:306-312` (trigger) vs `:166,198` (run)
+  `trigger` is the documented one-shot test path but builds the runtime with no `tokens=`, so an agent
+  needing SCM creds can't get them — a token must be minted by hand and passed via `env_file`. The two
+  runtime-construction sites also drift. Fix: extract one `build_runtime(...)` helper used by both;
+  wire the token provider in `trigger` when `GITHUB_APP_ID` is set, with a `--no-tokens` opt-out for
+  offline tests. (Pairs with #13 — once tokens are minted here the manual-token workaround goes away.)
+
+- [ ] **8. `claude-code` harness hard-requires `ANTHROPIC_API_KEY` even when Claude is OAuth-authed**
+  — `loopy_runtime/harness/base.py:59-60` + `loopy_runtime/runtime/inmemory.py:283-289` + `loopy_runtime/providers.py:38`
+  The presence-only check runs before the agent starts; local Claude Code is typically OAuth/
+  subscription-authed (`~/.claude/.credentials.json`), so a runnable setup dies with `sandbox provides
+  no ANTHROPIC_API_KEY`. Fix: make the check provider/`HOME`-aware (if `HOME` is provided and
+  `~/.claude/.credentials.json` exists, don't require the key), or downgrade to a warning for the local
+  provider. At minimum the error should say how to satisfy it. Dovetails with #6 (once `HOME` is
+  inherited the OAuth creds are reachable).
+
+### P1 — Observability (when it breaks you're flying blind)
+
+- [ ] **9. `loopy trigger` doesn't print step outputs**
+  — `loopy_cli/__init__.py:320-322`
+  Prints `run`/`steps`/`emitted` only; a step's `output: {pr_url, summary}` is never shown, so the PR
+  URL has to be fished out of the GitHub API. For a test command the outputs are the point. Fix: print
+  each completed step's outputs, or add `--json` to dump the full run record (outputs, emits, per-step
+  status, spend).
+
+- [ ] **10. Agent stdout/stderr is discarded on failure**
+  — `loopy_runtime/harness/base.py:73-75` and `:138`
+  Non-zero exit surfaces a one-line `stderr.strip()`; the JSON-parse failure path reports only "result
+  was not JSON" — no transcript of what the agent did/decided. Fix: persist raw stdout/stderr to run
+  history (or a `--verbose`/per-run log file), and surface the offending output on JSON-parse errors.
+
+- [ ] **11. The output JSON protocol is brittle (final message must be JSON-only)**
+  — `loopy_runtime/harness/base.py:136`
+  `json.loads(result_text)` runs on the agent's entire final message, so a ```` ```json ```` fence or a
+  trailing sentence fails the whole run even when the work succeeded. Fix: tolerant extraction — strip
+  code fences and parse the last balanced JSON object before failing; optionally validate against the
+  declared `output:`/`emits:` schema and re-prompt once on mismatch.
+
+### P2 — Ergonomics & examples
+
+- [ ] **12. No way to start the agent in a checkout — local always gets a fresh empty temp dir**
+  — `loopy_runtime/sandbox/local.py:51`
+  `tempfile.mkdtemp(...)` is always empty, so "edit a codebase" requires the agent to `git clone` inside
+  the prompt. Fix: optional sandbox `workspace: <path>` (copy/mount into the workdir) and/or a built-in
+  "clone `{{ event.repo }}` first" step option.
+
+- [ ] **13. Secrets must be written to a file on disk; no interpolation**
+  — `loopy_runtime/secrets.py:32-40`
+  `env_file` values are parsed literally with no `${VAR}` expansion, so running the demo means writing a
+  live `ANTHROPIC_API_KEY` and GitHub token to disk with only `.gitignore` between them and a commit.
+  Fix: support env interpolation in `env_file` values (`GH_TOKEN=${GH_TOKEN}`) so secrets pass through
+  from the process env without being persisted. (Pairs with #7.)
+
+- [ ] **14. Docs/examples assume the Daytona + `run` happy path; the local path is undocumented**
+  The README + `incidents` example imply tokens are auto-injected and agents have capability tools —
+  both untrue on the `trigger`/`local` path (#5, #7, #8). `examples/codefix` was built during the run
+  but never committed, so there's nothing to mirror yet. Fix: commit a `codefix`-style example and add a
+  "Run locally" quickstart documenting the `env_file` needs (`PATH`, `HOME`, `ANTHROPIC_API_KEY`,
+  `GH_TOKEN`) and the no-`tools:` rule, plus a one-command CI smoke test that drives a tiny edit
+  end-to-end.
+
 ## Backend capability status (B1–B12)
 
 Live status of the backend capabilities defined in `ARCHITECTURE.md §3.1` (full definitions +
