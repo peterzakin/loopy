@@ -41,6 +41,14 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _sandbox_needs_github(spec: SandboxSpec) -> bool:
+    """A sandbox needs GitHub auth when it declares `repos:` to clone — private repos can't
+    clone without a token. Derived from the spec (not a separate flag) so the requirement
+    stays in lockstep with `repos:` and can't drift. A push-to-an-unlisted-repo case would
+    need an explicit sandbox knob; deferred until a workflow actually requires it."""
+    return bool(spec.repos)
+
+
 class PreflightError(RuntimeError):
     """A credential/config problem found before any step runs.
 
@@ -107,6 +115,7 @@ class InMemoryRuntime:
         step that needs the key. The per-step check in `_run_step` remains as a backstop
         for paths that don't run preflight (direct `drain`/`tick`, tests)."""
         problems: list[str] = []
+        github_sandboxes: set[str] = set()
         seen: set[str] = set()
         for wf in self.manifest.workflows.values():
             for step in wf.steps.values():
@@ -126,12 +135,44 @@ class InMemoryRuntime:
                         f"agent '{name}' (sandbox '{sandbox_name}'): "
                         f"missing {', '.join(sorted(missing))}"
                     )
+                if _sandbox_needs_github(spec):
+                    github_sandboxes.add(sandbox_name)
+
+        sections: list[str] = []
         if problems:
-            raise PreflightError(
-                "pre-flight failed — sandbox(es) cannot supply the harness's required "
-                "provider key(s):\n  " + "\n  ".join(problems) + "\n\nAdd the missing "
-                "key(s) to the sandbox's env_file (see ARCHITECTURE.md §6)."
+            sections.append(
+                "sandbox(es) cannot supply the harness's required provider key(s):\n  "
+                + "\n  ".join(problems)
+                + "\n  → add the missing key(s) to the sandbox's env_file (see ARCHITECTURE.md §6)."
             )
+        github_problem = self._github_preflight_problem(github_sandboxes)
+        if github_problem:
+            sections.append(github_problem)
+        if sections:
+            raise PreflightError("pre-flight failed —\n" + "\n".join(sections))
+
+    def _github_preflight_problem(self, sandboxes: set[str]) -> str | None:
+        """Verify GitHub auth for the sandboxes that need it (those cloning `repos:`), or
+        return a describing string when it's missing/unmintable. One mint covers all of
+        them: today's token is installation-scoped (the repos chosen at install time), not
+        per-sandbox — so this proves auth *exists and mints*, not that it reaches each
+        specific repo (per-sandbox scoping is deferred)."""
+        if not sandboxes:
+            return None
+        names = ", ".join(sorted(sandboxes))
+        if self.tokens is None:
+            return (
+                f"sandbox(es) {names} clone repos but no GitHub auth is configured.\n"
+                "  → run `loopy auth github` to set up a GitHub App."
+            )
+        try:
+            asyncio.run(self.tokens.preflight())
+        except Exception as exc:  # noqa: BLE001 - surface any mint failure as a preflight problem
+            return (
+                f"GitHub auth required by sandbox(es) {names} but unusable: {exc}\n"
+                "  → check the GitHub App credentials and that it's installed on your repos."
+            )
+        return None
 
     # ── Runtime Protocol ────────────────────────────────────────────────────────
     async def trigger(self, event: Event) -> RunId | None:
