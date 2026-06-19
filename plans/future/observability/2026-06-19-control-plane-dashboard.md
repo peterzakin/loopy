@@ -180,9 +180,9 @@ from the resolved `state:` config / `--state` flag (default `inproc` → unchang
 
 ## Steps
 
-- [ ] **Stage 1 — Protocol + stores.** Add `RunSummary` + `list_runs()` to `contract.py`;
+- [x] **Stage 1 — Protocol + stores.** Add `RunSummary` + `list_runs()` to `contract.py`;
       implement `list_runs()` on `InMemoryStateStore`. Add tests.
-- [ ] **Stage 2 — SqliteStateStore.** New `loopy_runtime/state/sqlite.py` implementing the
+- [x] **Stage 2 — SqliteStateStore.** New `loopy_runtime/state/sqlite.py` implementing the
       full `StateStore` Protocol (history/outputs/watermarks/seen/dedupe + `list_runs`), WAL
       mode, schema bootstrap on open. Maintain the `runs` summary row on `create_run` and on
       terminal `append`. Conformance tests run the *same* suite against both stores.
@@ -216,11 +216,10 @@ from the resolved `state:` config / `--state` flag (default `inproc` → unchang
 
 ## Open questions
 
-- **Run→workflow on the summary.** `run_id` is `f"{wf_name}-{seq}"`, so workflow is parseable
-  from the prefix, but a workflow name could contain `-`. Cleaner to record `workflow`
-  explicitly at `create_run` — do we extend the `StateStore.create_run` signature, or stash it
-  in the `run_started` payload? (Leaning: add it to the `run_started` `RunEvent` payload to
-  avoid a Protocol signature change.)
+- ~~**Run→workflow on the summary.**~~ **Resolved (Stage 1):** derive workflow from the
+  `f"{wf_name}-{seq}"` run id via `rpartition("-")`, guarded by `seq` being all-digits — robust
+  even when the workflow name contains `-` (e.g. `my-cool-wf-7` → `my-cool-wf`). No
+  `create_run` signature change, no runtime change. See `_workflow_of` in `state/inmemory.py`.
 - **Default DB path / discovery.** Should `loopy admin` default to a conventional path
   (e.g. `./loopy-state.db`) so it pairs with a `loopy run --state sqlite` default, or always
   require the path argument explicitly? (Leaning: explicit arg in v1.)
@@ -238,3 +237,10 @@ from the resolved `state:` config / `--state` flag (default `inproc` → unchang
 - 2026-06-19 — OTel explicitly **out of scope** for this milestone (per request).
 - 2026-06-19 — Dashboard is **read-only**; reuse existing `fastapi`/`uvicorn`; frontend is a
   static page (no JS build step).
+- 2026-06-19 — **Stages 1–2 landed.** `RunSummary` + `StateStore.list_runs()` added (additive
+  Protocol change); `SqliteStateStore` (WAL, single file, `read_only=` mode for the dashboard).
+  Terminal state (`running`/`completed`/`failed` + `ended_at`/`error`) is single-sourced via
+  `state/derive.py:terminal_state` over the history; SQLite denormalizes the same result into a
+  `runs` index on the terminal append. Workflow derived from the run id (see resolved open
+  question above). One conformance suite (`tests/test_b8_state_store.py`) runs against both
+  stores; full suite green except pre-existing optional-dep gaps (daytona/redis/crypto).

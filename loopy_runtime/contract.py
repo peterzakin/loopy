@@ -91,6 +91,24 @@ class RunStatus:
 
 
 @dataclass(frozen=True)
+class RunSummary:
+    """A one-line index entry for a run, for the observability dashboard's list view (B12).
+
+    Derived from the event-sourced history — `state`/`ended_at`/`error` come from the terminal
+    `run_completed`/`run_failed` entry — so it stays a view over the single source of truth, not
+    a second one. `workflow` is the run's workflow name; `ended_at` is None while running."""
+
+    run_id: RunId
+    workflow: str
+    state: str  # running|completed|failed
+    entry_event: EventName
+    created_at: datetime
+    ended_at: datetime | None = None
+    error: str | None = None
+
+
+
+@dataclass(frozen=True)
 class ExecResult:
     exit_code: int
     stdout: str
@@ -219,6 +237,13 @@ class StateStore(Protocol):
     async def create_run(self, run_id: RunId, manifest_version: str, entry: Event) -> None: ...
     async def append(self, run_id: RunId, ev: RunEvent) -> None: ...
     async def history(self, run_id: RunId) -> list[RunEvent]: ...
+    async def list_runs(
+        self, *, limit: int = 100, offset: int = 0, state: str | None = None
+    ) -> list[RunSummary]:
+        """Enumerate runs newest-first for the dashboard (B12). `state` filters by
+        running|completed|failed; `limit`/`offset` paginate. The per-run reads above answer
+        'what happened in run X'; this answers 'what runs happened'."""
+        ...
     async def record_output(self, run_id: RunId, step_id: StepId, out: StepOutput) -> None: ...
     async def outputs(self, run_id: RunId) -> Mapping[StepId, StepOutput]: ...
     async def get_watermark(self, t: TriggerId) -> datetime | None: ...
