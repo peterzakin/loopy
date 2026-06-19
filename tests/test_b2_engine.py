@@ -101,7 +101,23 @@ def test_runtime_missing_model_key_records_failed_run():
     assert "ANTHROPIC_API_KEY" in (status.error or "")
 
 
-def _runtime(secrets):
+class _StubTokens:
+    """Minimal TokenProvider stand-in: records preflight calls; raises `error` if set."""
+
+    def __init__(self, error: Exception | None = None):
+        self.error = error
+        self.preflight_calls = 0
+
+    async def token_env(self, spec):
+        return {}
+
+    async def preflight(self) -> None:
+        self.preflight_calls += 1
+        if self.error:
+            raise self.error
+
+
+def _runtime(secrets, tokens=None):
     m = load_manifest(GOLDEN)
     return InMemoryRuntime(
         m,
@@ -109,6 +125,7 @@ def _runtime(secrets):
         sandboxes=LocalSandboxProvider(),
         secrets=secrets,
         bus=InProcessEventBus(),
+        tokens=tokens,
     )
 
 
@@ -125,6 +142,35 @@ def test_preflight_raises_on_missing_provider_key():
 
 
 def test_preflight_passes_when_keys_present():
-    # With the required key supplied, preflight is a no-op (no run is instantiated).
-    rt = _runtime(StaticSecretsResolver({"ANTHROPIC_API_KEY": "sk-test"}))
+    # The golden sandbox clones repos, so GitHub auth is required too: with the model key
+    # supplied and a working token provider, preflight is a no-op (no run is instantiated).
+    stub = _StubTokens()
+    rt = _runtime(StaticSecretsResolver({"ANTHROPIC_API_KEY": "sk-test"}), tokens=stub)
     rt.preflight()
+    assert stub.preflight_calls == 1  # one mint warms the cache for the first real step
+
+
+def test_preflight_fails_when_repos_need_github_but_no_auth():
+    # The golden sandbox declares `repos:` to clone, so it needs GitHub auth; with no
+    # TokenProvider wired, preflight reports it up front instead of failing on first clone.
+    from loopy_runtime.runtime.inmemory import PreflightError
+
+    rt = _runtime(StaticSecretsResolver({"ANTHROPIC_API_KEY": "sk-test"}))  # tokens=None
+    with pytest.raises(PreflightError) as exc:
+        rt.preflight()
+    assert "GitHub auth" in str(exc.value)
+    assert "loopy auth github" in str(exc.value)
+
+
+def test_preflight_fails_when_token_unmintable():
+    # GitHub auth is wired but can't mint (e.g. App not installed): surface the error up front.
+    from loopy_runtime.runtime.inmemory import PreflightError
+    from loopy_runtime.scm.github_app import GitHubAppError
+
+    rt = _runtime(
+        StaticSecretsResolver({"ANTHROPIC_API_KEY": "sk-test"}),
+        tokens=_StubTokens(error=GitHubAppError("the GitHub App has no installations")),
+    )
+    with pytest.raises(PreflightError) as exc:
+        rt.preflight()
+    assert "no installations" in str(exc.value)

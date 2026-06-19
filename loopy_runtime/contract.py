@@ -205,6 +205,13 @@ class TokenProvider(Protocol):
         Merged into the sandbox env after `SecretsResolver`, so it wins on key conflicts."""
         ...
 
+    async def preflight(self) -> None:
+        """Verify these credentials can actually mint a token, raising with an actionable
+        message otherwise. Called by the runtime's fail-fast preflight when a referenced
+        sandbox needs SCM auth, so a missing/misconfigured App is reported up front instead
+        of mid-cascade on the first clone. A successful check warms the token cache."""
+        ...
+
 
 # ── StateStore ─ B8, B10, B11 ───────────────────────────────────────────────────────
 @runtime_checkable

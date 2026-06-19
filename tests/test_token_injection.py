@@ -148,6 +148,32 @@ def test_multiple_installations_raise(monkeypatch):
         asyncio.run(provider.token_env(spec=None))
 
 
+# --- preflight: prove creds mint before any step runs -----------------------
+
+
+def test_preflight_mints_and_warms_cache(monkeypatch):
+    calls = []
+
+    def fake_mint(*a, **k):
+        calls.append(1)
+        return {"token": "ghs_p", "expires_at": _future()}
+
+    monkeypatch.setattr(github_app, "mint_installation_token", fake_mint)
+    provider = GitHubAppTokenProvider(CREDS, installation_id=7)
+    asyncio.run(provider.preflight())
+    # The preflight mint is cached, so a follow-up token_env reuses it (no second mint).
+    env = asyncio.run(provider.token_env(spec=None))
+    assert env["GITHUB_TOKEN"] == "ghs_p"
+    assert len(calls) == 1
+
+
+def test_preflight_raises_when_no_installation(monkeypatch):
+    monkeypatch.setattr(github_app, "list_installations", lambda *a, **k: [])
+    provider = GitHubAppTokenProvider(CREDS)  # no explicit id → must resolve
+    with pytest.raises(github_app.GitHubAppError, match="no installations"):
+        asyncio.run(provider.preflight())
+
+
 # --- runtime seam: env reaches the sandbox ----------------------------------
 
 

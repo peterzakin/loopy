@@ -90,6 +90,13 @@ class GitHubAppTokenProvider:
     async def token_env(self, spec: SandboxSpec) -> Mapping[str, str]:
         return git_credential_env(await self._token())
 
+    async def preflight(self) -> None:
+        """Mint once to prove the App creds resolve to a usable installation token —
+        surfacing 'no installations'/'multiple installations'/missing-key errors at
+        startup rather than on the first clone. The mint is cached, so the first real
+        step reuses it instead of paying the round-trip again."""
+        await self._token()
+
     async def _token(self) -> str:
         async with self._lock:  # one mint at a time; concurrent steps share the result
             now = datetime.now(UTC)
