@@ -31,7 +31,6 @@ class Agent(BaseModel):
     name: str
     harness: Harness = Field(default_factory=Harness)
     sandbox: str | None = None
-    tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     span: Span
 

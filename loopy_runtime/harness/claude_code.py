@@ -24,8 +24,10 @@ class ClaudeCodeHarness(JsonProtocolHarness):
         argv = ["claude", "-p", prompt, "--output-format", "json"]
         if agent.harness.model:
             argv += ["--model", agent.harness.model]
-        if agent.tools:
-            argv += ["--allowed-tools", " ".join(agent.tools)]
+        # No `--allowed-tools`: that flag is an allowlist over Claude's *built-in* tools
+        # (Bash/Edit/Write/…), not loopy's capability vocabulary, so narrowing it here would
+        # strip the agent's default toolset. The sandbox is the capability boundary; the agent
+        # keeps its full toolset under bypassPermissions.
         argv += ["--permission-mode", "bypassPermissions"]  # the sandbox is the boundary
         return argv
 

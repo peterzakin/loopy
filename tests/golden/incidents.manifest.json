@@ -44,9 +44,6 @@
         "sandbox": "default",
         "skills": [
           "testing"
-        ],
-        "tools": [
-          "open_pr"
         ]
       },
       "Investigator": {
@@ -58,8 +55,7 @@
         "skills": [
           "triage",
           "repro-authoring"
-        ],
-        "tools": []
+        ]
       },
       "Releaser": {
         "harness": {
@@ -69,10 +65,6 @@
         "sandbox": "default",
         "skills": [
           "rollout"
-        ],
-        "tools": [
-          "merge_pr",
-          "set_flags"
         ]
       },
       "Reviewer": {
@@ -83,9 +75,6 @@
         "sandbox": "default",
         "skills": [
           "rubrics/fix-quality"
-        ],
-        "tools": [
-          "run_evals"
         ]
       }
     },

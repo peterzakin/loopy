@@ -50,9 +50,7 @@ def _ctx():
     )
 
 
-AGENT = AgentSpec(
-    harness=HarnessSpec(runtime="claude-code", model="claude-opus-4-8"), tools=["open_pr"]
-)
+AGENT = AgentSpec(harness=HarnessSpec(runtime="claude-code", model="claude-opus-4-8"))
 
 
 def _harness():
@@ -65,7 +63,9 @@ def test_build_argv_has_expected_flags():
     assert argv[:2] == ["claude", "-p"]
     assert "--output-format" in argv and "json" in argv
     assert "--model" in argv and "claude-opus-4-8" in argv
-    assert "--allowed-tools" in argv and "open_pr" in argv
+    # `--allowed-tools` is an allowlist over Claude's built-in tools, not loopy capability
+    # names — wiring it here would strip the agent's default toolset, so it is never passed.
+    assert "--allowed-tools" not in argv
     assert argv[argv.index("--permission-mode") + 1] == "bypassPermissions"
 
 

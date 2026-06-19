@@ -517,7 +517,7 @@ mapping, not the plumbing.
 
 1. **`AgentHarness` = Claude Agent SDK (`claude-agent-sdk`).** The README's `harness.runtime:
    claude-code` maps directly onto it — tool loop, subagents, MCP, **skills**, human-in-the-loop.
-   `tools:`/`skills:` registry fields become SDK config. Do not build an agent loop. The `codex`
+   The `skills:` registry field becomes SDK config. Do not build an agent loop. The `codex`
    runtime (OpenAI's headless `codex exec`) is a sibling behind the same interface — pick it per
    agent with `harness.runtime: codex` and an OpenAI model.
 2. **`DurableLite` ≈ DBOS, not hand-built.** DBOS is a Postgres-backed durable-execution
