@@ -59,6 +59,16 @@ def test_create_app_url_personal_vs_org():
     assert auth.create_app_url("acme") == "https://github.com/organizations/acme/settings/apps/new"
 
 
+def test_default_app_name_is_unique_by_construction():
+    # GitHub App names are global and bare "loopy" is reserved, so the default carries
+    # entropy: same inputs yield different names, and never the bare reserved name.
+    a, b = auth.default_app_name(None), auth.default_app_name(None)
+    assert a != b
+    assert a not in ("loopy", "loopy-")
+    assert a.startswith("loopy-")
+    assert auth.default_app_name("acme").startswith("loopy-acme-")
+
+
 def test_submit_page_sets_manifest_via_js_and_round_trips():
     import json
     import re

@@ -23,6 +23,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import secrets
 from pathlib import Path
 
 import typer
@@ -67,8 +68,16 @@ def create_app_url(org: str | None) -> str:
 
 
 def default_app_name(org: str | None) -> str:
-    """A reasonable, likely-unique starting name (the user can rename on GitHub)."""
-    return f"loopy-{org}" if org else "loopy"
+    """A unique-by-construction default name (GitHub App names are global).
+
+    GitHub App names must be globally unique and can't shadow an existing account —
+    bare "loopy" is reserved for @loopy — so the auto-default appends a short random
+    suffix to make a collision astronomically unlikely. Pass `--name` to choose your
+    own; whatever name the App ends up with (incl. edits on GitHub's create screen) is
+    read back from the conversion response's `slug`, so the rest of the flow follows.
+    """
+    base = f"loopy-{org}" if org else "loopy"
+    return f"{base}-{secrets.token_hex(2)}"
 
 
 def render_submit_page(action_url: str, manifest: dict, state: str) -> str:
@@ -121,12 +130,11 @@ def obtain_manifest_code(
     with `?code=&state=`. The listener is torn down before returning.
     """
     import http.server
-    import secrets as pysecrets
     import threading
     import urllib.parse
     import webbrowser
 
-    state_token = pysecrets.token_urlsafe(16)
+    state_token = secrets.token_urlsafe(16)
     captured: dict[str, str] = {}
     done = threading.Event()
 
