@@ -323,6 +323,14 @@ step is touched.**
 `loopy trigger` is the one-shot form (fire one event, run to completion, exit) — ideal for
 tests and CI. `loopy run` is the same composition but long-lived, hosting the webhooks.
 
+Heads-up on creds on this path: agent secrets are **not** ambient. A GitHub token is injected
+only when a GitHub App is configured (`loopy auth github` — then `trigger` mints one too), and
+the bare `--sandbox local` subprocess inherits *nothing* from your shell (no `PATH`/`HOME`/model
+key), so its `env_file` must supply them — prefer `--sandbox docker`, which gets the toolchain
+from the image. The [`codefix` example](../examples/codefix/) is a runnable, single-step
+walkthrough of exactly this (its README has the per-provider `env_file` matrix and a
+one-command smoke test).
+
 ### B. Single-node server — what ships today
 
 ```

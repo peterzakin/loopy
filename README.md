@@ -202,3 +202,15 @@ export const sensorRegistry = {
 
 See `sensors/sensors.py` for the full example.
 
+## Examples / run it locally
+
+- [`examples/incidents/`](examples/incidents/) — the canonical multi-workflow loop this README
+  describes (triage → resolve → confirm + autoresearch).
+- [`examples/codefix/`](examples/codefix/) — the smallest *runnable* loop: one `CodeTask` event →
+  an agent that edits a checkout and opens a PR. Start here to actually run something. Its README
+  is a **"Run locally" quickstart** — what each `--sandbox` needs in its `env_file`
+  (`ANTHROPIC_API_KEY`/`GITHUB_TOKEN`, plus `PATH`/`HOME` for bare `local`), how to wire git auth
+  with `loopy auth github`, and a one-command end-to-end smoke test. Tokens are injected only when
+  a GitHub App is configured (on both `run` and `trigger`); they are **not** ambient on the
+  `trigger`/`local` path — the quickstart spells out the difference.
+
