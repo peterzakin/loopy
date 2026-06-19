@@ -8,6 +8,7 @@ the Daytona SDK or any network.
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass, field
 
 from loopy_runtime.providers import RECOGNIZED_MODEL_KEYS
@@ -105,11 +106,38 @@ def _append_layers(image: dict, build: ImageBuild) -> None:
     if "run" in image:
         build.ops.append(("run_commands", tuple(image["run"])))
     if "user" in image:
-        build.ops.append(("dockerfile_commands", ([f"USER {image['user']}"],)))
+        _append_user_layers(image, build)
     if "entrypoint" in image:
         build.ops.append(("entrypoint", (list(image["entrypoint"]),)))
     if "cmd" in image:
         build.ops.append(("cmd", (list(image["cmd"]),)))
+
+
+def _append_user_layers(image: dict, build: ImageBuild) -> None:
+    """Emit the layers that make `image.user` actually usable, then switch to it.
+
+    Declaring `user: daytona` on a bare base (e.g. `debian_slim`) is a trap two ways:
+      1. The user doesn't exist, so the container fails to *start* with a cryptic
+         `unable to find user daytona: no matching entries in passwd file`.
+      2. `WORKDIR` runs as root and creates the workdir root-owned *before* any user
+         exists, so the agent (running as `user`) lands in a cwd it can't write to.
+
+    The user declared the intent; the build should make it true. So for a non-root
+    user we create it (idempotently — a base image that already defines it is fine)
+    and hand it ownership of the workdir, all while still root, before the `USER`
+    switch. `root` needs none of this and is left untouched.
+    """
+    user = str(image["user"])
+    if user != "root":
+        quoted = shlex.quote(user)
+        # `id -u … || useradd` keeps this idempotent: a base that already ships the
+        # user (so `useradd` would fail) is left alone; a bare base gets it created.
+        cmds = [f"id -u {quoted} >/dev/null 2>&1 || useradd -m -s /bin/bash {quoted}"]
+        if "workdir" in image:
+            workdir = shlex.quote(str(image["workdir"]))
+            cmds.append(f"chown -R {quoted}:{quoted} {workdir}")
+        build.ops.append(("run_commands", tuple(cmds)))
+    build.ops.append(("dockerfile_commands", ([f"USER {user}"],)))
 
 
 def apply_image_plan(build: ImageBuild, image_cls):

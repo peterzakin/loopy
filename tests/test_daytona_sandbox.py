@@ -33,6 +33,7 @@ class FakeDaytona:
     def __init__(self):
         self.created: list = []
         self.deleted: list = []
+        self.closed = False
         self.sandbox = FakeSandbox()
 
     async def create(self, params):
@@ -41,6 +42,9 @@ class FakeDaytona:
 
     async def delete(self, sandbox):
         self.deleted.append(sandbox)
+
+    async def close(self):
+        self.closed = True
 
 
 def test_acquire_builds_image_and_injects_secrets():
@@ -85,3 +89,31 @@ def test_factory_selects_provider():
     assert isinstance(make_sandbox_provider("daytona").inner, DaytonaSandboxProvider)
     with pytest.raises(ValueError, match="unknown sandbox provider"):
         make_sandbox_provider("nope")
+
+
+def test_aclose_closes_injected_client_and_is_idempotent():
+    fake = FakeDaytona()
+    provider = DaytonaSandboxProvider(client=fake)
+    asyncio.run(provider.aclose())
+    assert fake.closed is True
+    asyncio.run(provider.aclose())  # idempotent: no error when already closed
+
+
+def test_factory_aclose_propagates_to_inner_daytona_client():
+    fake = FakeDaytona()
+    wrapped = make_sandbox_provider("daytona")
+    wrapped.inner._client = fake  # inject so no real client is constructed
+    asyncio.run(wrapped.aclose())
+    assert fake.closed is True
+
+
+def test_factory_aclose_is_noop_for_providers_without_aclose():
+    # The local provider has no aclose; the wrapper must not blow up.
+    asyncio.run(make_sandbox_provider("local").aclose())
+
+
+def test_missing_api_key_fails_fast(monkeypatch):
+    monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
+    provider = DaytonaSandboxProvider()  # no injected client → must build one
+    with pytest.raises(RuntimeError, match="DAYTONA_API_KEY is not set"):
+        asyncio.run(provider.acquire(SandboxSpec(image={"base": "x"}), {}))

@@ -23,7 +23,33 @@ def test_example_image_maps_in_order():
     assert build.ops == [
         ("workdir", ("/home/daytona",)),
         ("run_commands", (APT_GIT,)),
+        # A non-root user is created (idempotently) and handed the workdir before the
+        # USER switch — else the container can't start and the workdir is root-owned.
+        (
+            "run_commands",
+            (
+                "id -u daytona >/dev/null 2>&1 || useradd -m -s /bin/bash daytona",
+                "chown -R daytona:daytona /home/daytona",
+            ),
+        ),
         ("dockerfile_commands", (["USER daytona"],)),
+    ]
+
+
+def test_non_root_user_is_created_even_without_workdir():
+    build = plan_image({"base": "x", "user": "agent"})
+    assert build.ops == [
+        ("run_commands", ("id -u agent >/dev/null 2>&1 || useradd -m -s /bin/bash agent",)),
+        ("dockerfile_commands", (["USER agent"],)),
+    ]
+
+
+def test_root_user_is_not_created():
+    # root always exists; no useradd/chown, just the USER switch.
+    build = plan_image({"base": "x", "workdir": "/w", "user": "root"})
+    assert build.ops == [
+        ("workdir", ("/w",)),
+        ("dockerfile_commands", (["USER root"],)),
     ]
 
 
