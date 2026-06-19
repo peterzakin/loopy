@@ -9,6 +9,8 @@ from loopy_runtime.config import (
     DEFAULT_HOST,
     DEFAULT_PORT,
     DEFAULT_REDIS_URL,
+    DEFAULT_STATE,
+    DEFAULT_STATE_PATH,
     ConfigError,
     LoopyConfig,
     load_config,
@@ -55,10 +57,35 @@ def test_unknown_keys_warn_not_fatal(tmp_path):
 
 def test_reserved_keys_do_not_warn(tmp_path):
     warnings: list[str] = []
-    load_config(
-        _write(tmp_path, "state: memory\nlimits:\n  max_tokens: 5\n"), on_warning=warnings.append
-    )
+    load_config(_write(tmp_path, "limits:\n  max_tokens: 5\n"), on_warning=warnings.append)
     assert warnings == []
+
+
+def test_state_defaults_to_durable_sqlite(tmp_path):
+    cfg = load_config(tmp_path / "loopy.yaml")
+    assert (cfg.state_backend, cfg.state_path) == (DEFAULT_STATE, DEFAULT_STATE_PATH)
+    assert DEFAULT_STATE == "sqlite"  # `loopy run` is durable by default
+
+
+def test_state_block_loaded(tmp_path):
+    cfg = load_config(_write(tmp_path, "state:\n  backend: inproc\n  path: runs.db\n"))
+    assert (cfg.state_backend, cfg.state_path) == ("inproc", "runs.db")
+
+
+def test_bad_state_backend_raises(tmp_path):
+    with pytest.raises(ConfigError):
+        load_config(_write(tmp_path, "state:\n  backend: postgres\n"))
+
+
+def test_unknown_state_key_warns(tmp_path):
+    warnings: list[str] = []
+    load_config(_write(tmp_path, "state:\n  bogus: 1\n"), on_warning=warnings.append)
+    assert any("state.bogus" in w for w in warnings)
+
+
+def test_non_mapping_state_raises(tmp_path):
+    with pytest.raises(ConfigError):
+        load_config(_write(tmp_path, "state: memory\n"))
 
 
 def test_malformed_yaml_raises(tmp_path):
@@ -96,6 +123,17 @@ def test_resolve_bad_bus_flag_raises():
     # ValueError leaking from make_event_bus later.
     with pytest.raises(ConfigError):
         resolve(LoopyConfig(), bus="kafka")
+
+
+def test_resolve_state_flags_override():
+    base = LoopyConfig(state_backend="sqlite", state_path=".loopy/state.db")
+    out = resolve(base, state_backend="inproc", state_path="x.db")
+    assert (out.state_backend, out.state_path) == ("inproc", "x.db")
+
+
+def test_resolve_bad_state_flag_raises():
+    with pytest.raises(ConfigError):
+        resolve(LoopyConfig(), state_backend="postgres")
 
 
 def test_redis_url_flag_wins(monkeypatch):

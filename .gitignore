@@ -26,5 +26,6 @@ loopy.env
 **/sensors/.env
 # sandbox env_file(s)
 **/secrets/
-# local state: GitHub App private key (loopy auth github)
+# local state: GitHub App private key (loopy auth github) + the SQLite run-state DB
+# written by `loopy run` (.loopy/state.db and its -wal/-shm sidecars)
 .loopy/

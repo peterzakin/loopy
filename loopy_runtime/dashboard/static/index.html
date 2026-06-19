@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Loopy · control plane</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">🔁</span>
+        <div>
+          <h1>Loopy</h1>
+          <p class="subtitle">control plane · runs</p>
+        </div>
+      </div>
+      <div class="controls">
+        <div class="filters" id="filters" role="tablist">
+          <button class="filter is-active" data-state="">All</button>
+          <button class="filter" data-state="running">Running</button>
+          <button class="filter" data-state="completed">Completed</button>
+          <button class="filter" data-state="failed">Failed</button>
+        </div>
+        <span class="pulse" id="pulse" title="Auto-refreshing"></span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel runs" aria-label="Runs">
+        <div class="panel-head">
+          <h2>Runs</h2>
+          <span class="count" id="run-count"></span>
+        </div>
+        <div class="run-list" id="run-list"></div>
+        <div class="empty" id="runs-empty" hidden>
+          No runs yet — fire an event with <code>loopy trigger</code> or wait for a sensor.
+        </div>
+      </section>
+
+      <section class="panel detail" id="detail" aria-label="Run detail">
+        <div class="empty" id="detail-empty">Select a run to see what happened.</div>
+        <div id="detail-body" hidden></div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

@@ -506,12 +506,23 @@ mapping, not the plumbing.
 | Schemas / validation | `pydantic` v2 | registry, events, outputs; type DSL → pydantic types |
 | Template render + static `{{ }}` check | `Jinja2` | `env.parse()` + `meta.find_undeclared_variables()` for §4.4; renders at runtime |
 | DAG build / validate | `networkx` | topo sort, cycle detection, reachability for `after:` |
-| CLI | `Typer` | `loopy compile` / `run` / `dev` |
+| CLI | `Typer` | `loopy compile` / `run` / `trigger` / `admin` |
 | `loopy.events` stubs | `datamodel-code-generator` | `.pyi` from the registry |
 | Cron + scheduling | `croniter` + `APScheduler` | 5-field expr + tz; drives poll/cron ticks |
 | `SensorRunner` webhooks | `FastAPI` + `uvicorn` | mount `@sensor(webhook=…)` routes |
 | `EventBus` (networked) | `FastStream` over NATS/Redis | in-proc bus is trivial; swap brokers without touching the engine |
-| Observability | `OpenTelemetry` + `structlog` | DBOS and Temporal both emit OTel |
+| Observability | `OpenTelemetry` + `structlog` | DBOS and Temporal both emit OTel (not built yet) |
+
+**Observability today (B12, shipped):** the `StateStore` records an event-sourced run history
+(`run_started` → `step_completed`/`event_emitted` → `run_completed`/`run_failed`). `loopy run`
+defaults to a **durable SQLite `StateStore`** (`.loopy/state.db`) so that history survives restarts
+and a *separate* process can read it; `loopy admin` opens that file **read-only** and serves a small
+FastAPI app (`loopy_runtime/dashboard/`) — a run list + per-run timeline, emitted events, step
+outputs, and the failure error. Run state (running/completed/failed) is *derived* from the history
+in one place (`state/derive.py`), so the list and detail views and both store backends can't
+disagree. SQLite is single-host by design; a networked store (Redis/Postgres, e.g. via DBOS below)
+slots behind the same `StateStore` Protocol for the distributed target. OTel/structlog export is the
+next layer, still deferred.
 
 **Three high-leverage adoptions that change the plan:**
 

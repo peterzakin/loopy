@@ -378,6 +378,9 @@ sensor_server:        # the host:port that binds the sensor-webhook listener
   host: 0.0.0.0
   port: 8000
 bus: redis            # inproc (single-process) | redis (networked broker)
+state:                # where run history is recorded (B12 observability)
+  backend: sqlite     # sqlite (durable, default) | inproc (ephemeral)
+  path: .loopy/state.db
 ```
 
 Precedence is **explicit flag > loopy.yaml > built-in default**, so `--bus inproc` still wins
@@ -385,8 +388,26 @@ over a file that says `redis`. Connection strings stay in the environment, never
 `bus: redis` reads its URL from the `REDIS_URL` env var (or the `--redis-url` flag), defaulting
 to `redis://localhost:6379`. `sandbox` is *not* a config key — it's declared per-agent in
 `registry.yml`; the `--sandbox` flag selects only the provider backend (`local`/`daytona`).
-`state:` (durable StateStore) and `limits:` (spend caps) are reserved for B10/B-cost and not yet
-read.
+`state:` selects the run-history `StateStore`: it defaults to a durable **SQLite** file
+(`.loopy/state.db`, gitignored), so run history survives restarts and the `loopy admin` dashboard
+can read it (see below); `--state inproc` / `backend: inproc` opts back into the old ephemeral
+store. `limits:` (spend caps) is still reserved for B-cost and not yet read.
+
+**`loopy admin` — the read-only run dashboard (B12).** Run history written by `loopy run` is
+served by a separate, read-only web process:
+
+```bash
+loopy run manifest.json          # writes .loopy/state.db as runs execute
+loopy admin                      # in another terminal: serves http://127.0.0.1:9000
+# loopy admin path/to/state.db --host 0.0.0.0 --port 9000   # explicit DB / bind
+```
+
+`loopy admin` opens the SQLite file **read-only** (it never mutates state — only `loopy run`
+writes) and serves a run list with per-run timeline, emitted events, step outputs, and the failure
+error. It pairs with the `loopy run` default, so the common case needs no flags. The dashboard is
+single-host (it reads the local file) and unauthenticated — bind it to localhost or front it with
+your own auth; internet exposure is out of scope for v1. OpenTelemetry/metrics export is a later
+layer.
 
 **`loopy.env` — the secret companion to `loopy.yaml`.** Because connection strings and provider
 keys can't live in the YAML, a local-dev convenience file supplies them: `loopy run` reads

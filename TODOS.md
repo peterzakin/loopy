@@ -209,7 +209,7 @@ B7/B10. Legend: ✅ shipped · ⚠️ partial · ❌ not built / deferred.
 | **B9** | Idempotent side effects + retries | ❌ | not built → TODO #4 (retry-policy open decision) |
 | **B10** | Crash recoverability | ❌ | Phase 11 (DurableLite/DBOS) → TODO #2 |
 | **B11** | Manifest-version pinning | ❌ | not built |
-| **B12** | Observability | ⚠️ | `status()` / `failed_runs` / `drain_errors` exist; no OTel |
+| **B12** | Observability | ⚠️ | `status()` / `failed_runs` / `drain_errors` + a durable SQLite run store and read-only `loopy admin` dashboard (run list/timeline/outputs); no OTel yet |
 
 Open backend work clusters into the items above: **B7 + B10** (+ remaining B6/B8) → TODO #2;
 **B9** → TODO #4. Update a row's status when its capability lands.
