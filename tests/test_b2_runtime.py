@@ -26,6 +26,9 @@ class RecordingHarness:
     def required_keys(self, agent):
         return set()
 
+    def missing_keys(self, agent, env):
+        return set()
+
     async def run(self, step, ctx, sandbox):
         self.seen[step.id] = dict(ctx.event.fields)
         emits = {ev: self.emit_payloads.get(ev, {}) for ev in step.emits}

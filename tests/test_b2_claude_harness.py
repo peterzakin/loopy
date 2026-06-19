@@ -106,6 +106,27 @@ def test_run_requires_model_key_declared():
     assert _harness().required_keys(AGENT) == {"ANTHROPIC_API_KEY"}
 
 
+def test_missing_keys_demands_model_key_without_creds():
+    # Keyed on the sandbox env only (not the control-plane HOME), so this is deterministic.
+    assert _harness().missing_keys(AGENT, {}) == {"ANTHROPIC_API_KEY"}
+
+
+def test_missing_keys_satisfied_by_api_key():
+    assert _harness().missing_keys(AGENT, {"ANTHROPIC_API_KEY": "sk-x"}) == set()
+
+
+def test_missing_keys_satisfied_by_oauth_credentials(tmp_path):
+    creds = tmp_path / ".claude" / ".credentials.json"
+    creds.parent.mkdir(parents=True)
+    creds.write_text("{}")
+    # No API key, but OAuth creds are reachable via the sandbox HOME → not missing.
+    assert _harness().missing_keys(AGENT, {"HOME": str(tmp_path)}) == set()
+
+
+def test_missing_keys_demands_key_when_home_has_no_credentials(tmp_path):
+    assert _harness().missing_keys(AGENT, {"HOME": str(tmp_path)}) == {"ANTHROPIC_API_KEY"}
+
+
 def test_run_trips_spend_budget():
     step = StepSpec(id="w/s", agent="Fixer", budget=BudgetSpec(spend={"usd": 1}), body="b")
     sandbox = CaptureSandbox({"result": "", "total_cost_usd": 5.0})

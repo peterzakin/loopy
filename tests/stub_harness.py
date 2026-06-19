@@ -21,6 +21,9 @@ class StubAgentHarness:
     def required_keys(self, agent: AgentSpec) -> set[str]:
         return set()  # no model key needed — bypasses the provider-key check
 
+    def missing_keys(self, agent: AgentSpec, env: Mapping[str, str]) -> set[str]:
+        return set()
+
     async def run(self, step: StepSpec, ctx: StepContext, sandbox: Sandbox) -> StepResult:
         emits = {}
         for name in step.emits:
