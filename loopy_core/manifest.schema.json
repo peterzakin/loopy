@@ -21,7 +21,20 @@
               "provider": { "type": ["string", "null"] },
               "image": { "type": "object" },
               "network": { "type": "array", "items": { "type": "string" } },
-              "env_file": { "type": "array", "items": { "type": "string" } }
+              "env_file": { "type": "array", "items": { "type": "string" } },
+              "repos": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["url"],
+                  "properties": {
+                    "url": { "type": "string" },
+                    "ref": { "type": ["string", "null"] },
+                    "path": { "type": ["string", "null"] },
+                    "depth": { "type": ["integer", "null"] }
+                  }
+                }
+              }
             }
           }
         },

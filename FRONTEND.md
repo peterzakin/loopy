@@ -44,7 +44,8 @@ Pydantic models, one module per domain. Sketch (types abbreviated):
 
 ```python
 # registry/model.py
-class Sandbox(BaseModel):   name: str; provider: str; image: dict; network: list[str]; span: Span
+class Sandbox(BaseModel):   name: str; provider: str; image: dict; network: list[str]; repos: list[Repo]; span: Span
+class Repo(BaseModel):      url: str; ref: str|None; path: str|None; depth: int|None   # GitHub repos cloned into the workspace at acquire time
 class Harness(BaseModel):   runtime: str; model: str
 class Agent(BaseModel):     name: str; harness: Harness; sandbox: str; skills: list[str]; span: Span
 # field types are plain JSON Schema fragments (dict), not a custom type — see §3

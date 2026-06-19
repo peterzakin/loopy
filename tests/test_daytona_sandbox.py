@@ -80,7 +80,8 @@ def test_release_deletes_sandbox():
 
 
 def test_factory_selects_provider():
-    assert isinstance(make_sandbox_provider("local"), LocalSandboxProvider)
-    assert isinstance(make_sandbox_provider("daytona"), DaytonaSandboxProvider)
+    # The factory wraps every provider in the repo-cloning decorator; assert on the inner.
+    assert isinstance(make_sandbox_provider("local").inner, LocalSandboxProvider)
+    assert isinstance(make_sandbox_provider("daytona").inner, DaytonaSandboxProvider)
     with pytest.raises(ValueError, match="unknown sandbox provider"):
         make_sandbox_provider("nope")

@@ -118,11 +118,15 @@ failures debuggable) → 12, 13, 14 (polish)**. A single integration test that r
 
 ### P2 — Ergonomics & examples
 
-- [ ] **12. No way to start the agent in a checkout — local always gets a fresh empty temp dir**
+- [⚠️] **12. No way to start the agent in a checkout — local always gets a fresh empty temp dir**
   — `loopy_runtime/sandbox/local.py:51`
-  `tempfile.mkdtemp(...)` is always empty, so "edit a codebase" requires the agent to `git clone` inside
-  the prompt. Fix: optional sandbox `workspace: <path>` (copy/mount into the workdir) and/or a built-in
-  "clone `{{ event.repo }}` first" step option.
+  `tempfile.mkdtemp(...)` is always empty, so "edit a codebase" used to require the agent to `git clone`
+  inside the prompt. **Partly resolved:** a sandbox now declares `repos:` (a list of GitHub repos) and
+  the `_RepoCloningProvider` factory wrapper clones them into the workspace at acquire time, via the
+  shared `sandbox/workspace.py` helper over the `Sandbox.exec` seam — auth rides the injected GitHub
+  token, so local/docker/daytona all get it. Still open: (a) static `repos:` only — no `{{ event.repo }}`
+  templating yet; (b) an optional `workspace: <local path>` copy/mount for offline/local-only checkouts;
+  (c) a `crosscheck` rule that `repos` hosts ⊆ `network`.
 
 - [ ] **13. Secrets must be written to a file on disk; no interpolation**
   — `loopy_runtime/secrets.py:32-40`

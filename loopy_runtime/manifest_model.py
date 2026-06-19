@@ -22,11 +22,19 @@ class HarnessSpec(_Model):
     model: str | None = None
 
 
+class RepoSpec(_Model):
+    url: str
+    ref: str | None = None
+    path: str | None = None
+    depth: int | None = 1
+
+
 class SandboxSpec(_Model):
     provider: str | None = None
     image: dict = Field(default_factory=dict)
     network: list[str] = Field(default_factory=list)
     env_file: list[str] = Field(default_factory=list)
+    repos: list[RepoSpec] = Field(default_factory=list)
 
 
 class AgentSpec(_Model):

@@ -24,6 +24,7 @@ E111 = "LOOPY-E111"  # on: lists multiple events (unions unsupported)
 E201 = "LOOPY-E201"  # unknown type shorthand in event fields: or step output:
 E210 = "LOOPY-E210"  # entity name not Capitalized / reserved `default` misused (X1)
 E211 = "LOOPY-E211"  # duplicate entity name in registry.yml (X1)
+E212 = "LOOPY-E212"  # malformed sandbox repos: entry (not owner/name string nor {url,...})
 
 # E3xx — templates
 E301 = "LOOPY-E301"  # illegal template: control flow / filters / dotted path
@@ -62,6 +63,7 @@ ALL_CODES: frozenset[str] = frozenset(
         E201,
         E210,
         E211,
+        E212,
         E301,
         E302,
         E303,
