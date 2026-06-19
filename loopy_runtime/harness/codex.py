@@ -20,14 +20,26 @@ from __future__ import annotations
 
 import json
 
+from loopy_runtime.contract import ToolchainLayer
 from loopy_runtime.harness.base import HarnessError, JsonProtocolHarness
 from loopy_runtime.manifest_model import AgentSpec, StepSpec
 
 __all__ = ["CodexHarness", "HarnessError"]
 
+# The OpenAI `codex` CLI and its Node runtime, on top of the base substrate.
+# TODO(#16): pin the CLI version once a baseline is chosen, for reproducible sandboxes.
+_TOOLCHAIN = ToolchainLayer(
+    apt=("nodejs", "npm"),
+    run=("npm install -g @openai/codex",),
+    probe=("codex",),
+)
+
 
 class CodexHarness(JsonProtocolHarness):
     RUNTIME = "codex"
+
+    def toolchain(self, agent: AgentSpec) -> ToolchainLayer:
+        return super().toolchain(agent).merge(_TOOLCHAIN)
 
     def build_argv(self, step: StepSpec, agent: AgentSpec, prompt: str) -> list[str]:
         # `exec` is codex's non-interactive mode; `--json` streams structured events.

@@ -13,6 +13,7 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
+from loopy_runtime.contract import ToolchainLayer
 from loopy_runtime.harness.base import HarnessError, JsonProtocolHarness
 from loopy_runtime.manifest_model import AgentSpec, StepSpec
 from loopy_runtime.providers import required_model_key
@@ -22,6 +23,15 @@ __all__ = ["ClaudeCodeHarness", "HarnessError"]
 # Where the Claude Code CLI stores OAuth/subscription credentials under HOME. When present
 # and reachable, the agent authenticates without an ANTHROPIC_API_KEY.
 _OAUTH_CREDENTIALS = Path(".claude", ".credentials.json")
+
+# The Claude Code CLI (`claude`) and its Node runtime, on top of the base substrate. Composed
+# onto the user's image so the binary the harness shells out to is present by construction.
+# TODO(#16): pin the CLI version once a baseline is chosen, for reproducible sandboxes.
+_TOOLCHAIN = ToolchainLayer(
+    apt=("nodejs", "npm"),
+    run=("npm install -g @anthropic-ai/claude-code",),
+    probe=("claude",),
+)
 
 
 def _claude_oauth_available(env: Mapping[str, str]) -> bool:
@@ -38,6 +48,9 @@ def _claude_oauth_available(env: Mapping[str, str]) -> bool:
 
 class ClaudeCodeHarness(JsonProtocolHarness):
     RUNTIME = "claude-code"
+
+    def toolchain(self, agent: AgentSpec) -> ToolchainLayer:
+        return super().toolchain(agent).merge(_TOOLCHAIN)
 
     def missing_keys(self, agent: AgentSpec, env: Mapping[str, str]) -> set[str]:
         # Local Claude Code is usually OAuth/subscription-authed, not API-keyed. Treat the

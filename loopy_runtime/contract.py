@@ -97,6 +97,43 @@ class ExecResult:
     stderr: str
 
 
+@dataclass(frozen=True)
+class ToolchainLayer:
+    """The toolchain a harness needs in its sandbox, expressed as *additive-only* image
+    layers (apt/pip/run/env) — never a base or snapshot — so it composes onto any user
+    base and the sandbox `image:` stays harness-agnostic (one sandbox reusable across
+    harnesses). `probe` is the set of binaries the runtime verifies are on `PATH` in the
+    live sandbox before the harness runs (#16)."""
+
+    apt: tuple[str, ...] = ()
+    pip: tuple[str, ...] = ()
+    run: tuple[str, ...] = ()
+    env: Mapping[str, str] = field(default_factory=dict)
+    probe: tuple[str, ...] = ()
+
+    def merge(self, *others: ToolchainLayer) -> ToolchainLayer:
+        """Combine layers in order (substrate first, then the harness's): list fields
+        concatenate de-duplicated (first occurrence wins position); `env` later-wins."""
+
+        def _dedup(*seqs: tuple[str, ...]) -> tuple[str, ...]:
+            seen: dict[str, None] = {}
+            for seq in seqs:
+                for item in seq:
+                    seen.setdefault(item, None)
+            return tuple(seen)
+
+        env = dict(self.env)
+        for other in others:
+            env.update(other.env)
+        return ToolchainLayer(
+            apt=_dedup(self.apt, *(o.apt for o in others)),
+            pip=_dedup(self.pip, *(o.pip for o in others)),
+            run=_dedup(self.run, *(o.run for o in others)),
+            env=env,
+            probe=_dedup(self.probe, *(o.probe for o in others)),
+        )
+
+
 # ── AgentHarness ─ B4 ─────────────────────────────────────────────────────────────
 @runtime_checkable
 class AgentHarness(Protocol):
@@ -116,6 +153,20 @@ class AgentHarness(Protocol):
         The runtime refuses to run a step when this is non-empty. Defaults to
         `required_keys(agent) - env`, but a harness may honor alternative auth — e.g. Claude
         Code OAuth credentials reachable via `HOME` satisfy the model key without it being set."""
+        ...
+
+    def toolchain(self, agent: AgentSpec) -> ToolchainLayer:
+        """The toolchain this harness needs in the sandbox for `agent`, as an additive image
+        layer. The runtime composes it onto the sandbox's `image:` so the CLI/runtime the
+        harness shells out to is present by construction, without coupling the sandbox to a
+        harness. Defaults to the common substrate (git + TLS roots)."""
+        ...
+
+    def required_tools(self, agent: AgentSpec) -> set[str]:
+        """Binaries that must be on `PATH` in the sandbox for `agent` (the toolchain's
+        `probe`). The runtime probes the live sandbox for these before running the step and
+        refuses to run when any is missing — the backstop for an image/override that defeats
+        toolchain composition."""
         ...
 
 

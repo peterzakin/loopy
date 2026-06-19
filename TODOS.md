@@ -154,6 +154,41 @@ failures debuggable) → 12, 13, 14 (polish)**. A single integration test that r
   `examples/codefix/smoke.sh` (real edit against a throwaway repo). Still local-only on egress
   enforcement (same gap as Daytona); the live `smoke.sh` is not wired into CI (it needs real creds).
 
+- [ ] **15. Sandbox network isolation is unenforced — `spec.network` egress allowlist is a no-op locally and on Daytona**
+  — `loopy_runtime/sandbox/docker.py:121-122`, Daytona provider (same gap)
+  The Docker provider is hermetic for filesystem/toolchain/env, but the container is started with
+  `docker run` and no network controls, so the agent can reach any host the developer's machine can —
+  `spec.network` (the per-host egress allowlist) is parsed but never enforced. Daytona has the same gap.
+  This means "hermetic" today means *env/toolchain* isolation, not *network* isolation, so a compromised
+  or misbehaving agent has unrestricted egress. Fix (Docker): run the container on a locked-down user
+  network and enforce the allowlist (e.g. an egress proxy the container is forced through, or
+  `--network` + iptables/`--add-host` rules derived from `spec.network`); deny by default. Mirror the
+  enforcement contract on Daytona so both providers honor `spec.network` identically.
+
+- [⚠️] **16. Harness toolchain contract — the harness contributes its toolchain as a layer; the sandbox image stays harness-agnostic**
+  — `loopy_runtime/contract.py` (`ToolchainLayer`), `loopy_runtime/harness/{base,claude_code,codex,router}.py`,
+  `loopy_runtime/sandbox/toolchain.py` (`compose_image`), `loopy_runtime/runtime/inmemory.py` (`_run_step`/`_verify_toolchain`)
+  Env vars are necessary but not sufficient: `PATH`/`HOME` being set doesn't help if the binary the harness
+  shells out to was never installed in the image. A bare `python:3.12-slim` had no `claude`/`node`, so (per
+  #6) the agent failed deep in the run with a `command not found`. The sandbox `image:` had to stay
+  harness-agnostic (one sandbox reusable across claude-code/codex), so the base image is NOT made
+  harness-specific. **Shipped:**
+  1. **Harness-contributed toolchain layer.** Each harness declares `toolchain()` → an *additive-only*
+     `ToolchainLayer(apt, pip, run, env, probe)` (never a base/snapshot). Base = substrate (`git` +
+     `ca-certificates`); `claude-code` adds node + the `claude` CLI; codex adds `codex`. `compose_image`
+     **prepends** these ahead of the user's `image:` layers; the runtime composes into the *effective* image
+     just before `acquire`, so providers (docker/daytona) stay untouched and the manifest spec stays
+     harness-agnostic. Snapshots skip composition (prebuilt) and rely on the probe.
+  2. **Runtime validation (backstop).** `required_tools()` = the layer's `probe`; `_verify_toolchain` probes
+     the live sandbox after acquire (`command -v` via `sandbox.exec`, uniform across local/docker/daytona)
+     and fails fast with an actionable error — so even a snapshot/base override that defeats composition
+     can't reach step one ill-equipped.
+
+  **Remaining:** (a) pin the CLI versions in each harness's toolchain for reproducible sandboxes (left as a
+  `TODO(#16)` in `claude_code.py`/`codex.py`); (b) snapshot/cache the composed result keyed on
+  `(base digest + toolchain hash)` so the install runs once, not on every acquire (today layers replay each
+  acquire). Invariant that makes it all work: the toolchain contract is purely additive, never a base image.
+
 ## Backend capability status (B1–B12)
 
 Live status of the backend capabilities defined in `ARCHITECTURE.md §3.1` (full definitions +

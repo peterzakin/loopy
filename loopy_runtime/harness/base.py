@@ -23,7 +23,13 @@ import re
 from collections.abc import Mapping
 
 from loopy_runtime.budget import BudgetEnforcer
-from loopy_runtime.contract import Sandbox, StepContext, StepOutput, StepResult
+from loopy_runtime.contract import (
+    Sandbox,
+    StepContext,
+    StepOutput,
+    StepResult,
+    ToolchainLayer,
+)
 from loopy_runtime.manifest_model import AgentSpec, EventContract, StepSpec
 from loopy_runtime.providers import provider, required_model_key, validate_model
 from loopy_runtime.render import TemplateRenderer
@@ -31,6 +37,11 @@ from loopy_runtime.render import TemplateRenderer
 # How much agent output to keep in an error message — enough to debug, not a flood.
 _TRANSCRIPT_LIMIT = 2000
 _FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
+
+# Tools any agent needs regardless of harness: `git` for repo work (declared `repos:` are
+# cloned into the workspace) and TLS roots for HTTPS. Each harness extends this with its own
+# CLI + runtime via `toolchain`. Kept additive-only so it composes onto any user base image.
+SUBSTRATE = ToolchainLayer(apt=("git", "ca-certificates"), probe=("git",))
 
 
 def _tail(text: str, limit: int = _TRANSCRIPT_LIMIT) -> str:
@@ -120,6 +131,14 @@ class JsonProtocolHarness:
         """Required keys not satisfiable for `agent` given the sandbox `env`. Default: those
         absent from `env`; a harness may override to honor other auth (e.g. OAuth creds)."""
         return self.required_keys(agent) - set(env)
+
+    def toolchain(self, agent: AgentSpec) -> ToolchainLayer:
+        """The common substrate every agent needs. A concrete harness overrides this to add
+        its CLI + runtime, e.g. `return super().toolchain(agent).merge(_MY_TOOLCHAIN)`."""
+        return SUBSTRATE
+
+    def required_tools(self, agent: AgentSpec) -> set[str]:
+        return set(self.toolchain(agent).probe)
 
     async def run(self, step: StepSpec, ctx: StepContext, sandbox: Sandbox) -> StepResult:
         if step.agent is None or step.agent not in self._agents:
