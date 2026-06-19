@@ -197,6 +197,11 @@ def run(
         state=state,
         tokens=tokens,
     )
+    try:
+        runtime.preflight()  # fail fast at startup if any sandbox can't supply its harness keys
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
     receiver = LocalEventReceiver(event_bus, m.registry.events)  # shared gate for webhooks + polls
     sensor_runner = FastAPISensorRunner(receiver)
     for sensor in m.sensors:
@@ -310,6 +315,7 @@ def trigger(
             secrets=EnvFileSecretsResolver(root),
             bus=InProcessEventBus(),
         )
+        runtime.preflight()  # fail fast before firing the event if any sandbox lacks its keys
         run_id = asyncio.run(runtime.trigger(triggering))
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         typer.echo(f"error: {exc}", err=True)
