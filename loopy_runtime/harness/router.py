@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from loopy_runtime.contract import Sandbox, StepContext, StepResult
+from loopy_runtime.contract import Sandbox, StepContext, StepResult, ToolchainLayer
 from loopy_runtime.harness.base import HarnessError, JsonProtocolHarness
 from loopy_runtime.harness.claude_code import ClaudeCodeHarness
 from loopy_runtime.harness.codex import CodexHarness
@@ -55,6 +55,12 @@ class HarnessRouter:
 
     def missing_keys(self, agent: AgentSpec, env: Mapping[str, str]) -> set[str]:
         return self._harness_for(agent).missing_keys(agent, env)
+
+    def toolchain(self, agent: AgentSpec) -> ToolchainLayer:
+        return self._harness_for(agent).toolchain(agent)
+
+    def required_tools(self, agent: AgentSpec) -> set[str]:
+        return self._harness_for(agent).required_tools(agent)
 
     async def run(self, step: StepSpec, ctx: StepContext, sandbox: Sandbox) -> StepResult:
         agent = self._agents.get(step.agent) if step.agent else None

@@ -30,6 +30,7 @@ from loopy_runtime.contract import (
 )
 from loopy_runtime.manifest_model import Manifest, SandboxSpec, StepSpec, WorkflowSpec
 from loopy_runtime.retry import ExponentialBackoffRetry
+from loopy_runtime.sandbox.toolchain import compose_image
 from loopy_runtime.sensors.scheduler import cron_prev
 from loopy_runtime.state.inmemory import InMemoryStateStore
 
@@ -334,6 +335,11 @@ class InMemoryRuntime:
                     f"'{step.agent}'. Add {keys} to the sandbox's env_file, or authenticate the "
                     f"CLI so its OAuth credentials are reachable via the sandbox HOME."
                 )
+            # Compose the harness's toolchain into the effective image so the CLI/runtime it
+            # shells out to is present by construction — the sandbox spec itself stays
+            # harness-agnostic (#16). No-op for harnesses with an empty toolchain.
+            image = compose_image(spec.image, self.harness.toolchain(agent))
+            spec = spec.model_copy(update={"image": image})
 
         # Mint + inject scoped SCM creds last, so they win over any env_file key and so
         # the ephemeral token is freshly minted for this step (the App key never enters).
@@ -342,6 +348,8 @@ class InMemoryRuntime:
 
         sandbox = await self.sandboxes.acquire(spec, secrets)
         try:
+            if agent is not None:
+                await self._verify_toolchain(sandbox, agent, step.agent, sandbox_name)
             attempt = 0
             while True:
                 try:
@@ -357,6 +365,33 @@ class InMemoryRuntime:
                         await asyncio.sleep(delay.total_seconds())
         finally:
             await sandbox.release()
+
+    async def _verify_toolchain(self, sandbox, agent, agent_name, sandbox_name: str) -> None:
+        """Runtime validation (#16): probe the live sandbox for the harness's required
+        binaries before the agent runs, turning a cryptic mid-run `command not found` into an
+        actionable up-front error. Catches an image/override that left the sandbox ill-equipped
+        even after toolchain composition (e.g. a `snapshot:` that doesn't bundle the CLI, or the
+        bare `local` provider with the tool absent from the host)."""
+        tools = sorted(self.harness.required_tools(agent))
+        if not tools:
+            return
+        # One probe: print each tool that isn't resolvable on PATH. `command -v` is a POSIX
+        # shell builtin (no dependency on `which`), so this works across local/docker/daytona.
+        script = "; ".join(f'command -v "{t}" >/dev/null 2>&1 || echo "{t}"' for t in tools)
+        try:
+            result = await sandbox.exec(["sh", "-c", script])
+            missing = [t for t in result.stdout.split() if t in set(tools)]
+        except Exception:
+            # Couldn't even run the probe (e.g. the bare `local` provider with an empty env, so
+            # `sh` isn't resolvable) — treat the whole toolchain as unverifiable/missing.
+            missing = tools
+        if missing:
+            raise RuntimeError(
+                f"sandbox '{sandbox_name}' is missing tool(s) {', '.join(missing)} required by "
+                f"agent '{agent_name}'. Add them to the sandbox image (e.g. `apt:`/`run:` "
+                "layers), use a snapshot/base image that bundles them, or — for `--sandbox local` "
+                "— install them on the host and ensure PATH reaches them."
+            )
 
     def _build_emitted(self, event_name: str, payload: Mapping[str, object]) -> Event:
         # The agent produced this payload (decision #3 = B); validate it against the

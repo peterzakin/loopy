@@ -153,30 +153,29 @@ failures debuggable) → 12, 13, 14 (polish)**. A single integration test that r
   `--network` + iptables/`--add-host` rules derived from `spec.network`); deny by default. Mirror the
   enforcement contract on Daytona so both providers honor `spec.network` identically.
 
-- [ ] **16. Harness toolchain contract — the harness contributes its toolchain as a layer; the sandbox image stays harness-agnostic**
-  — `loopy_runtime/harness/base.py`, `loopy_runtime/sandbox/{docker,daytona_image}.py`, `loopy_runtime/runtime/inmemory.py:100` (`preflight`)
-  Env vars are necessary but not sufficient: `PATH`/`HOME` being set doesn't help if the binary the
-  harness shells out to was never installed in the image. `ClaudeCodeHarness` runs `["claude", ...]`
-  (`claude_code.py:53`); a bare `python:3.12-slim` image has no `claude`/`node`, so (per #6) the agent
-  fails deep in the run with a `command not found` the JSON parser then chokes on — the real problem is
-  "this image can't host this harness." **Key requirement: the sandbox `image:` must stay harness-agnostic**
-  (one sandbox reusable across claude-code/codex), so do NOT make the base image harness-specific. Instead:
+- [⚠️] **16. Harness toolchain contract — the harness contributes its toolchain as a layer; the sandbox image stays harness-agnostic**
+  — `loopy_runtime/contract.py` (`ToolchainLayer`), `loopy_runtime/harness/{base,claude_code,codex,router}.py`,
+  `loopy_runtime/sandbox/toolchain.py` (`compose_image`), `loopy_runtime/runtime/inmemory.py` (`_run_step`/`_verify_toolchain`)
+  Env vars are necessary but not sufficient: `PATH`/`HOME` being set doesn't help if the binary the harness
+  shells out to was never installed in the image. A bare `python:3.12-slim` had no `claude`/`node`, so (per
+  #6) the agent failed deep in the run with a `command not found`. The sandbox `image:` had to stay
+  harness-agnostic (one sandbox reusable across claude-code/codex), so the base image is NOT made
+  harness-specific. **Shipped:**
+  1. **Harness-contributed toolchain layer.** Each harness declares `toolchain()` → an *additive-only*
+     `ToolchainLayer(apt, pip, run, env, probe)` (never a base/snapshot). Base = substrate (`git` +
+     `ca-certificates`); `claude-code` adds node + the `claude` CLI; codex adds `codex`. `compose_image`
+     **prepends** these ahead of the user's `image:` layers; the runtime composes into the *effective* image
+     just before `acquire`, so providers (docker/daytona) stay untouched and the manifest spec stays
+     harness-agnostic. Snapshots skip composition (prebuilt) and rely on the probe.
+  2. **Runtime validation (backstop).** `required_tools()` = the layer's `probe`; `_verify_toolchain` probes
+     the live sandbox after acquire (`command -v` via `sandbox.exec`, uniform across local/docker/daytona)
+     and fails fast with an actionable error — so even a snapshot/base override that defeats composition
+     can't reach step one ill-equipped.
 
-  1. **Harness-contributed toolchain layer.** Each harness declares a `toolchain()` returning an
-     *additive-only* layer — never a base/snapshot, so it composes onto any user base:
-     `ToolchainLayer(apt=[...], pip=[...], run=[...], env={...}, probe=("claude","git"))`.
-     `claude-code` → node + `claude` CLI (version pinned in the harness); codex → `codex`. The provider
-     **prepends** these ahead of the user's `image:` layers through the existing `_setup_commands`/`plan_image`
-     machinery; the user still owns the base + their own deps. Snapshot the composed result keyed on
-     `(base digest + toolchain hash)` so the install runs once, not every acquire.
-  2. **Runtime validation (backstop).** Symmetric with the existing credential preflight: `required_tools()`
-     = the layer's `probe`; extend `preflight()` to probe the live sandbox (`which <tool>` via `sandbox.exec`,
-     uniform across local/docker/Daytona) and aggregate misses into the same fail-fast `PreflightError` with
-     an actionable message — so even a hand-rolled base override that defeats composition still can't reach
-     step one ill-equipped.
-
-  The single invariant that makes it work: the toolchain contract is purely additive (apt/pip/run/env),
-  never a base image. Composition guarantees the tools by construction; the probe enforces it at runtime.
+  **Remaining:** (a) pin the CLI versions in each harness's toolchain for reproducible sandboxes (left as a
+  `TODO(#16)` in `claude_code.py`/`codex.py`); (b) snapshot/cache the composed result keyed on
+  `(base digest + toolchain hash)` so the install runs once, not on every acquire (today layers replay each
+  acquire). Invariant that makes it all work: the toolchain contract is purely additive, never a base image.
 
 ## Backend capability status (B1–B12)
 
