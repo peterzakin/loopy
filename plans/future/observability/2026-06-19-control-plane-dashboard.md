@@ -171,7 +171,9 @@ def admin(
     """Serve the read-only control-plane dashboard over the shared state DB."""
     import asyncio, uvicorn
     from loopy_runtime.dashboard.app import create_app
-    asyncio.run(uvicorn.Server(uvicorn.Config(create_app(db), host=host, port=port)).serve())
+    from loopy_runtime.state.sqlite import SqliteStateStore
+    store = SqliteStateStore(db, read_only=True)  # raises a clear error if the DB doesn't exist
+    asyncio.run(uvicorn.Server(uvicorn.Config(create_app(store), host=host, port=port)).serve())
 ```
 
 `loopy run` wiring: where it does `state = InMemoryStateStore()` today, select the backend
@@ -191,9 +193,12 @@ from the resolved `state:` config / `--state` flag (default `inproc` → unchang
       now **defaults to SQLite** (`.loopy/state.db` under `--root`), `--state inproc` opts out.
       `trigger` + the library/test default stay in-memory. E2E test: a real cascade run lands in
       SQLite and a read-only reader sees it via `list_runs` + `history`.
-- [ ] **Stage 4 — Read API.** `loopy_runtime/dashboard/app.py`: `create_app(db)` opens SQLite
-      read-only; `RunView` builder (pure) turns history+outputs into the detail shape; wire the
-      two `/api/...` routes. Unit-test the builder + routes with a seeded DB.
+- [x] **Stage 4 — Read API.** `loopy_runtime/dashboard/{app,views}.py`: `create_app(store)`
+      (takes any StateStore, not a DB path — store-agnostic + testable on the in-memory store)
+      serves `GET /api/runs` (filter/paginate) and `GET /api/runs/{run_id}`. Pure `views.py`
+      builders (`build_run_detail`/`summary_to_dict`) derive status/steps/emits from
+      history+outputs. Tested via direct handler invocation (no httpx) + an e2e smoke over a
+      read-only SQLite store.
 - [ ] **Stage 5 — Frontend.** Single `index.html` (+ small `app.js`, `style.css`) served as
       static assets: run list (state badge, workflow, time), click → detail (step timeline,
       emitted events, outputs, error). Poll every few seconds for refresh.
@@ -244,6 +249,12 @@ from the resolved `state:` config / `--state` flag (default `inproc` → unchang
   it stays the reference impl + library/test default and the `loopy trigger` default (one-shot,
   must not write a `.db` to the cwd), and remains reachable via `--state inproc`. Rationale: the
   dashboard should work with zero flags and a long-lived server shouldn't lose history on restart.
+- 2026-06-19 — **Stage 4 landed.** `create_app(store)` takes a `StateStore` rather than a DB path
+  (refinement of the original `create_app(db)` sketch): the API depends only on the Protocol, so it
+  tests against the in-memory store and `loopy admin` (Stage 6) owns opening the SQLite file
+  read-only. Run *detail* is derived from `history`+`outputs` (no extra store method needed), so the
+  list and detail views can't disagree on a run's state. Routes tested by awaiting the handlers
+  directly (project convention — no httpx in CI).
 - 2026-06-19 — **Stage 3 landed.** `state:` config block (`backend`/`path`) + `--state` /
   `--state-path` flags resolved through `make_state_store` (mirrors the bus/sandbox factories).
   `loopy run` defaults to `.loopy/state.db` (already gitignored); startup echoes the chosen store.
