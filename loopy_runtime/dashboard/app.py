@@ -11,15 +11,25 @@ It takes any `StateStore`, not a DB path, so it's testable against the in-memory
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from loopy_runtime.contract import StateStore
 from loopy_runtime.dashboard.views import VALID_RUN_STATES, build_run_detail, summary_to_dict
+
+_STATIC = Path(__file__).parent / "static"
 
 
 def create_app(store: StateStore) -> FastAPI:
     app = FastAPI(title="Loopy control plane", docs_url=None, redoc_url=None)
     app.state.store = store
+
+    @app.get("/")
+    async def index() -> FileResponse:
+        return FileResponse(_STATIC / "index.html")
 
     @app.get("/api/runs")
     async def list_runs(state: str | None = None, limit: int = 100, offset: int = 0):
@@ -36,4 +46,6 @@ def create_app(store: StateStore) -> FastAPI:
         outputs = await store.outputs(run_id)
         return build_run_detail(run_id, history, outputs)
 
+    # Mounted last so it doesn't shadow the API routes above.
+    app.mount("/static", StaticFiles(directory=_STATIC), name="static")
     return app

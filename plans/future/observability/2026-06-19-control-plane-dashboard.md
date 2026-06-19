@@ -199,9 +199,10 @@ from the resolved `state:` config / `--state` flag (default `inproc` → unchang
       builders (`build_run_detail`/`summary_to_dict`) derive status/steps/emits from
       history+outputs. Tested via direct handler invocation (no httpx) + an e2e smoke over a
       read-only SQLite store.
-- [ ] **Stage 5 — Frontend.** Single `index.html` (+ small `app.js`, `style.css`) served as
-      static assets: run list (state badge, workflow, time), click → detail (step timeline,
-      emitted events, outputs, error). Poll every few seconds for refresh.
+- [x] **Stage 5 — Frontend.** `dashboard/static/{index.html,app.js,style.css}` served by the
+      app (`GET /` → index, `/static` mount): run list with state badges + filter, click → detail
+      (event timeline, emitted events, step outputs, error box). Vanilla JS, polls every 3s. Live
+      uvicorn smoke confirmed page/assets/API all serve; route + static-asset tests added.
 - [ ] **Stage 6 — CLI + docs.** Add `loopy admin` command (lazy imports). Document the
       flow in `DEPLOYMENT.md` (run with `--state sqlite`, then `loopy admin <db>`); flip
       TODOS.md B12 row from ⚠️ toward the dashboard milestone; graduate the durable-store
@@ -249,6 +250,11 @@ from the resolved `state:` config / `--state` flag (default `inproc` → unchang
   it stays the reference impl + library/test default and the `loopy trigger` default (one-shot,
   must not write a `.db` to the cwd), and remains reachable via `--state inproc`. Rationale: the
   dashboard should work with zero flags and a long-lived server shouldn't lose history on restart.
+- 2026-06-19 — **Stage 5 landed.** Single-page vanilla-JS frontend (no build step) served from
+  `dashboard/static/`; `GET /` returns index.html, `/static` is a mounted StaticFiles dir (mounted
+  last so it can't shadow the API). Polls `/api/runs` (+ the open run's detail) every 3s. Dark
+  "ops" theme. Verify-by-running was a live uvicorn smoke (no httpx/headless browser in this env).
+  TODO for Stage 6/packaging: confirm hatchling ships the non-.py `static/` assets in the wheel.
 - 2026-06-19 — **Stage 4 landed.** `create_app(store)` takes a `StateStore` rather than a DB path
   (refinement of the original `create_app(db)` sketch): the API depends only on the Protocol, so it
   tests against the in-memory store and `loopy admin` (Stage 6) owns opening the SQLite file

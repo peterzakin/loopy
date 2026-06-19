@@ -116,7 +116,24 @@ def test_get_run_endpoint_404_for_unknown():
 def test_routes_registered():
     app = create_app(InMemoryStateStore())
     paths = {getattr(r, "path", None) for r in app.routes}
-    assert {"/api/runs", "/api/runs/{run_id}"} <= paths
+    assert {"/", "/api/runs", "/api/runs/{run_id}"} <= paths
+
+
+def test_index_serves_the_static_html():
+    from pathlib import Path
+
+    app = create_app(InMemoryStateStore())
+    resp = asyncio.run(_endpoint(app, "/")())
+    # FileResponse pointing at the bundled single-page app.
+    assert str(resp.path).endswith("static/index.html")
+    assert Path(resp.path).is_file()
+
+
+def test_static_assets_present():
+    from loopy_runtime.dashboard.app import _STATIC
+
+    for name in ("index.html", "app.js", "style.css"):
+        assert (_STATIC / name).is_file()
 
 
 def test_summary_to_dict_shape():
