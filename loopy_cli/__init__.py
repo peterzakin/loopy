@@ -3,6 +3,7 @@
     loopy compile   produce the manifest (frontend)
     loopy run       start the server: host sensor webhooks; events drive workflow runs
     loopy trigger   fire one event at the manifest and run it to completion (for testing)
+    loopy admin     serve the read-only dashboard over the run-state DB `loopy run` writes
 
 Heavy deps are imported lazily per command so `loopy compile` stays runtime-free.
 """
@@ -434,6 +435,37 @@ def trigger(
 
     if record["failed"]:
         raise typer.Exit(code=1)
+
+
+@app.command()
+def admin(
+    db: Path = typer.Argument(
+        Path(".loopy/state.db"), help="State DB written by `loopy run` (default .loopy/state.db)."
+    ),
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address."),
+    port: int = typer.Option(9000, "--port", help="Port to serve the dashboard on."),
+) -> None:
+    """Serve the read-only control-plane dashboard over the run-state DB.
+
+    Pairs with `loopy run` (which defaults to that same DB): no flags needed in the common case —
+    `loopy run` in one terminal, `loopy admin` in another.
+    """
+    import asyncio
+
+    import uvicorn
+
+    from loopy_runtime.dashboard.app import create_app
+    from loopy_runtime.state.sqlite import SqliteStateStore
+
+    try:
+        store = SqliteStateStore(db, read_only=True)  # raises if the DB doesn't exist yet
+    except FileNotFoundError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"loopy dashboard → http://{host}:{port}  (reading {db})")
+    config = uvicorn.Config(create_app(store), host=host, port=port, log_level="warning")
+    asyncio.run(uvicorn.Server(config).serve())  # pragma: no cover - long-lived server
 
 
 if __name__ == "__main__":  # pragma: no cover

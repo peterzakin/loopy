@@ -136,6 +136,28 @@ def test_static_assets_present():
         assert (_STATIC / name).is_file()
 
 
+# ── loopy admin CLI ─────────────────────────────────────────────────────────────────
+def test_admin_command_help():
+    from typer.testing import CliRunner
+
+    from loopy_cli import app
+
+    result = CliRunner().invoke(app, ["admin", "--help"])
+    assert result.exit_code == 0
+    assert "--host" in result.stdout and "--port" in result.stdout
+
+
+def test_admin_errors_clearly_when_db_missing(tmp_path):
+    from typer.testing import CliRunner
+
+    from loopy_cli import app
+
+    result = CliRunner().invoke(app, ["admin", str(tmp_path / "nope.db")])
+    assert result.exit_code == 1
+    # the friendly read-only-missing message, not a stack trace
+    assert "no state DB" in result.output
+
+
 def test_summary_to_dict_shape():
     store = _seed()
     rows = asyncio.run(store.list_runs())
