@@ -68,13 +68,15 @@ failures debuggable) → 12, 13, 14 (polish)**. A single integration test that r
   `env_file`/secrets on top — or an explicit `inherit_env:` allowlist on the sandbox spec. Keep remote
   sandboxes hermetic.
 
-- [ ] **7. `loopy trigger` doesn't inject GitHub tokens (only `loopy run` does)**
-  — `loopy_cli/__init__.py:306-312` (trigger) vs `:166,198` (run)
-  `trigger` is the documented one-shot test path but builds the runtime with no `tokens=`, so an agent
-  needing SCM creds can't get them — a token must be minted by hand and passed via `env_file`. The two
-  runtime-construction sites also drift. Fix: extract one `build_runtime(...)` helper used by both;
-  wire the token provider in `trigger` when `GITHUB_APP_ID` is set, with a `--no-tokens` opt-out for
-  offline tests. (Pairs with #13 — once tokens are minted here the manual-token workaround goes away.)
+- [x] ~~**7. `loopy trigger` doesn't inject GitHub tokens (only `loopy run` does)**~~
+  — `loopy_cli/__init__.py`
+  `trigger` is the documented one-shot test path but built the runtime with no `tokens=`, so an agent
+  needing SCM creds couldn't get them, and the two runtime-construction sites drifted. **Resolved:**
+  extracted a single `build_runtime(...)` helper (harness + sandboxes + secrets + bus + state + tokens)
+  now used by both `run` and `trigger`, plus a shared `_make_token_provider(root, enabled, announce)`
+  that reads the App creds from `loopy.env` (merged under the process env). `trigger` mints scoped
+  tokens when an App is configured, with a `--no-tokens` opt-out for fully offline tests. (Pairs with
+  #13 — once tokens are minted here the manual-token workaround goes away.)
 
 - [ ] **8. `claude-code` harness hard-requires `ANTHROPIC_API_KEY` even when Claude is OAuth-authed**
   — `loopy_runtime/harness/base.py:59-60` + `loopy_runtime/runtime/inmemory.py:283-289` + `loopy_runtime/providers.py:38`

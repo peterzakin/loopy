@@ -109,6 +109,59 @@ def compile(
     raise typer.Exit(code=result.diagnostics.exit_code())
 
 
+def _make_token_provider(root: Path, *, enabled: bool, announce: bool):
+    """Mint scoped GitHub App tokens for sandboxes when an App is configured.
+
+    Reads the control-plane env (`loopy.env`, merged under the process env) for the App
+    credentials `loopy auth github` lands there; the App private key stays at the
+    control-plane and only the minted, repo-scoped token crosses into a sandbox. Returns a
+    `GitHubAppTokenProvider`, or `None` when no App is configured (unchanged offline
+    behavior). `enabled=False` (the `--no-tokens` opt-out) skips minting entirely.
+    """
+    if not enabled:
+        return None
+    from loopy_runtime.scm.github_app import AppCredentials, GitHubAppError
+    from loopy_runtime.scm.token_provider import GitHubAppTokenProvider
+    from loopy_runtime.secrets import load_control_plane_env
+
+    merged = dict(os.environ)
+    for key, value in load_control_plane_env(root).items():
+        merged.setdefault(key, value)  # real/platform env wins over loopy.env
+    try:
+        provider = GitHubAppTokenProvider(AppCredentials.from_env(merged, root=root))
+    except GitHubAppError:
+        return None  # no App configured → no token injection
+    if announce:
+        typer.echo("github app: minting scoped tokens for sandboxes (key stays control-plane)")
+    return provider
+
+
+def build_runtime(manifest, *, root: Path, sandbox: str, bus, state=None, tokens=None):
+    """Construct the InMemoryRuntime with its standard dependency wiring.
+
+    The single runtime-construction site shared by `run` and `trigger`, so the serve and
+    one-shot paths can't drift in how the harness, sandboxes, secrets, bus, durable state,
+    and SCM token provider are wired (that drift is exactly what let `trigger` ship without
+    token injection). `state` is passed through when given (so a networked bus can share the
+    runtime's StateStore); omitted otherwise so the runtime uses its own default.
+    """
+    from loopy_runtime.harness.router import HarnessRouter
+    from loopy_runtime.runtime.inmemory import InMemoryRuntime
+    from loopy_runtime.sandbox.factory import make_sandbox_provider
+    from loopy_runtime.secrets import EnvFileSecretsResolver
+
+    extra = {"state": state} if state is not None else {}
+    return InMemoryRuntime(
+        manifest,
+        harness=HarnessRouter(manifest.registry.agents, manifest.registry.events),
+        sandboxes=make_sandbox_provider(sandbox),
+        secrets=EnvFileSecretsResolver(root),
+        bus=bus,
+        tokens=tokens,
+        **extra,
+    )
+
+
 @app.command()
 def run(
     manifest: Path = typer.Argument(..., help="Path to manifest.json."),
@@ -131,16 +184,9 @@ def run(
 
     from loopy_runtime.bus.factory import make_event_bus
     from loopy_runtime.config import ConfigError, load_config, resolve, resolve_redis_url
-    from loopy_runtime.harness.router import HarnessRouter
     from loopy_runtime.manifest_model import load_manifest
     from loopy_runtime.receiver import LocalEventReceiver
-    from loopy_runtime.runtime.inmemory import InMemoryRuntime
-    from loopy_runtime.sandbox.factory import make_sandbox_provider
-    from loopy_runtime.secrets import (
-        EnvFileSecretsResolver,
-        load_control_plane_env,
-        load_sensor_env,
-    )
+    from loopy_runtime.secrets import load_control_plane_env, load_sensor_env
     from loopy_runtime.sensors.loader import load_poll_sensor, load_webhook_sensor
     from loopy_runtime.sensors.runner import FastAPISensorRunner, synthesizing_publisher
     from loopy_runtime.sensors.scheduler import PollScheduler, parse_interval
@@ -158,15 +204,7 @@ def run(
     # SCM token injection: if a GitHub App is configured (via `loopy auth github`), mint a
     # scoped installation token per step and inject it into the sandbox. The App private key
     # stays here at the control-plane; only the ephemeral token crosses into the sandbox.
-    from loopy_runtime.scm.github_app import AppCredentials, GitHubAppError
-    from loopy_runtime.scm.token_provider import GitHubAppTokenProvider
-
-    tokens = None
-    try:
-        tokens = GitHubAppTokenProvider(AppCredentials.from_env(os.environ, root=root))
-        typer.echo("github app: minting scoped tokens for sandboxes (key stays control-plane)")
-    except GitHubAppError:
-        pass  # no App configured → no token injection (unchanged behavior)
+    tokens = _make_token_provider(root, enabled=True, announce=True)
 
     try:
         cfg = resolve(load_config(config), host=host, port=port, bus=bus)
@@ -188,14 +226,8 @@ def run(
     # dedupe by Event.id) — a networked bus consumes off the broker, so it needs its own dedupe.
     state = InMemoryStateStore()
     event_bus = make_event_bus(cfg.bus, redis_url=resolved_redis_url, state=state)
-    runtime = InMemoryRuntime(
-        m,
-        harness=HarnessRouter(m.registry.agents, m.registry.events),
-        sandboxes=make_sandbox_provider(sandbox),
-        secrets=EnvFileSecretsResolver(root),
-        bus=event_bus,
-        state=state,
-        tokens=tokens,
+    runtime = build_runtime(
+        m, root=root, sandbox=sandbox, bus=event_bus, state=state, tokens=tokens
     )
     receiver = LocalEventReceiver(event_bus, m.registry.events)  # shared gate for webhooks + polls
     sensor_runner = FastAPISensorRunner(receiver)
@@ -282,6 +314,9 @@ def trigger(
     fields: str | None = typer.Option(None, "--fields", help="Event fields as a JSON object."),
     root: Path = typer.Option(Path("."), "--root", help="Project root (for env_file resolution)."),
     sandbox: str = typer.Option("local", "--sandbox", help="Sandbox provider: local | daytona."),
+    no_tokens: bool = typer.Option(
+        False, "--no-tokens", help="Skip GitHub App token injection (for fully offline tests)."
+    ),
 ) -> None:
     """Fire one event at the manifest and run the cascade to completion (for testing)."""
     import asyncio
@@ -289,11 +324,7 @@ def trigger(
 
     from loopy_runtime.bus.inproc import InProcessEventBus
     from loopy_runtime.contract import Event
-    from loopy_runtime.harness.router import HarnessRouter
     from loopy_runtime.manifest_model import load_manifest
-    from loopy_runtime.runtime.inmemory import InMemoryRuntime
-    from loopy_runtime.sandbox.factory import make_sandbox_provider
-    from loopy_runtime.secrets import EnvFileSecretsResolver
 
     m = load_manifest(manifest)
     triggering = Event(
@@ -302,13 +333,13 @@ def trigger(
         id="trigger",
         emitted_at=datetime.now(UTC),
     )
+    # Like `run`, inject scoped GitHub App tokens when an App is configured (via
+    # `loopy auth github`), so the one-shot test path can exercise repo-touching workflows.
+    # `--no-tokens` opts out for fully offline tests.
+    tokens = _make_token_provider(root, enabled=not no_tokens, announce=True)
     try:
-        runtime = InMemoryRuntime(
-            m,
-            harness=HarnessRouter(m.registry.agents, m.registry.events),
-            sandboxes=make_sandbox_provider(sandbox),
-            secrets=EnvFileSecretsResolver(root),
-            bus=InProcessEventBus(),
+        runtime = build_runtime(
+            m, root=root, sandbox=sandbox, bus=InProcessEventBus(), tokens=tokens
         )
         run_id = asyncio.run(runtime.trigger(triggering))
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
