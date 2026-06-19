@@ -19,14 +19,7 @@ from loopy_runtime.contract import (
     StepOutput,
     TriggerId,
 )
-from loopy_runtime.state.derive import terminal_state
-
-
-def _workflow_of(run_id: RunId) -> str:
-    """The workflow name from a `f"{wf_name}-{seq}"` run id (seq is an int, so split off the
-    trailing `-<seq>`); falls back to the whole id if it doesn't match that shape."""
-    head, _, tail = run_id.rpartition("-")
-    return head if head and tail.isdigit() else run_id
+from loopy_runtime.state.derive import terminal_state, workflow_of
 
 
 class InMemoryStateStore:
@@ -41,7 +34,7 @@ class InMemoryStateStore:
 
     async def create_run(self, run_id: RunId, manifest_version: str, entry: Event) -> None:
         self._history.setdefault(run_id, [])
-        self._meta.setdefault(run_id, (_workflow_of(run_id), entry.name, datetime.now(UTC)))
+        self._meta.setdefault(run_id, (workflow_of(run_id), entry.name, datetime.now(UTC)))
 
     async def append(self, run_id: RunId, ev: RunEvent) -> None:
         self._history[run_id].append(ev)

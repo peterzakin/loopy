@@ -29,12 +29,7 @@ from loopy_runtime.contract import (
     StepOutput,
     TriggerId,
 )
-from loopy_runtime.state.inmemory import _workflow_of
-
-# History `kind`s that end a run, mapped to the resulting RunSummary state (mirrors
-# state.derive._TERMINAL — kept here because the SQLite store flips the index on append
-# rather than deriving on read).
-_TERMINAL: dict[str, str] = {"run_completed": "completed", "run_failed": "failed"}
+from loopy_runtime.state.derive import terminal_for_event, workflow_of
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -83,6 +78,13 @@ class SqliteStateStore:
         self.path = Path(path)
         self.read_only = read_only
         if read_only:
+            # Fail with an actionable message rather than a bare "unable to open database file"
+            # on the first query, which is what a reader (the dashboard) gets if it starts
+            # before `loopy run` has ever created the DB.
+            if not self.path.exists():
+                raise FileNotFoundError(
+                    f"no state DB at {self.path} — start `loopy run` (it creates the store) first"
+                )
             uri = f"file:{self.path}?mode=ro"
             self._conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
         else:
@@ -91,7 +93,6 @@ class SqliteStateStore:
         self._conn.row_factory = sqlite3.Row
         # WAL: a single writer and concurrent readers across processes on one host.
         self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA foreign_keys=ON")
 
     def close(self) -> None:
         self._conn.close()
@@ -104,7 +105,7 @@ class SqliteStateStore:
             "INSERT OR IGNORE INTO runs "
             "(run_id, workflow, manifest_version, entry_event, created_at, state) "
             "VALUES (?, ?, ?, ?, ?, 'running')",
-            (run_id, _workflow_of(run_id), manifest_version, entry.name, _iso(datetime.now(UTC))),
+            (run_id, workflow_of(run_id), manifest_version, entry.name, _iso(datetime.now(UTC))),
         )
         self._conn.commit()
 
@@ -113,12 +114,12 @@ class SqliteStateStore:
             "INSERT INTO run_events (run_id, kind, step_id, payload, at) VALUES (?, ?, ?, ?, ?)",
             (run_id, ev.kind, ev.step_id, json.dumps(ev.payload, default=str), _iso(ev.at)),
         )
-        terminal = _TERMINAL.get(ev.kind)
+        terminal = terminal_for_event(ev)
         if terminal is not None:  # flip the index row to match the derived terminal state
-            error = ev.payload.get("error") if terminal == "failed" else None
+            state, error = terminal
             self._conn.execute(
                 "UPDATE runs SET state = ?, ended_at = ?, error = ? WHERE run_id = ?",
-                (terminal, _iso(ev.at), error, run_id),
+                (state, _iso(ev.at), error, run_id),
             )
         self._conn.commit()
 
@@ -148,7 +149,10 @@ class SqliteStateStore:
         if state is not None:
             sql += " WHERE state = ?"
             params.append(state)
-        sql += " ORDER BY created_at DESC, run_id DESC LIMIT ? OFFSET ?"
+        # Newest-first by insertion order (rowid), not created_at: timestamps can tie on a
+        # same-microsecond burst, and a lexical run_id tie-break would mis-sort `wf-10` vs `wf-9`.
+        # rowid is monotonic per insert and matches the in-memory store's creation order exactly.
+        sql += " ORDER BY rowid DESC LIMIT ? OFFSET ?"
         params += [limit, offset]
         rows = self._conn.execute(sql, params).fetchall()
         return [

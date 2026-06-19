@@ -100,6 +100,43 @@ def test_list_runs_filter_and_paginate(store):
     assert [r.run_id for r in page] == ["wf-4", "wf-3"]  # newest-first, skip wf-5, take 2
 
 
+def test_list_runs_orders_by_creation_not_lexical_run_id(store):
+    # >= 10 runs of one workflow: ids are greet-1..greet-12. Newest-first must be numeric
+    # creation order (greet-12 first), NOT a lexical run_id sort (which puts greet-9 before
+    # greet-10/11/12). Both backends must agree.
+    async def go():
+        for i in range(1, 13):
+            await store.create_run(f"greet-{i}", "1", _event())
+        return [r.run_id for r in await store.list_runs()]
+
+    order = asyncio.run(go())
+    assert order == [f"greet-{i}" for i in range(12, 0, -1)]
+
+
+def test_sqlite_ordering_survives_tied_timestamps(tmp_path, monkeypatch):
+    # Force every created_at to the same microsecond; ordering must still be creation order
+    # (it relies on rowid, not a lexical run_id tie-break on a tied created_at).
+    import loopy_runtime.state.sqlite as sqlite_mod
+
+    fixed = _at(0)
+
+    class _FrozenDT:  # only now() is frozen; _parse still needs the real fromisoformat
+        now = staticmethod(lambda tz=None: fixed)
+        fromisoformat = staticmethod(datetime.fromisoformat)
+
+    monkeypatch.setattr(sqlite_mod, "datetime", _FrozenDT)
+    store = SqliteStateStore(tmp_path / "state.db")
+
+    async def go():
+        for i in range(1, 13):
+            await store.create_run(f"greet-{i}", "1", _event())
+        return [r.run_id for r in await store.list_runs()]
+
+    order = asyncio.run(go())
+    store.close()
+    assert order == [f"greet-{i}" for i in range(12, 0, -1)]
+
+
 def test_workflow_with_hyphen_is_parsed(store):
     async def go():
         await store.create_run("my-cool-wf-7", "1", _event())
