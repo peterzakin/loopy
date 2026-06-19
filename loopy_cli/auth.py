@@ -38,7 +38,14 @@ CALLBACK_TIMEOUT_SECONDS = 300
 
 
 def build_manifest(name: str, redirect_url: str, *, public: bool = False) -> dict:
-    """Assemble the GitHub App manifest: minimal fix/PR permissions, no webhook."""
+    """Assemble the GitHub App manifest: minimal fix/PR permissions, no webhook.
+
+    `hook_attributes` is deliberately omitted: GitHub requires `hook_attributes.url`
+    whenever the object is present (sending `{active: false}` alone fails with
+    "url wasn't supplied"). An App with no `hook_attributes` simply has no webhook —
+    which is what we want, since this App is a credential source, not an event sink,
+    so loopy stays serverless.
+    """
     return {
         "name": name,
         "url": HOMEPAGE_URL,
@@ -49,9 +56,6 @@ def build_manifest(name: str, redirect_url: str, *, public: bool = False) -> dic
             "pull_requests": "write",
             "metadata": "read",
         },
-        # No webhook: this App is a credential source, not an event sink, so loopy
-        # stays serverless (a webhook would require a hosted receiver).
-        "hook_attributes": {"active": False},
     }
 
 

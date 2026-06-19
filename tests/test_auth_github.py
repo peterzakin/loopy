@@ -41,9 +41,12 @@ def rsa_keys() -> tuple[str, str]:
 def test_build_manifest_shape():
     manifest = auth.build_manifest("loopy-acme", "http://127.0.0.1:8765/callback")
     assert manifest["name"] == "loopy-acme"
+    assert manifest["url"]  # top-level url is required by GitHub
     assert manifest["redirect_url"] == "http://127.0.0.1:8765/callback"
     assert manifest["public"] is False
-    assert manifest["hook_attributes"] == {"active": False}  # no webhook → serverless
+    # hook_attributes must be omitted entirely: if present, GitHub requires its `url`,
+    # so `{active: false}` alone fails with "url wasn't supplied". No object → no webhook.
+    assert "hook_attributes" not in manifest
     assert manifest["default_permissions"] == {
         "contents": "write",
         "pull_requests": "write",
