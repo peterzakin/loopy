@@ -81,6 +81,52 @@ def _print_workflows(project) -> None:  # noqa: ANN001 - loopy_core.compile.mode
 
 
 @app.command()
+def init(
+    name: str | None = typer.Argument(
+        None, help="Project name — also the new directory's name. Prompted for if omitted."
+    ),
+    directory: Path = typer.Option(
+        Path("."), "--dir", help="Parent directory to create the project under (default: cwd)."
+    ),
+) -> None:
+    """Scaffold a new Loopy project: registry, a runnable starter workflow, and an env file."""
+    from loopy_cli.scaffold import InvalidProjectName, scaffold_project, validate_project_name
+
+    if not name:
+        name = typer.prompt("Project name")
+    try:
+        name = validate_project_name(name)
+    except InvalidProjectName as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    target = (directory / name).resolve()
+    try:
+        created = scaffold_project(target, name)
+    except FileExistsError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo()
+    typer.echo(
+        typer.style(f"  📦  Created Loopy project '{name}'", fg=typer.colors.CYAN, bold=True)
+    )
+    typer.echo(typer.style("  " + "─" * 40, fg=typer.colors.BRIGHT_BLACK))
+    for rel in created:
+        typer.echo("      " + typer.style(f"{name}/{rel.as_posix()}", fg=typer.colors.GREEN))
+    typer.echo()
+    typer.echo("  Next:")
+    typer.echo(typer.style(f"    cd {name}", fg=typer.colors.BRIGHT_WHITE))
+    typer.echo("    # edit secrets/dev.env (set ANTHROPIC_API_KEY) and registry.yml (repos:)")
+    typer.echo(
+        typer.style("    loopy auth github", fg=typer.colors.BRIGHT_WHITE)
+        + typer.style("   # wire git auth (writes loopy.env here)", fg=typer.colors.BRIGHT_BLACK)
+    )
+    typer.echo(typer.style("    loopy compile . --out manifest.json", fg=typer.colors.BRIGHT_WHITE))
+    typer.echo()
+
+
+@app.command()
 def compile(
     path: Path = typer.Argument(Path("."), help="Project directory to compile."),
     out: Path | None = typer.Option(None, "--out", help="Write the manifest JSON to this path."),

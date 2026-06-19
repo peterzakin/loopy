@@ -1,0 +1,78 @@
+"""`loopy init` scaffolding — the scaffold writes the canonical layout and compiles green.
+
+The load-bearing guarantee is the compile assertion: a freshly initialized project must pass
+`loopy compile` with zero diagnostics, so `loopy init` can never scaffold something the rest
+of the toolchain rejects.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from loopy_cli.scaffold import (
+    InvalidProjectName,
+    scaffold_project,
+    validate_project_name,
+)
+from loopy_core.compile.pipeline import compile_project
+
+
+def test_scaffold_compiles_green(tmp_path):
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo")
+
+    result = compile_project(target)
+    assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
+    # The starter loop is the documented one: a single CodeTask-triggered workflow.
+    assert "codefix" in result.project.workflows
+
+
+def test_scaffold_writes_canonical_layout(tmp_path):
+    target = tmp_path / "demo"
+    created = scaffold_project(target, "demo")
+
+    rels = {p.as_posix() for p in created}
+    assert {
+        "registry.yml",
+        "workflows/codefix/open-pr.md",
+        "skills/codefix/SKILL.md",
+        "sensors/sensors.py",
+        "secrets/dev.env",
+        ".gitignore",
+    } <= rels
+    # Secrets and control-plane creds are gitignored from the start.
+    gitignore = (target / ".gitignore").read_text()
+    assert "loopy.env" in gitignore
+    assert "secrets/" in gitignore
+    # The project name lands in the header comment via the sentinel replacement.
+    assert "# demo" in (target / "registry.yml").read_text()
+
+
+def test_scaffold_refuses_nonempty_dir(tmp_path):
+    target = tmp_path / "demo"
+    target.mkdir()
+    (target / "keep.txt").write_text("mine")
+    with pytest.raises(FileExistsError):
+        scaffold_project(target, "demo")
+
+
+def test_scaffold_into_empty_existing_dir_is_ok(tmp_path):
+    target = tmp_path / "demo"
+    target.mkdir()  # empty — allowed
+    scaffold_project(target, "demo")
+    assert (target / "registry.yml").is_file()
+
+
+@pytest.mark.parametrize("bad", ["", "  ", ".", "..", "a/b", "a\\b", "-leading", "/abs"])
+def test_invalid_project_names_rejected(bad):
+    with pytest.raises(InvalidProjectName):
+        validate_project_name(bad)
+
+
+@pytest.mark.parametrize("good", ["demo", "my-proj", "my_proj", "Proj1", "a.b"])
+def test_valid_project_names_accepted(good):
+    assert validate_project_name(good) == good
+
+
+def test_validate_strips_surrounding_whitespace():
+    assert validate_project_name("  demo  ") == "demo"
