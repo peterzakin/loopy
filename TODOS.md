@@ -9,8 +9,8 @@ plan/source. When an item ships, check its box (`- [x]`) and strike the heading
 
 - [ ] **1. Cumulative cascade spend cap + usage-reporting contract**
   — `plans/future/cost-budget/2026-06-17-usage-contract-and-cumulative-spend.md`
-  No real terminator for runaway loop-back cascades today (`ResultRejected → propose`,
-  `GoalReopened → arbitrate`): each step stays within its per-step budget while cumulative cost
+  No real terminator for runaway loop-back cascades today (any event that loops back to a
+  workflow's entry): each step stays within its per-step budget while cumulative cost
   grows unbounded — only `max_iterations` (a count, not money) stops it. Make `Usage` (tokens
   required, `cost_usd` optional) a harness-contract output, accumulate per-drain, raise
   `CascadeBudgetExceeded` before each step, expose `--max-tokens`. **v1 is a token-based cap only**;
