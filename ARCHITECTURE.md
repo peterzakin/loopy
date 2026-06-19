@@ -73,7 +73,7 @@ A versioned JSON document — the only thing a backend is allowed to depend on. 
 - **Registry, resolved**: agents merged with `defaults`; sandbox specs (image + network
   allowlist); event field contracts (typed maps).
 - **Lineage**: cross-workflow event seams (`Incident`, `WorkItem`, `MetricThreshold`,
-  `GoalReopened`, `ResultRejected`) and within-workflow output edges.
+  `GoalShipped`) and within-workflow output edges.
 - **Sensors**: registered sensor metadata (route/poll config + the event each declares it emits).
   The function *bodies* stay in their authoring language — Python today, other languages later;
   the manifest is language-neutral and records only the descriptor (see §4.6).
@@ -93,7 +93,7 @@ triggering event, must satisfy these. Each requirement is also where a modular p
 | **B2** | **DAG execution honoring `after:`.** Run each non-entry step only after all its `after:` predecessors complete, passing predecessor **outputs** by reference for `{{ step.field }}` resolution. | The engine's core job. |
 | **B3** | **Template resolution at runtime.** Resolve `{{ event.* }}` (entry event) and `{{ step.* }}` (a direct `after:` predecessor's output) against real run data before invoking the agent. | Values only exist at run time. |
 | **B4** | **Agent invocation + typed output capture.** Run a step's prose against its bound agent (model + tools + skills + sandbox) and validate the result against the step's `output:` schema. | Steps are agent tasks. |
-| **B5** | **Event emission onto the bus.** When a step (or sensor) `emits:` a registered event, publish it so other workflows' `on:` subscriptions fire — including loop-backs (`ResultRejected → propose`, `GoalReopened → arbitrate`). | Cross-workflow seams. |
+| **B5** | **Event emission onto the bus.** When a step (or sensor) `emits:` a registered event, publish it so other workflows' `on:` subscriptions fire — including any event-driven loop-back to a workflow's entry. | Cross-workflow seams. |
 | **B6** | **Budget enforcement.** Enforce `budget.wall_clock` (minutes) and `budget.spend.usd`; honor `window`/`latency` (days). | Runs span days; must be bounded. |
 | **B7** | **Durable timers.** `cron(expr)` ticks and budget/wait windows must survive process restarts (no language `sleep`). | Day-long waits can't live in memory. |
 | **B8** | **Cron watermarks.** Persist `last_run` per cron/poll trigger and supply `{{ event.scheduled_at }}` / `{{ event.last_run }}` so steps scan only what changed. | README's incremental-scan contract. |
@@ -204,8 +204,8 @@ arrive with that same scheduler later; poll sensors use duration strings only.)
 
 ### 3.3 Conformance suite
 
-One backend-agnostic test set every `Runtime` must pass: run the README's incidents +
-autoresearch example manifest end-to-end and assert outputs, emitted events, and step order.
+One backend-agnostic test set every `Runtime` must pass: run the README's incidents example
+manifest end-to-end and assert outputs, emitted events, and step order.
 This is what keeps the engine genuinely swappable rather than swappable-in-theory.
 
 ### 3.4 Interface signatures (Phase 6 boundary)
@@ -243,6 +243,11 @@ class StepOutput:
     fields: Mapping[str, Any]         # validated against step.output schema
 
 @dataclass(frozen=True)
+class StepResult:                     # what a harness returns for one step
+    output: StepOutput                                       # validated against step.output
+    emits: Mapping[EventName, Mapping[str, Any]]             # a payload per event the step emits
+
+@dataclass(frozen=True)
 class StepContext:                    # passed to the agent for one step execution
     run_id: RunId
     step_id: StepId
@@ -257,20 +262,25 @@ class RunEvent:                       # an entry in the event-sourced history
     payload: Mapping[str, Any]
     at: datetime
 
-# StepSpec / SandboxSpec / Budget / Manifest come from the compiled manifest (§2).
+# StepSpec / AgentSpec / SandboxSpec / Budget / Manifest come from the compiled manifest (§2).
+# ToolchainLayer is the harness-contract type from §3.2 (additive CLI layer; see TODO #16).
 
 # ── AgentHarness ─ B4 ───────────────────────────────────────────────────────────
 @runtime_checkable
 class AgentHarness(Protocol):
-    async def run(self, step: "StepSpec", ctx: StepContext, sandbox: "Sandbox") -> StepOutput:
+    async def run(self, step: "StepSpec", ctx: StepContext, sandbox: "Sandbox") -> StepResult:
         """Render step.body templates with ctx, run step.agent in `sandbox`, enforce
-        step.budget.wall_clock, and return output validated against step.output.
-        Raise AgentError on failure so RetryPolicy can decide."""
+        step.budget.wall_clock, and return the step output (validated against step.output)
+        plus a payload per emits: event. Raise AgentError on failure so RetryPolicy can decide."""
+    def required_keys(self, agent: "AgentSpec") -> set[str]: ...            # static env keys the agent needs
+    def missing_keys(self, agent: "AgentSpec", env: Mapping[str, str]) -> set[str]: ...  # env-aware pre-flight (OAuth-aware)
+    def toolchain(self, agent: "AgentSpec") -> "ToolchainLayer": ...        # additive CLI layer composed onto the image (§ TODO #16)
 
 # ── SandboxProvider ─ B4 ──────────────────────────────────────────────────────────
 @runtime_checkable
 class SandboxProvider(Protocol):
-    async def acquire(self, spec: "SandboxSpec") -> "Sandbox": ...   # build image + apply egress allowlist
+    async def acquire(self, spec: "SandboxSpec", secrets: Mapping[str, str]) -> "Sandbox": ...
+        # build image + apply egress allowlist; inject `secrets` as the sandbox env (the trust boundary)
 
 @runtime_checkable
 class Sandbox(Protocol):
@@ -343,9 +353,9 @@ class RetryPolicy(Protocol):
 # ── Runtime ─ the engine: B1–B3, B6, B7, B10, B11, B12 ───────────────────────────────
 @runtime_checkable
 class Runtime(Protocol):
-    async def trigger(self, event: Event) -> RunId:        # B1: event → new run rooted at matching on:
+    async def trigger(self, event: Event) -> Optional[RunId]:        # B1: event → new run rooted at matching on: (None if no entry subscribes)
         ...
-    async def tick(self, t: TriggerId, scheduled_at: datetime) -> RunId:  # B7/B8: cron tick
+    async def tick(self, t: TriggerId, scheduled_at: datetime) -> Optional[RunId]:  # B7/B8: cron tick
         ...
     async def resume(self, run_id: RunId) -> None:         # B10: rebuild from history, continue
         ...
@@ -504,13 +514,13 @@ mapping, not the plumbing.
 | Frontmatter split | `python-frontmatter` | YAML header + prose body |
 | YAML parse | `ruamel.yaml` | preserves line numbers → `file:line` errors |
 | Schemas / validation | `pydantic` v2 | registry, events, outputs; type DSL → pydantic types |
-| Template render + static `{{ }}` check | `Jinja2` | `env.parse()` + `meta.find_undeclared_variables()` for §4.4; renders at runtime |
+| Template render + static `{{ }}` check | in-house (regex) | refs are pure `{{ producer.field }}` (no logic), so a regex parser (`template/parser.py`) extracts + validates them and the runtime fills them by string substitution (`render.py`) — a full template engine (Jinja2) isn't needed |
 | DAG build / validate | `networkx` | topo sort, cycle detection, reachability for `after:` |
 | CLI | `Typer` | `loopy compile` / `run` / `trigger` / `admin` |
 | `loopy.events` stubs | `datamodel-code-generator` | `.pyi` from the registry |
-| Cron + scheduling | `croniter` + `APScheduler` | 5-field expr + tz; drives poll/cron ticks |
-| `SensorRunner` webhooks | `FastAPI` + `uvicorn` | mount `@sensor(webhook=…)` routes |
-| `EventBus` (networked) | `FastStream` over NATS/Redis | in-proc bus is trivial; swap brokers without touching the engine |
+| Cron + scheduling | `croniter` + in-house asyncio scheduler | 5-field expr + tz (`croniter`); the in-process `Scheduler` (`sensors/scheduler.py`) drives poll/cron ticks — APScheduler not adopted (the durable-timer seam is deferred to B7, §3.2) |
+| `SensorRunner` webhooks | `FastAPI` + `uvicorn` | mount `@sensor(webhook=…)` routes (future; poll is the near-term trigger) |
+| `EventBus` (networked) | `redis` (Streams + consumer group) | `RedisEventBus` (`bus/redis.py`) uses Streams directly; the in-proc bus is trivial. FastStream/NATS not adopted — brokers swap behind the `EventBus` Protocol |
 | Observability | `OpenTelemetry` + `structlog` | DBOS and Temporal both emit OTel (not built yet) |
 
 **Observability today (B12, shipped):** the `StateStore` records an event-sourced run history
@@ -526,11 +536,14 @@ next layer, still deferred.
 
 **Three high-leverage adoptions that change the plan:**
 
-1. **`AgentHarness` = Claude Agent SDK (`claude-agent-sdk`).** The README's `harness.runtime:
-   claude-code` maps directly onto it — tool loop, subagents, MCP, **skills**, human-in-the-loop.
-   The `skills:` registry field becomes SDK config. Do not build an agent loop. The `codex`
-   runtime (OpenAI's headless `codex exec`) is a sibling behind the same interface — pick it per
-   agent with `harness.runtime: codex` and an OpenAI model.
+1. **`AgentHarness` = the Claude Code CLI, invoked headlessly (shipped).** The README's
+   `harness.runtime: claude-code` maps onto the `claude` CLI run as a subprocess in the sandbox
+   (`harness/claude_code.py`), parsing its JSON output — loopy reuses Claude Code's own tool loop,
+   subagents, MCP, and **skills** rather than building an agent loop. (The `claude-agent-sdk` Python
+   package is the in-process alternative if a tighter embedding is ever wanted.) The `codex`
+   runtime (OpenAI's headless `codex exec`, `harness/codex.py`) is a sibling behind the same
+   interface — pick it per agent with `harness.runtime: codex` and an OpenAI model; `HarnessRouter`
+   dispatches per agent with per-harness model eligibility.
 2. **`DurableLite` ≈ DBOS, not hand-built.** DBOS is a Postgres-backed durable-execution
    *library* (no cluster) — matches loopy's self-contained aesthetic and delivers B7–B11 for free.
    Revises Phase 11 from "reimplement event-sourcing" to "map manifest steps onto DBOS

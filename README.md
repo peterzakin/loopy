@@ -34,7 +34,6 @@ ProjectName/
     upkeep/      scan-deps.md                            # on: cron("0 3 * * *") → WorkItem
     resolve/     arbitrate.md · fix.md · review.md · ship.md
     confirm/     check.md                                # on: MetricThreshold
-    autoresearch/ propose.md · allocate.md · ratchet.md · confirm.md
   skills/                       # reusable agent skills, referenced by name from registry.yml
     triage/             SKILL.md
     repro-authoring/    SKILL.md
@@ -43,12 +42,10 @@ ProjectName/
     sensors.py
 ```
 
-The incidents loop is **three workflows** wired by events only at the real seams — `Incident`
-(sensors → triage), `WorkItem` (triage → resolve), `MetricThreshold` (sensor → confirm), and
-`GoalReopened` (confirm → resolve) — while the tight internals (`arbitrate → fix → review → ship`) pass **outputs** along
-`after`-chains. `autoresearch` is **one** workflow: a single entry (`on: ResultsPlateaued`), an
-`after`-chain (`propose → allocate → ratchet → confirm`) passing outputs, and a `ResultRejected`
-event that loops `confirm` back to `propose`.
+The incidents loop is **four workflows** wired by events only at the real seams — `Incident`
+(sensors → triage), `WorkItem` (triage → resolve, and `upkeep`'s nightly `cron` → resolve),
+`MetricThreshold` (sensor → confirm), and `GoalShipped` (resolve's terminal announcement) — while
+the tight internals (`arbitrate → fix → review → ship`) pass **outputs** along `after`-chains.
 
 ## Naming convention
 
@@ -86,7 +83,7 @@ The test for which to reach for: *does another workflow need this value?* If the
 the same workflow consumes it, it's an **output**. If another workflow subscribes to it — or a
 step needs to loop back to a workflow's entry — it's an **event**. Within-workflow handoffs
 (e.g. `arbitrate → fix`) are outputs; cross-workflow seams (`investigate → arbitrate` via
-`WorkItem`, `check → arbitrate` via `GoalReopened`) are events.
+`WorkItem`) are events.
 
 ## Example `registry.yml`
 
@@ -211,7 +208,7 @@ See `sensors/sensors.py` for the full example.
 ## Examples / run it locally
 
 - [`examples/incidents/`](examples/incidents/) — the canonical multi-workflow loop this README
-  describes (triage → resolve → confirm + autoresearch).
+  describes (triage → resolve → confirm, plus an `upkeep` cron scan).
 - [`examples/codefix/`](examples/codefix/) — the smallest *runnable* loop: one `CodeTask` event →
   an agent that edits a checkout and opens a PR. Start here to actually run something. Its README
   is a **"Run locally" quickstart** — what each `--sandbox` needs in its `env_file`
