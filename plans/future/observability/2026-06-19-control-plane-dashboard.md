@@ -9,7 +9,7 @@
 Give operators a simple web UI to see what runs have happened and what occurred inside
 each one — run list with state (running/completed/failed), per-run step timeline, emitted
 events, step outputs, and the error on a failure. The dashboard is its own HTTP server,
-started as a separate process via `loopy dashboard`, reading from a shared on-disk store
+started as a separate process via `loopy admin`, reading from a shared on-disk store
 that `loopy run` writes to. This is the first concrete delivery against backend capability
 **B12 (Observability)** beyond `status()` / `failed_runs`.
 
@@ -45,7 +45,7 @@ process, no history across restarts).
    (b) add the one missing query — enumerate runs.
 
 2. **SQLite is the right v1 store.** Stdlib (no new dependency), single-file, and supports a
-   concurrent writer (`loopy run`) + reader (`loopy dashboard`) on one host under WAL mode.
+   concurrent writer (`loopy run`) + reader (`loopy admin`) on one host under WAL mode.
    It is explicitly single-host; a networked store (Redis/Postgres) for multi-host is a
    later B10/B11 concern behind the same Protocol, out of scope here.
 
@@ -104,7 +104,7 @@ Three layers, built bottom-up so each is independently testable:
    the view shape, unit-testable without HTTP.
 
 3. **Frontend + CLI** — a single static HTML/JS page served by the same app (list view →
-   click a run → detail view; polls the API for refresh), and a `loopy dashboard` Typer
+   click a run → detail view; polls the API for refresh), and a `loopy admin` Typer
    command that points at the DB file and runs uvicorn.
 
 ### Proposed shape (sketches, not final)
@@ -163,7 +163,7 @@ CLI:
 
 ```python
 @app.command()
-def dashboard(
+def admin(
     db: Path = typer.Argument(..., help="Path to the loopy state DB (e.g. loopy-state.db)."),
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(9000, "--port"),
@@ -196,8 +196,8 @@ from the resolved `state:` config / `--state` flag (default `inproc` → unchang
 - [ ] **Stage 5 — Frontend.** Single `index.html` (+ small `app.js`, `style.css`) served as
       static assets: run list (state badge, workflow, time), click → detail (step timeline,
       emitted events, outputs, error). Poll every few seconds for refresh.
-- [ ] **Stage 6 — CLI + docs.** Add `loopy dashboard` command (lazy imports). Document the
-      flow in `DEPLOYMENT.md` (run with `--state sqlite`, then `loopy dashboard <db>`); flip
+- [ ] **Stage 6 — CLI + docs.** Add `loopy admin` command (lazy imports). Document the
+      flow in `DEPLOYMENT.md` (run with `--state sqlite`, then `loopy admin <db>`); flip
       TODOS.md B12 row from ⚠️ toward the dashboard milestone; graduate the durable-store
       decision into `ARCHITECTURE.md`.
 - [ ] **Stage 7 — On merge.** `git mv` this plan to `plans/past/observability/`.
@@ -208,7 +208,7 @@ from the resolved `state:` config / `--state` flag (default `inproc` → unchang
 - `loopy_runtime/state/inmemory.py` — implement `list_runs()`.
 - `loopy_runtime/state/sqlite.py` — **new**: SQLite-backed `StateStore`.
 - `loopy_runtime/config.py` — parse the reserved `state:` block (backend + path).
-- `loopy_cli/__init__.py` — `loopy run` store selection; new `loopy dashboard` command.
+- `loopy_cli/__init__.py` — `loopy run` store selection; new `loopy admin` command.
 - `loopy_runtime/dashboard/__init__.py`, `app.py`, `views.py` — **new**: read API + view builder.
 - `loopy_runtime/dashboard/static/{index.html,app.js,style.css}` — **new**: the UI.
 - `tests/` — store conformance suite (both stores), `list_runs`, view builder, API routes.
@@ -221,7 +221,7 @@ from the resolved `state:` config / `--state` flag (default `inproc` → unchang
   explicitly at `create_run` — do we extend the `StateStore.create_run` signature, or stash it
   in the `run_started` payload? (Leaning: add it to the `run_started` `RunEvent` payload to
   avoid a Protocol signature change.)
-- **Default DB path / discovery.** Should `loopy dashboard` default to a conventional path
+- **Default DB path / discovery.** Should `loopy admin` default to a conventional path
   (e.g. `./loopy-state.db`) so it pairs with a `loopy run --state sqlite` default, or always
   require the path argument explicitly? (Leaning: explicit arg in v1.)
 - **Live-ish refresh.** Is polling every ~3s acceptable for v1, or is SSE/WebSocket wanted
