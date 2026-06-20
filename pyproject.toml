@@ -16,13 +16,15 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "pyjwt[crypto]>=2.8",
+    # Daytona is the default sandbox provider (agents run in remote cloud sandboxes,
+    # never silently on the host), so its SDK is a core dependency — not an optional extra.
+    "daytona>=0.180",
 ]
 
 [project.scripts]
 loopy = "loopy_cli:app"
 
 [project.optional-dependencies]
-daytona = ["daytona>=0.180"]
 redis = [
     "redis>=5.0",
 ]
@@ -31,7 +33,6 @@ redis = [
 dev = [
     "pytest>=8.0",
     "ruff>=0.4",
-    "daytona>=0.180",
     "fakeredis>=2.21",
 ]
 

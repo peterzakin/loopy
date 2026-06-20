@@ -936,6 +936,7 @@ source = { editable = "." }
 dependencies = [
     { name = "croniter" },
     { name = "datamodel-code-generator" },
+    { name = "daytona" },
     { name = "fastapi" },
     { name = "jsonschema" },
     { name = "networkx" },
@@ -948,16 +949,12 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-daytona = [
-    { name = "daytona" },
-]
 redis = [
     { name = "redis" },
 ]
 
 [package.dev-dependencies]
 dev = [
-    { name = "daytona" },
     { name = "fakeredis" },
     { name = "pytest" },
     { name = "ruff" },
@@ -967,7 +964,7 @@ dev = [
 requires-dist = [
     { name = "croniter", specifier = ">=2.0" },
     { name = "datamodel-code-generator", specifier = ">=0.25" },
-    { name = "daytona", marker = "extra == 'daytona'", specifier = ">=0.180" },
+    { name = "daytona", specifier = ">=0.180" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "jsonschema", specifier = ">=4.21" },
     { name = "networkx", specifier = ">=3.2" },
@@ -979,11 +976,10 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
     { name = "uvicorn", specifier = ">=0.29" },
 ]
-provides-extras = ["daytona", "redis"]
+provides-extras = ["redis"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "daytona", specifier = ">=0.180" },
     { name = "fakeredis", specifier = ">=2.21" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "ruff", specifier = ">=0.4" },
