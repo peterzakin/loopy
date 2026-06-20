@@ -237,7 +237,7 @@ def _run_record(run_id, runtime, outputs) -> dict:
 def _source_root() -> Path | None:
     """The loopy source checkout (the dir holding pyproject.toml), or None.
 
-    `--docker` builds the engine image from source, so it needs the build context. Walks up
+    Container mode builds the engine image from source, so it needs the build context. Walks up
     from this package; returns None for a wheel install with no source tree alongside it.
     """
     for parent in Path(__file__).resolve().parents:
@@ -268,8 +268,9 @@ def _run_in_docker(
     context = _source_root()
     if context is None:
         typer.echo(
-            "error: `loopy run --docker` currently requires a source checkout (no pyproject.toml "
-            "found alongside the package to build the engine image from).",
+            "error: `loopy run` (container mode) currently requires a source checkout (no "
+            "pyproject.toml found alongside the package to build the engine image from). "
+            "Use `loopy run --in-process` for a dev server without Docker.",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -286,7 +287,7 @@ def _run_in_docker(
     if manifest_rel.startswith(".."):
         typer.echo(
             f"error: manifest {manifest} is outside the project root {root_abs}; "
-            "with --docker the manifest must live under --root (it's mounted at /project).",
+            "in container mode the manifest must live under --root (it's mounted at /project).",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -322,7 +323,9 @@ def _run_in_docker(
 
 @app.command()
 def run(
-    manifest: Path = typer.Argument(..., help="Path to manifest.json."),
+    manifest: Path = typer.Argument(
+        Path("manifest.json"), help="Path to the manifest (default: manifest.json)."
+    ),
     root: Path = typer.Option(Path("."), "--root", help="Project root (for env_file + sensors)."),
     config: Path = typer.Option(
         Path("loopy.yaml"), "--config", help="Deployment defaults (loopy.yaml); flags override it."
@@ -344,25 +347,28 @@ def run(
     state_path: str | None = typer.Option(
         None, "--state-path", help="SQLite state DB path (default .loopy/state.db, under --root)."
     ),
-    docker: bool = typer.Option(
+    in_process: bool = typer.Option(
         False,
-        "--docker",
-        help="Run the engine + redis as containers (redis bus, sqlite state, daytona sandbox).",
+        "--in-process",
+        help="Run the engine in this process (dev) instead of the default container stack.",
     ),
     detach: bool = typer.Option(
-        False, "--detach", "-d", help="With --docker, run the stack in the background."
+        False, "--detach", "-d", help="Run the container stack in the background."
     ),
     build: bool = typer.Option(
-        True, "--build/--no-build", help="With --docker, (re)build the engine image first."
+        True, "--build/--no-build", help="(Re)build the engine image before starting the stack."
     ),
 ) -> None:
-    """Start the Loopy server: host sensor webhooks; incoming events drive workflow runs."""
+    """Start Loopy: bring up the engine + redis container stack (redis bus, sqlite state, daytona
+    sandbox) hosting the sensor webhooks. Pass `--in-process` to run the engine in this process
+    instead (the dev inner loop; no Docker/Daytona needed)."""
     import asyncio
 
-    # `--docker` runs the same single-node composition (this very `run` command, with
-    # redis/sqlite/daytona) inside containers. It short-circuits before the in-process
-    # wiring below, since that setup is for running the engine in *this* process.
-    if docker:
+    # The default is the containerized single-node stack. `--in-process` opts into running the
+    # engine in *this* process (and is also what the container itself runs internally, so the
+    # stack doesn't recurse into launching Docker again). Short-circuit to docker before the
+    # in-process wiring below.
+    if not in_process:
         _run_in_docker(
             root=root, manifest=manifest, port=port, sandbox=sandbox, detach=detach, build=build
         )
@@ -401,7 +407,15 @@ def run(
         raise typer.Exit(code=1) from exc
     resolved_redis_url = resolve_redis_url(redis_url)
 
-    m = load_manifest(manifest)
+    try:
+        m = load_manifest(manifest)
+    except FileNotFoundError as exc:
+        typer.echo(
+            f"error: manifest {manifest} not found. Run `loopy compile <project> "
+            f"--out {manifest}` first, or pass the manifest path.",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
     # Sensor-layer secrets: a single runner-wide `sensors/.env`, merged into the process env so
     # in-process @sensor functions read them via os.environ. Non-override (setdefault) so a value
     # explicitly set in the real environment wins, matching dotenv convention.

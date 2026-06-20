@@ -1,4 +1,4 @@
-# Internal deployment asset — driven by `loopy run --docker`, not invoked by hand.
+# Internal deployment asset — driven by `loopy run` (the default container mode), not by hand.
 # All ${...} values are supplied by the CLI's process env (see loopy_cli._run_in_docker);
 # there is no user-authored .env.
 name: loopy
@@ -28,6 +28,7 @@ services:
     command:
       - run
       - ${LOOPY_MANIFEST:-manifest.json}
+      - --in-process
       - --root=/project
       - --host=0.0.0.0
       - --port=8000
