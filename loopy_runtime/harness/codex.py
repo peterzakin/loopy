@@ -53,9 +53,9 @@ class CodexHarness(JsonProtocolHarness):
 
     def _parse_response(self, stdout: str, step: StepSpec) -> tuple[str, Usage]:
         message = self._final_message(stdout, step)
-        # codex emits token usage (no USD cost), but mapping its JSONL token events to the
-        # `Usage` floor is a follow-up — for now report zero-token, cost-less usage so the
-        # contract is satisfied. (See the cost-budget plan; v1 fills tokens for claude-code.)
+        # codex emits no USD cost (token usage only), so it reports cost-less `Usage` and is
+        # refused up front under a `--max-spend` cap. Mapping its JSONL token events into the
+        # telemetry fields is a follow-up. (See the cost-budget plan.)
         return message, Usage()
 
     @classmethod

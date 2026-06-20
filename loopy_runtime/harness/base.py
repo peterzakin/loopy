@@ -193,10 +193,10 @@ class JsonProtocolHarness:
         raise NotImplementedError
 
     def _parse_response(self, stdout: str, step: StepSpec) -> tuple[str, Usage]:
-        """Read the agent's final message text and the invocation's `Usage` (tokens, plus
-        `cost_usd` when the CLI reports one) out of the CLI's stdout. Tokens are required of
-        every real harness so the runtime can enforce a cumulative cascade cap; `cost_usd`
-        is None for harnesses that report no dollar figure."""
+        """Read the agent's final message text and the invocation's `Usage` (cost_usd when the
+        CLI reports one — the signal the cumulative cascade cap accumulates — plus tokens as
+        telemetry) out of the CLI's stdout. `cost_usd` is None for harnesses that report no
+        dollar figure."""
         raise NotImplementedError
 
     # ── shared JSON protocol ──────────────────────────────────────────────────────
