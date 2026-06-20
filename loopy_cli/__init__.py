@@ -12,6 +12,7 @@ Heavy deps are imported lazily per command so `loopy compile` stays runtime-free
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -30,6 +31,26 @@ app.add_typer(auth_app, name="auth")
 @app.callback()
 def main() -> None:
     """Author, compile, and run durable agent workflows."""
+
+
+def _enable_progress_logging() -> None:
+    """Surface the runtime's INFO-level lifecycle breadcrumbs (e.g. the Daytona build/boot
+    progress) on stderr.
+
+    The CLI installs no root logging config, so these records are otherwise swallowed at
+    Python's default WARNING threshold — which is exactly why a `--sandbox daytona` build can
+    look hung for minutes. Scoped to the `loopy_runtime` namespace (not the root logger) so
+    third-party SDK chatter (httpx, the Daytona client) stays quiet, and to stderr so it never
+    pollutes the structured run record on stdout. Idempotent — safe to call per command."""
+    logger = logging.getLogger("loopy_runtime")
+    if any(getattr(h, "_loopy_progress", False) for h in logger.handlers):
+        return
+    handler = logging.StreamHandler()  # stderr
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    handler._loopy_progress = True  # type: ignore[attr-defined]  # tag for the idempotency guard
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
 
 
 def _print_workflows(project) -> None:  # noqa: ANN001 - loopy_core.compile.model.Project
@@ -467,6 +488,8 @@ def run(
     instead (the dev inner loop; no Docker/Daytona needed)."""
     import asyncio
 
+    _enable_progress_logging()  # surface sandbox build/boot breadcrumbs (otherwise swallowed)
+
     # The default is the containerized single-node stack. `--in-process` opts into running the
     # engine in *this* process (and is also what the container itself runs internally, so the
     # stack doesn't recurse into launching Docker again). Short-circuit to docker before the
@@ -651,6 +674,10 @@ def trigger(
     """Fire one event at the manifest and run the cascade to completion (for testing)."""
     import asyncio
     from datetime import UTC, datetime
+
+    # A one-shot probe against a remote sandbox is otherwise silent through the multi-minute
+    # build+boot; surface the runtime's lifecycle breadcrumbs so it doesn't look hung.
+    _enable_progress_logging()
 
     from loopy_runtime.bus.inproc import InProcessEventBus
     from loopy_runtime.contract import Event
