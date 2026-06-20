@@ -6,6 +6,10 @@
 # run in Daytona sandboxes (a separate domain).
 FROM python:3.11-slim
 
+# Declared so the shared compose build arg is accepted here too; the source build ignores it —
+# it installs from the COPYed tree below, not from PyPI (see Dockerfile.pypi for the pip path).
+ARG LOOPY_VERSION
+
 # uv for a fast, cached dependency resolve (the repo's install tool).
 RUN pip install --no-cache-dir uv
 

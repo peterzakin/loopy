@@ -18,9 +18,15 @@ services:
       retries: 5
 
   loopy:
+    # Tagged by loopy version so the image is built once (from local source, or PyPI via
+    # Dockerfile.pypi when there's no checkout) and reused across runs; a new version → new tag →
+    # rebuilt. `loopy run --build` forces a rebuild. Both build inputs come from the CLI's env.
+    image: ${LOOPY_ENGINE_IMAGE:-loopy-engine:latest}
     build:
       context: ${LOOPY_BUILD_CONTEXT}
       dockerfile: ${LOOPY_DOCKERFILE}
+      args:
+        LOOPY_VERSION: ${LOOPY_VERSION:-}
     depends_on:
       redis:
         condition: service_healthy
