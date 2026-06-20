@@ -328,9 +328,9 @@ def _run_in_docker(
             "LOOPY_PORT": str(port or 8000),
         }
     )
-    # The engine inside the container reads --max-spend from LOOPY_MAX_SPEND (compose passes it
-    # through only when set), so the budget cap holds in container mode too. Set it only when
-    # given, so an unset cap doesn't reach the container as an unparseable empty string.
+    # Forward the budget cap as a real --max-spend flag on the container's command (the compose
+    # appends it only when LOOPY_MAX_SPEND is set). This is plumbing between the CLI and compose,
+    # not an env-backed option: --max-spend itself is never read from the environment.
     if max_spend is not None:
         env["LOOPY_MAX_SPEND"] = str(max_spend)
 
@@ -375,7 +375,6 @@ def run(
     max_spend: float | None = typer.Option(
         None,
         "--max-spend",
-        envvar="LOOPY_MAX_SPEND",
         help="Cap the cumulative USD a cascade may spend (terminates runaway loop-backs; "
         "needs cost-reporting harnesses).",
     ),
