@@ -241,6 +241,38 @@ def test_runtime_injects_token_env_into_sandbox():
     assert provider.secrets["PRELOADED"] == "1"  # alongside resolved secrets
 
 
+def test_runtime_injects_run_id_into_sandbox():
+    # LOOPY_RUN_ID is injected for traceability so the agent can stamp the run onto a PR/commit.
+    provider = _CapturingProvider()
+    rt = InMemoryRuntime(
+        _one_step_manifest(),
+        harness=StubAgentHarness({}),
+        sandboxes=provider,
+        secrets=StaticSecretsResolver({}),
+        bus=InProcessEventBus(),
+    )
+    run_id = asyncio.run(
+        rt.trigger(Event(name="Go", fields={}, id="t", emitted_at=datetime.now(UTC)))
+    )
+    assert provider.secrets["LOOPY_RUN_ID"] == run_id
+
+
+def test_env_file_cannot_shadow_run_id():
+    # Engine-owned: a sandbox env_file value for LOOPY_RUN_ID must not win over the real run id.
+    provider = _CapturingProvider()
+    rt = InMemoryRuntime(
+        _one_step_manifest(),
+        harness=StubAgentHarness({}),
+        sandboxes=provider,
+        secrets=StaticSecretsResolver({"LOOPY_RUN_ID": "forged"}),
+        bus=InProcessEventBus(),
+    )
+    run_id = asyncio.run(
+        rt.trigger(Event(name="Go", fields={}, id="t", emitted_at=datetime.now(UTC)))
+    )
+    assert provider.secrets["LOOPY_RUN_ID"] == run_id != "forged"
+
+
 def test_runtime_without_tokens_is_unchanged():
     provider = _CapturingProvider()
     rt = InMemoryRuntime(

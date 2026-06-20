@@ -401,6 +401,12 @@ class InMemoryRuntime:
         if self.tokens is not None:
             secrets.update(await self.tokens.token_env(spec))
 
+        # Run identity for traceability: the agent (and any tooling it shells out to) can stamp
+        # the run id onto what it produces — a PR body, a commit trailer, an uploaded artifact —
+        # so an external side effect can be traced back to the run that made it. Engine-owned, so
+        # it's set last and an env_file can't shadow it.
+        secrets["LOOPY_RUN_ID"] = ctx.run_id
+
         sandbox = await self.sandboxes.acquire(spec, secrets)
         try:
             if agent is not None:
