@@ -1,5 +1,5 @@
 [project]
-name = "loopy-core"
+name = "loopy-computer"
 version = "0.1.0"
 description = "Loopy frontend: compile workflows into a validated manifest (the dbt-core of durable agent workflows)"
 readme = "README.md"

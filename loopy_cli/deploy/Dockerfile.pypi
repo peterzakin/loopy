@@ -1,5 +1,5 @@
 # Internal deployment asset — built by `loopy run` (container mode) when there is NO loopy
-# source checkout (e.g. a `pip install loopy-core`). Installs the pinned loopy release straight
+# source checkout (e.g. a `pip install loopy-computer`). Installs the pinned loopy release straight
 # from PyPI, so it needs no build context beyond this file — that's what removes the
 # source-checkout requirement from container mode.
 #
@@ -14,7 +14,7 @@ ARG LOOPY_VERSION
 RUN test -n "$LOOPY_VERSION" || (echo "LOOPY_VERSION build arg is required" >&2; exit 1)
 
 # [redis] for `--bus redis`; Daytona (the default sandbox) ships in the core deps.
-RUN pip install --no-cache-dir "loopy-core[redis]==${LOOPY_VERSION}"
+RUN pip install --no-cache-dir "loopy-computer[redis]==${LOOPY_VERSION}"
 
 # Commands run against the bind-mounted project (manifest + sensors + env files).
 WORKDIR /project
