@@ -233,15 +233,18 @@ fixed: the docker→daytona missing-user crash is now auto-handled, and there is
   this one credential, opt-in from the operator), inject it as the SCM token and skip the App dance;
   keep the App flow as the production/multi-repo path. Unblocks #18.
 
-- [ ] **18. `loopy init` compiles green but can't run as-is**
-  — `loopy_cli/scaffold.py:63,142`, `loopy_cli/__init__.py:83-127`
+- [x] ~~**18. `loopy init` compiles green but can't run as-is**~~
+  — `loopy_cli/doctor.py`, `loopy_cli/__init__.py` (`doctor` cmd + `init` next-steps), `loopy_cli/scaffold.py`
   The starter points at `octocat/Hello-World` (no push access) and ships `ANTHROPIC_API_KEY=sk-ant-...`
   as a literal placeholder, with no git auth. It compiles clean, which is misleading — green compile ≠
-  runnable. Before a first successful run a dev must change the repo, paste a real key into
-  `secrets/dev.env`, and solve #17. Make `init` honest about the gap: print a "before your first run"
-  checklist (set the key, point `repos:` at a repo you can push to, run auth), and/or a `loopy doctor`
-  preflight that names exactly what's still placeholder. (Pairs with #17 — once a token fallback exists,
-  the checklist gets much shorter.)
+  runnable. **Resolved both ways the item suggested.** (a) `loopy init`'s next-steps is now a "Before your
+  first run" checklist (set the key, repoint `repos:`, run auth) that ends in `loopy doctor`. (b) New
+  `loopy doctor` command: it compiles the project, then runs a *runnability* preflight that catches the
+  three scaffold defaults a presence check misses — the literal `sk-ant-...` key, the unpushable starter
+  repo, and missing git auth (no App in `loopy.env`, no `GITHUB_TOKEN` in an env_file when sandboxes clone
+  repos). Errors exit non-zero, warnings don't. The logic lives in a pure, unit-tested `diagnose`
+  (`tests/test_doctor.py`); the live token-mint check stays at `run`/`trigger` preflight. (Pairs with #17 —
+  once a token fallback exists, the auth step in both the checklist and doctor gets shorter.)
 
 - [ ] **19. PR success is reported unverified — `pr_url` is taken from agent output, never confirmed**
   — `loopy_runtime/runtime/inmemory.py:328-333`, `loopy_cli/__init__.py:224-234` (`_run_record`)

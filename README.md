@@ -237,6 +237,10 @@ See `sensors/sensors.py` for the full example.
 
 A few things worth knowing before the first run:
 
+- **`loopy doctor` checks a project is *runnable*, not just valid.** A green `loopy compile` only
+  proves the manifest is well-formed; the scaffold still ships placeholders that break a real run (a
+  fake `ANTHROPIC_API_KEY`, an unpushable starter repo, no git auth). `loopy doctor` names exactly
+  which of those are still outstanding — run it before your first `trigger`.
 - **`--sandbox` is a provider, not a sandbox name.** It takes `local | docker | daytona` and
   selects the *provider* for the run; it is **not** the name of a sandbox in `registry.yml`. (Per-
   sandbox provider selection from the registry isn't wired yet — the flag picks one provider for
