@@ -194,6 +194,83 @@ def test_ambient_key_offer_noop_without_env_key(tmp_path, monkeypatch):
     assert _key_line(target) == f"ANTHROPIC_API_KEY={PLACEHOLDER_ANTHROPIC_KEY}"
 
 
+def test_ambient_daytona_offer_writes_creds_when_confirmed(tmp_path, monkeypatch):
+    """A real DAYTONA_API_KEY (and URL) in the environment is written into loopy.env on confirm."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo", repos=["me/app"])
+    assert "DAYTONA_API_KEY" not in load_control_plane_env(target)  # commented placeholder only
+
+    monkeypatch.setenv("DAYTONA_API_KEY", "dtn_realkey0123456789")
+    monkeypatch.setenv("DAYTONA_API_URL", "https://daytona.example.com")
+    monkeypatch.setattr("typer.confirm", lambda *a, **k: True)
+    loopy_cli._offer_ambient_daytona_creds(target)
+
+    env = load_control_plane_env(target)
+    assert env["DAYTONA_API_KEY"] == "dtn_realkey0123456789"
+    assert env["DAYTONA_API_URL"] == "https://daytona.example.com"
+
+
+def test_ambient_daytona_offer_carries_key_without_url(tmp_path, monkeypatch):
+    """The URL is optional — a key with no DAYTONA_API_URL still lands the key alone."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo", repos=["me/app"])
+
+    monkeypatch.setenv("DAYTONA_API_KEY", "dtn_realkey0123456789")
+    monkeypatch.delenv("DAYTONA_API_URL", raising=False)
+    monkeypatch.setattr("typer.confirm", lambda *a, **k: True)
+    loopy_cli._offer_ambient_daytona_creds(target)
+
+    env = load_control_plane_env(target)
+    assert env["DAYTONA_API_KEY"] == "dtn_realkey0123456789"
+    assert "DAYTONA_API_URL" not in env
+
+
+def test_ambient_daytona_offer_respects_decline(tmp_path, monkeypatch):
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo", repos=["me/app"])
+
+    monkeypatch.setenv("DAYTONA_API_KEY", "dtn_realkey0123456789")
+    monkeypatch.setattr("typer.confirm", lambda *a, **k: False)
+    loopy_cli._offer_ambient_daytona_creds(target)
+
+    assert "DAYTONA_API_KEY" not in load_control_plane_env(target)
+
+
+def test_ambient_daytona_offer_noop_without_env_key(tmp_path, monkeypatch):
+    """No key in the environment ⇒ no prompt, no change (and crucially, no crash)."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo", repos=["me/app"])
+
+    monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
+
+    def _boom(*a, **k):  # the prompt must never be reached
+        raise AssertionError("should not prompt when no ambient Daytona key is present")
+
+    monkeypatch.setattr("typer.confirm", _boom)
+    loopy_cli._offer_ambient_daytona_creds(target)
+
+    assert "DAYTONA_API_KEY" not in load_control_plane_env(target)
+
+
+def test_ambient_daytona_offer_does_not_clobber_existing(tmp_path, monkeypatch):
+    """An already-configured key in loopy.env is left untouched — no prompt, no overwrite."""
+    from loopy_runtime.secrets import write_control_plane_env
+
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo", repos=["me/app"])
+    write_control_plane_env(target, {"DAYTONA_API_KEY": "dtn_already_set"})
+
+    monkeypatch.setenv("DAYTONA_API_KEY", "dtn_ambient_different")
+
+    def _boom(*a, **k):  # must not prompt when a key is already configured
+        raise AssertionError("should not prompt when loopy.env already has a key")
+
+    monkeypatch.setattr("typer.confirm", _boom)
+    loopy_cli._offer_ambient_daytona_creds(target)
+
+    assert load_control_plane_env(target)["DAYTONA_API_KEY"] == "dtn_already_set"
+
+
 def test_init_non_interactive_writes_placeholder_scaffold(tmp_path, monkeypatch):
     """`--non-interactive` skips every prompt and leaves the verbatim placeholder scaffold."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-realkey0123456789")  # would be offered if asked
