@@ -170,3 +170,29 @@ def test_run_raises_on_nonzero_exit():
     sandbox = CaptureSandbox({"result": ""}, exit_code=1)
     with pytest.raises(HarnessError):
         asyncio.run(_harness().run(step, _ctx(), sandbox))
+
+
+def test_run_reports_usage_tokens_and_cost():
+    # The envelope's `usage` block → tokens (the cascade-cap signal); `total_cost_usd` →
+    # optional metadata. Both surface on the StepResult.
+    step = StepSpec(id="w/s", agent="Fixer", output={"goal": {"type": "string"}}, body="b")
+    envelope = {
+        "result": json.dumps({"output": {"goal": "ship it"}, "emits": {}}),
+        "usage": {"input_tokens": 1200, "output_tokens": 340, "cache_read_input_tokens": 99},
+        "total_cost_usd": 0.0123,
+    }
+    result = asyncio.run(_harness().run(step, _ctx(), CaptureSandbox(envelope)))
+    assert result.usage.input_tokens == 1200
+    assert result.usage.output_tokens == 340
+    assert result.usage.total_tokens == 1540
+    assert result.usage.cost_usd == 0.0123
+
+
+def test_run_usage_defaults_to_zero_tokens_and_no_cost_when_absent():
+    # An envelope without a `usage` block / cost (older CLI, or a trivial run) → zero tokens
+    # and cost_usd None, never a crash.
+    step = StepSpec(id="w/s", agent="Fixer", output={"goal": {"type": "string"}}, body="b")
+    envelope = {"result": json.dumps({"output": {"goal": "x"}, "emits": {}})}
+    result = asyncio.run(_harness().run(step, _ctx(), CaptureSandbox(envelope)))
+    assert result.usage.total_tokens == 0
+    assert result.usage.cost_usd is None

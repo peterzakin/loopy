@@ -57,7 +57,7 @@ def test_unknown_keys_warn_not_fatal(tmp_path):
 
 def test_reserved_keys_do_not_warn(tmp_path):
     warnings: list[str] = []
-    load_config(_write(tmp_path, "limits:\n  max_tokens: 5\n"), on_warning=warnings.append)
+    load_config(_write(tmp_path, "limits:\n  max_spend: 5\n"), on_warning=warnings.append)
     assert warnings == []
 
 

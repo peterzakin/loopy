@@ -5,7 +5,8 @@ is the security boundary — see the per-harness bypass flags), then parses a sm
 protocol the agent is asked to emit: `{"output": {...}, "emits": {"<Event>": {...}}}`.
 That protocol — the prompt instruction, result parsing, and output/emit validation — is
 identical across providers, so it lives here; a concrete harness only supplies the CLI
-argv and how to read the agent's final message + USD cost out of that CLI's stdout.
+argv and how to read the agent's final message + `Usage` (tokens, optional USD cost) out
+of that CLI's stdout.
 
 The base also enforces the two per-harness rules:
 
@@ -29,6 +30,7 @@ from loopy_runtime.contract import (
     StepOutput,
     StepResult,
     ToolchainLayer,
+    Usage,
 )
 from loopy_runtime.manifest_model import AgentSpec, EventContract, StepSpec
 from loopy_runtime.providers import provider, required_model_key, validate_model
@@ -156,13 +158,14 @@ class JsonProtocolHarness:
             detail = _tail(result.stderr) or _tail(result.stdout) or "(no output)"
             raise HarnessError(f"{self.RUNTIME} exited {result.exit_code}: {detail}")
 
-        message, spent_usd = self._parse_response(result.stdout, step)
-        self._enforce_spend(step, spent_usd)
+        message, usage = self._parse_response(result.stdout, step)
+        self._enforce_spend(step, usage.cost_usd or 0.0)
 
         parsed = self._parse_result(message, step)
         return StepResult(
             output=StepOutput(fields=self._extract_output(parsed, step)),
             emits=self._extract_emits(parsed, step),
+            usage=usage,
         )
 
     async def _exec(self, argv: list[str], step: StepSpec, sandbox: Sandbox):
@@ -189,9 +192,11 @@ class JsonProtocolHarness:
     def build_argv(self, step: StepSpec, agent: AgentSpec, prompt: str) -> list[str]:
         raise NotImplementedError
 
-    def _parse_response(self, stdout: str, step: StepSpec) -> tuple[str, float]:
-        """Read the agent's final message text and the run's USD cost out of the CLI's
-        stdout. Cost is 0.0 for harnesses that report none."""
+    def _parse_response(self, stdout: str, step: StepSpec) -> tuple[str, Usage]:
+        """Read the agent's final message text and the invocation's `Usage` (cost_usd when the
+        CLI reports one — the signal the cumulative cascade cap accumulates — plus tokens as
+        telemetry) out of the CLI's stdout. `cost_usd` is None for harnesses that report no
+        dollar figure."""
         raise NotImplementedError
 
     # ── shared JSON protocol ──────────────────────────────────────────────────────

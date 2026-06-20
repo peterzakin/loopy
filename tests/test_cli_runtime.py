@@ -88,6 +88,18 @@ def test_build_runtime_passes_state_through_when_given(tmp_path):
     assert rt.tokens is None  # default: no injection unless wired
 
 
+def test_build_runtime_defaults_cascade_budget_to_none(tmp_path):
+    rt = build_runtime(_manifest(), root=tmp_path, sandbox="local", bus=InProcessEventBus())
+    assert rt.cascade_budget_usd is None  # dollar cap disabled unless --max-spend is given
+
+
+def test_build_runtime_wires_max_spend_into_dollar_cap(tmp_path):
+    rt = build_runtime(
+        _manifest(), root=tmp_path, sandbox="local", bus=InProcessEventBus(), max_spend=12.50
+    )
+    assert rt.cascade_budget_usd == 12.50
+
+
 # --- trigger CLI surface ------------------------------------------------------
 
 
@@ -101,6 +113,13 @@ def test_trigger_exposes_json_flag():
     result = runner.invoke(app, ["trigger", "--help"])
     assert result.exit_code == 0
     assert "--json" in result.stdout
+
+
+def test_trigger_and_run_expose_max_spend_flag():
+    for cmd in ("trigger", "run"):
+        result = runner.invoke(app, [cmd, "--help"])
+        assert result.exit_code == 0
+        assert "--max-spend" in result.stdout
 
 
 # --- run record (#9: surface step outputs) -----------------------------------
