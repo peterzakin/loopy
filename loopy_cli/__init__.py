@@ -164,6 +164,7 @@ def init(
     # Offer to close the gaps the scaffold leaves on purpose before reporting what's left.
     if interactive:
         _offer_ambient_anthropic_key(target)
+        _offer_ambient_daytona_creds(target)
         # Git auth only matters if the agent actually clones a repo. With none configured,
         # creating a GitHub App would have nothing to install on — so skip it and say why.
         if repos:
@@ -243,6 +244,46 @@ def _offer_ambient_anthropic_key(target: Path) -> None:
         "  "
         + typer.style("✓", fg=typer.colors.GREEN)
         + " wrote ANTHROPIC_API_KEY to secrets/dev.env"
+    )
+    typer.echo()
+
+
+def _offer_ambient_daytona_creds(target: Path) -> None:
+    """If `DAYTONA_API_KEY` is in the environment, offer to write it into the control-plane env.
+
+    The default scaffold's sandbox is `provider: daytona`, which needs `DAYTONA_API_KEY` (and
+    optionally `DAYTONA_API_URL`) in `loopy.env` to run — the scaffold ships those as commented
+    placeholders. Most people trying loopy with Daytona already have the key exported, so reuse
+    it on the spot rather than making them hand-edit `loopy.env`. `DAYTONA_API_URL` is only
+    carried along when the key is present (a URL alone can't authenticate). Skips silently when
+    no key is in the environment, or when `loopy.env` already has one (don't clobber).
+    """
+    from loopy_runtime.secrets import load_control_plane_env, write_control_plane_env
+
+    key = os.environ.get("DAYTONA_API_KEY", "").strip()
+    if not key:
+        return
+
+    # Already configured (e.g. re-init over an existing tree) — nothing to offer, don't clobber.
+    if load_control_plane_env(target).get("DAYTONA_API_KEY"):
+        return
+
+    masked = f"{key[:4]}…{key[-4:]}" if len(key) > 8 else "the value"
+    if not typer.confirm(
+        f"  Found DAYTONA_API_KEY in your environment ({masked}). Write it into loopy.env?",
+        default=True,
+    ):
+        return
+
+    updates = {"DAYTONA_API_KEY": key}
+    url = os.environ.get("DAYTONA_API_URL", "").strip()
+    if url:
+        updates["DAYTONA_API_URL"] = url
+
+    write_control_plane_env(target, updates)
+    wrote = " + ".join(updates)
+    typer.echo(
+        "  " + typer.style("✓", fg=typer.colors.GREEN) + f" wrote {wrote} to loopy.env"
     )
     typer.echo()
 
