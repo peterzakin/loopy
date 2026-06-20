@@ -176,9 +176,13 @@ The event-publish layer: code that turns the outside world into **registered eve
 more files (a single `sensors.py` is fine); each sensor is a function decorated with `@sensor`,
 triggered by a `poll` or a `webhook`.
 
-> **Note:** `poll` is the intended near-term trigger. **`webhook` is a future improvement** —
-> hosting webhooks for arbitrary third-party services needs per-source authentication, which is
-> deferred. The `webhook=` examples below illustrate that future path.
+> **Both `poll` and `webhook` are supported.** `loopy run` hosts each `@sensor(webhook=...)` as an
+> HTTP route and fans one path out to every sensor on it (GitHub posts every event type to a single
+> URL, so several sensors can share `/hooks/github`). Ingress can be signed: when
+> `GITHUB_WEBHOOK_SECRET` is set, `loopy run` verifies GitHub's `X-Hub-Signature-256` HMAC at the
+> edge before any sensor sees the payload. See [`examples/github/`](examples/github/) for a
+> signed-webhook loop and [`examples/incidents/sensors/sensors.py`](examples/incidents/sensors/sensors.py)
+> for a mix of `webhook` and `poll` sensors.
 
 A sensor **returns a registered event** — and returning *is* emitting: the event goes on the
 bus and routes to whichever workflow subscribes with `on:`. Return `None` to emit nothing, or
@@ -221,12 +225,17 @@ export const sensorRegistry = {
 };
 ```
 
-See `sensors/sensors.py` for the full example.
+See [`examples/github/sensors/sensors.py`](examples/github/sensors/sensors.py) for the full
+signed-webhook example, and `sensors/sensors.py` in a scaffolded project.
 
 ## Examples / run it locally
 
 - [`examples/incidents/`](examples/incidents/) — the canonical multi-workflow loop this README
   describes (triage → resolve → confirm, plus an `upkeep` cron scan).
+- [`examples/github/`](examples/github/) — the canonical **webhook** loop: GitHub posts every
+  event to one `/hooks/github` URL; `loopy run` verifies the `X-Hub-Signature-256` HMAC once at the
+  edge, then fans the delivery out to two sensors (PR opened → code review, PR merged → find
+  follow-on work).
 - [`examples/codefix/`](examples/codefix/) — the smallest *runnable* loop: one `CodeTask` event →
   an agent that edits a checkout and opens a PR. Start here to actually run something. Its README
   is a **"Run locally" quickstart** — what each sandbox `provider:` needs in its `env_file`

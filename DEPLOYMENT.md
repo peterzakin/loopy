@@ -5,13 +5,14 @@
 > explains a *deployment*** — the concrete pieces that make up a running Loopy, how they
 > wire together, and what changes as you go from a laptop to production.
 
-> ⚠️ **Ingress direction — read first.** The intended sensor model is **polling** (Loopy calls
-> out to each source on a schedule). **Webhook ingress is a future improvement:** supporting
-> arbitrary third-party webhooks requires per-source authentication, which is deferred (see
-> `BACKLOG.scratch.md` and the sensor-ingress plan). The webhook examples below illustrate that
-> future path — they are **not** a production ingress. (Honest status: webhook routes currently
-> run but are unauthenticated; durable poll scheduling is itself still ahead — ARCHITECTURE B7/B8.
-> So neither is production-ready yet; polling is the *direction*.)
+> ⚠️ **Ingress status — read first.** Both sensor models run today. `loopy run` schedules **poll**
+> and **cron** triggers on an in-process scheduler (one watermark-gated task per sensor) and hosts
+> **webhook** sensors as HTTP routes, fanning one URL out to every sensor on it. Webhook ingress can
+> be **signed**: for `/hooks/github` paths, `loopy run` verifies GitHub's `X-Hub-Signature-256` HMAC
+> at the edge when `GITHUB_WEBHOOK_SECRET` is set (a path left without a secret runs unverified — dev
+> only — and says so loudly). The remaining gap is **durability**, not the trigger type: the
+> scheduler is in-process, so restart-survival and single-firing across workers are still ahead
+> (ARCHITECTURE B7/B8). For production you want the durable runtime behind the same `Scheduler` seam.
 
 ---
 
@@ -517,8 +518,9 @@ bind-mounted **read-only** at `/project`), the manifest (relative to `--root`, d
 `manifest.json`), `--port` — plus the project's `loopy.env` for the Daytona creds. Which backend
 each agent runs in rides the manifest (the sandbox's `provider:`), not the launch command. There is no compose file or `.env` to write. Agent secrets stay
 in the sandbox `env_file`s under the project, and `loopy.env` (read from the project root) still
-carries the GitHub App creds for token minting. (The container stack builds the image from a
-source checkout today.)
+carries the GitHub App creds for token minting. (The container stack builds the engine image from a
+local source tree when one is present, otherwise from the pinned PyPI release (`loopy-computer`) via
+the shipped `Dockerfile.pypi` — so container mode needs only Docker, not a source checkout.)
 
 ### C. Durable / distributed — the production target (design-complete, behind the same interfaces)
 
@@ -584,12 +586,14 @@ What you actually need in place for a successful run, in order:
 - **Sensor module won't load** → the server logs a warning and falls back to *synthesizing*
   events from the contract, so the path still exercises end-to-end. Real payloads need the
   module to import cleanly (it imports the `loopy` authoring shim).
-- **`cron(…)` / poll triggers** → recorded in the manifest but **not scheduled** by the v1
-  runtime (durable timers are B7/B8, deferred). Polling is the intended sensor model; the
-  durable scheduler that runs it is still ahead.
-- **Webhook ingress** → a **future improvement**, not production-ready: the webhook routes run
-  but are unauthenticated (authenticating arbitrary third-party webhooks is deferred). Don't
-  expose them to untrusted networks.
+- **`cron(…)` / poll triggers** → scheduled today by the **in-process** `PollScheduler` (poll
+  sensors fire watermark-gated; `on: cron(...)` entries fire `Runtime.tick` on each occurrence).
+  What's still ahead is **durable** scheduling (survives restart, single-firing across workers) —
+  the B7/B8 timer work, which drops in behind the same `Scheduler` seam.
+- **Webhook ingress** → hosted by `loopy run` as HTTP routes, with **signed ingress** for GitHub
+  (`X-Hub-Signature-256` verified at the edge when `GITHUB_WEBHOOK_SECRET` is set). A `/hooks/github`
+  route left without a secret runs unverified — **dev only**; set the secret before exposing it to
+  untrusted networks. A general per-source auth framework for arbitrary providers is still ahead.
 - **Process restart** → in-flight runs are lost under the InMemory runtime (topology A/B). This
   is the single biggest reason to move to topology C for anything long-running.
 - **Budget trip** → terminal, not retried. A step exceeding `wall_clock` or `spend.usd` fails

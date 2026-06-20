@@ -65,11 +65,13 @@ into a Loopy <strong>event</strong>. The question: does Loopy give the developer
 or an <em>SDK</em> to drop into whatever they already run?</p>
 
 <div class="callout">
-  <strong>Note — this is forward-looking.</strong> The intended near-term sensor trigger is
-  <strong>polling</strong>. <strong>Webhook ingress (and the server-vs-SDK question below) is a future
-  improvement</strong> — hosting webhooks for arbitrary third-party services requires per-source
-  authentication, which is deferred. This note explores that future design; it doesn't describe a
-  shipped capability.
+  <strong>Status: webhook ingress has shipped.</strong> Both triggers — <strong>polling</strong> and
+  <strong>webhooks</strong> — are supported today. What landed is <strong>Option A below (the turnkey
+  server)</strong>: <code>loopy run</code> hosts each <code>@sensor(webhook=...)</code> as an HTTP route,
+  fans one URL out to every sensor on it, and verifies signed ingress at the edge (GitHub's
+  <code>X-Hub-Signature-256</code> HMAC when <code>GITHUB_WEBHOOK_SECRET</code> is set) — the per-source
+  authentication this note had filed as deferred. The server-vs-SDK comparison below is retained as
+  design rationale; the polyglot SDK path (Option B) remains future work.
 </div>
 
 <h2>The two options</h2>

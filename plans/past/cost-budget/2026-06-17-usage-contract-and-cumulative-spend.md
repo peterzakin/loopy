@@ -2,7 +2,10 @@
 
 **Status:** SHIPPED — 2026-06-20. Final surface is **`--max-spend` (USD) only**; the token cap
 that briefly shipped was removed (illegible unit — see 2026-06-20 note). `Usage` keeps tokens as
-telemetry. Cap gated on cost-reporting harnesses.
+telemetry. Cap gated on cost-reporting harnesses. **Superseded surface:** the spend cap later moved
+out of the launch flag and into the registry (project + per-workflow caps, #54) and is marked
+experimental with a documented cross-workflow caveat (#55) — the `--max-spend` flag below was the
+first cut.
 **Owner:** peter
 **Date:** 2026-06-17
 

@@ -44,13 +44,24 @@ plan at the start of a session.
 
 ## Current epics
 
-- **`future/sensor-ingress/`** — receiver-as-gate + decoupling (core shipped; HTTP intake / auth /
-  contract distribution still open).
-- **`future/cost-budget/`** — usage-reporting contract + cumulative cascade spend cap (design only).
+`future/` is currently empty — every drafted epic has shipped and been archived to `past/`. New
+work starts a fresh `future/<epic>/` (see "Starting new work").
+
+- **`past/sensor-ingress/`** — receiver-as-gate + intake/execution decoupling (Stages 1/2/1.5).
+  Shipped; signed GitHub webhook ingress later landed here (#63). Stage 3 (developer-hosted
+  `POST /events` / producer auth / external broker / contract distribution) still deferred.
+- **`past/cost-budget/`** — usage-reporting contract + cumulative cascade spend cap. Shipped as
+  `--max-spend` (USD), then moved into the registry (#54) and marked experimental (#55).
+- **`past/repo-access/`** — `loopy auth github` GitHub App onboarding + runtime `TokenProvider`
+  injection. Shipped (later hardened by #66/#67/#68); per-sandbox `repos:` scoping still deferred.
+- **`past/config/`** — `loopy.yaml` deployment defaults for `loopy run` (flag > yaml > default).
+  Shipped, including the reserved `state:` selector.
 - **`past/redis-broker/`** — `RedisEventBus` (Redis Streams) as the first networked broker behind
   the `EventBus` seam. Shipped; durable-run recovery still B10.
 - **`past/poll-sensors/`** — in-process asyncio poll scheduler behind a durable-timer seam
   (`Tick` input, multi-event fan-out, watermarks). Shipped; durability deferred to B7.
+- **`past/observability/`** — control-plane run dashboard (`loopy admin`) over the durable state
+  store. Shipped.
 - **`past/daytona-sandbox/`** — DaytonaSandboxProvider behind the Sandbox Protocol. Shipped.
 - **`past/agent-emitted-events/`** — the agent produces emitted-event payloads (#3, E1) and real
   sensor execution (#2, E2). Shipped.

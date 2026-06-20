@@ -1,6 +1,10 @@
 # Event ingress: make the receiver a real gate, decoupled from execution
 
-**Status:** in progress
+**Status:** SHIPPED (this milestone) — Stages 1, 2, and 1.5 are built: the receiver is a real
+validation gate, intake is decoupled from execution (publish-and-ack + background `serve()`), and
+run failures are recorded not raised. Signed GitHub webhook ingress later landed on this surface
+(#63). **Stage 3 (developer-hosted: `POST /events`, producer auth, external broker, contract
+distribution) remains deferred** — a separate milestone, tracked in `TODOS.md`.
 **Owner:** peter
 **Date:** 2026-06-16
 
