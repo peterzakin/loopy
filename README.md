@@ -1,6 +1,16 @@
 # Loopy
 
-Loopy is a framework for authoring agent automations**. The agent's** job is the **body** (prose); config is light **frontmatter**; the workflow's DAG is built from one rule.
+Loopy is a **code-first, agent-neutral** framework for authoring agent automations. Your
+automations are *files in your repo* — workflows, skills, and sensors authored as Markdown and
+code — so they version, diff, and review like the rest of your codebase. There's no canvas to
+click together: `loopy compile` builds the workflow's DAG straight from those files. Each step's
+agent is the **body** (prose); its config is light **frontmatter**; the DAG is built from one rule.
+
+**Agent-neutral.** Loopy orchestrates the loop; it doesn't bind you to one vendor's agent. Every
+step names its runtime in `registry.yml` (`harness.runtime`) — **Claude Code** (`claude-*` models)
+and **OpenAI Codex** (`gpt-*`/o-series/`codex-*`) ship today, and the harness registry is built to
+take more. Mix them in one manifest: route a triage step to one runtime and a fixer to another,
+and swap a step's runtime or model without touching its prose.
 
 ## Install
 
@@ -164,10 +174,10 @@ any resources — and agents reference them **by name** in `registry.yml`
 Namespaced subdirectories are allowed (`rubrics/fix-quality`). A skill name resolves only against
 `skills/`; an unresolved name is a compile-time error.
 
-This reflects the organizing principle: `**registry.yml` holds the lightweight, inline config**  
-**entities** (Agents, Sandboxes, Events — a few fields each), while **top-level directories hold**  
-**authored artifacts that have a *body*** (`workflows/`, `skills/`, and eventually `sensors/`). An  
-agent naming `skills: [triage]` resolves it against `skills/`, the same way `agent: Investigator`  
+This reflects the organizing principle: **`registry.yml` holds the lightweight, inline config
+entities** (Agents, Sandboxes, Events — a few fields each), while **top-level directories hold the
+authored artifacts that have a *body*** (`workflows/`, `skills/`, and eventually `sensors/`). An
+agent naming `skills: [triage]` resolves it against `skills/`, the same way `agent: Investigator`
 resolves against the registry.
 
 ## `sensors/`
