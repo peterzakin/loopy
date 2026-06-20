@@ -397,7 +397,13 @@ def run_github_auth(
         if not no_browser:
             import webbrowser
 
+            # Announce the open the way the create-app step does — webbrowser.open is
+            # silent (and a no-op headless/over SSH), so without this it looks like we
+            # only printed the link.
+            typer.echo("  → opening the install page in your browser…")
             webbrowser.open(install_url)
+        else:
+            typer.echo("  → --no-browser: open the URL above to install")
         # Creating the App did not install it. Block until the install lands rather than
         # hand back a created-but-uninstalled App that fails much later at `loopy run`.
         _wait_for_installation(root)
