@@ -260,14 +260,7 @@ def _source_root() -> Path | None:
 
 
 def _run_in_docker(
-    *,
-    root: Path,
-    manifest: Path,
-    port: int | None,
-    sandbox: str,
-    detach: bool,
-    build: bool,
-    max_spend: float | None = None,
+    *, root: Path, manifest: Path, port: int | None, sandbox: str, detach: bool, build: bool
 ) -> None:
     """Bring up the single-node stack (engine + redis) via the bundled compose file.
 
@@ -328,12 +321,6 @@ def _run_in_docker(
             "LOOPY_PORT": str(port or 8000),
         }
     )
-    # Forward the budget cap as a real --max-spend flag on the container's command (the compose
-    # appends it only when LOOPY_MAX_SPEND is set). This is plumbing between the CLI and compose,
-    # not an env-backed option: --max-spend itself is never read from the environment.
-    if max_spend is not None:
-        env["LOOPY_MAX_SPEND"] = str(max_spend)
-
     cmd = ["docker", "compose", "-f", str(compose), "up"]
     if build:
         cmd.append("--build")
@@ -401,13 +388,7 @@ def run(
     # in-process wiring below.
     if not in_process:
         _run_in_docker(
-            root=root,
-            manifest=manifest,
-            port=port,
-            sandbox=sandbox,
-            detach=detach,
-            build=build,
-            max_spend=max_spend,
+            root=root, manifest=manifest, port=port, sandbox=sandbox, detach=detach, build=build
         )
         return
 

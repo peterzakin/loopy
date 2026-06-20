@@ -24,17 +24,20 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    # The collapsed single-node topology: redis bus, sqlite state, daytona sandbox. Run via a
-    # shell so the optional --max-spend flag is appended only when a cap was set. LOOPY_MAX_SPEND
-    # is pure CLI→compose plumbing (set by loopy_cli._run_in_docker only when --max-spend is
-    # passed); the engine's --max-spend flag itself is never read from the environment.
-    entrypoint: ["/bin/sh", "-c"]
+    # The collapsed single-node topology: redis bus, sqlite state, daytona sandbox. Launch wiring
+    # only — workflow controls (budgets, limits) are authored in the registry / workflow dir and
+    # ride the manifest, never the launch command.
     command:
-      - >
-        exec loopy run "${LOOPY_MANIFEST:-manifest.json}" --in-process --root=/project
-        --host=0.0.0.0 --port=8000 --bus=redis --sandbox="${LOOPY_SANDBOX:-daytona}"
-        --state=sqlite --state-path=/state/state.db
-        ${LOOPY_MAX_SPEND:+--max-spend} ${LOOPY_MAX_SPEND:-}
+      - run
+      - ${LOOPY_MANIFEST:-manifest.json}
+      - --in-process
+      - --root=/project
+      - --host=0.0.0.0
+      - --port=8000
+      - --bus=redis
+      - --sandbox=${LOOPY_SANDBOX:-daytona}
+      - --state=sqlite
+      - --state-path=/state/state.db
     environment:
       # Infra creds only — agent secrets ride the sandbox env_file, not the engine env.
       - REDIS_URL=redis://redis:6379
