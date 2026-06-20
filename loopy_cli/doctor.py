@@ -12,6 +12,13 @@ declared with no git auth wired. The runtime's own `preflight()` only checks tha
 `read_env` callback that returns a parsed env_file (or `None` if missing), and the merged
 control-plane env, and returns an ordered list of `Finding`s. The CLI does the file I/O and
 renders them.
+
+`check_repo_access` is the one live check `diagnose` can't make: with a GitHub App
+configured, `diagnose` can only see that *some* App exists — not whether it was actually
+installed on the repos in `registry.yml`. `check_repo_access` resolves the installation,
+mints a token, and confirms each declared repo is in the App's selected repositories,
+catching at preflight the gap that otherwise only surfaced at `loopy run` ("no
+installations" / a clone 403). It does network I/O, so it lives apart from pure `diagnose`.
 """
 
 from __future__ import annotations
@@ -132,3 +139,81 @@ def diagnose(
         )
 
     return findings
+
+
+def _declared_repo_slugs(registry) -> list[str]:  # noqa: ANN001 - registry.model.Registry
+    """The repos sandboxes actually clone, as deduped lowercase `owner/name`.
+
+    Skips the unpushable starter repo — `diagnose` already flags that as its own error, so
+    re-reporting it as "not in the App's repos" would just be noise.
+    """
+    slugs: list[str] = []
+    for sandbox in registry.sandboxes.values():
+        for repo in sandbox.repos:
+            slug = _repo_slug(repo.url)
+            if slug != PLACEHOLDER_REPO and slug not in slugs:
+                slugs.append(slug)
+    return slugs
+
+
+def check_repo_access(registry, creds) -> list[Finding]:  # noqa: ANN001 - Registry, AppCredentials
+    """Live preflight: confirm every repo a sandbox clones is in the App's selected repos.
+
+    The gap `diagnose` can't see: a configured GitHub App that was never installed on the
+    repos in `registry.yml` (or installed on the wrong ones) compiles and diagnoses clean,
+    then fails at `loopy run` with "no installations" or a clone 403. This makes the call
+    `diagnose` can't — resolve the installation, mint a token, list the repos it reaches —
+    and flags any declared repo the App can't access.
+
+    Network calls go through `loopy_runtime.scm.github_app` (stubbed in tests). Any GitHub or
+    network error degrades to a single `warn` rather than failing the whole preflight — the
+    run path still surfaces the real error loudly. Returns `Finding`s; empty ⇒ all reachable.
+    """
+    from loopy_runtime.scm import github_app
+
+    wanted = _declared_repo_slugs(registry)
+    if not wanted:
+        return []  # no repos cloned → nothing to check (orchestrator-style project)
+
+    def _warn(detail: str) -> list[Finding]:
+        return [
+            Finding("warn", f"couldn't verify repo access: {detail}", "run `loopy auth status`")
+        ]
+
+    try:
+        installations = github_app.list_installations(creds)
+    except (github_app.GitHubAppError, OSError) as exc:
+        return _warn(str(exc))
+
+    if not installations:
+        return [
+            Finding(
+                "error",
+                "the GitHub App is configured but not installed on any account yet",
+                "install it — run `loopy auth status` for the URL, then pick your repos",
+            )
+        ]
+    if len(installations) > 1:
+        return _warn("the App has multiple installations — can't tell which serves these repos")
+
+    try:
+        token = github_app.mint_installation_token(creds, installations[0]["id"])["token"]
+        reachable_payload = github_app.list_installation_repositories(token)
+    except (github_app.GitHubAppError, OSError) as exc:
+        return _warn(str(exc))
+
+    reachable = {
+        str(repo.get("full_name", "")).lower() for repo in reachable_payload.get("repositories", [])
+    }
+    missing = [slug for slug in wanted if slug not in reachable]
+    if not missing:
+        return []
+    is_one = len(missing) == 1
+    return [
+        Finding(
+            "error",
+            f"the GitHub App can't access {', '.join(missing)} — "
+            f"{'it is' if is_one else 'they are'} not in its selected repositories",
+            "add the repo(s) to the App's installation (run `loopy auth status` for the URL)",
+        )
+    ]

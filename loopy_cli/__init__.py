@@ -456,8 +456,10 @@ def doctor(
 
     `loopy compile` proves the manifest is *valid*; `doctor` proves it's *runnable* — it catches
     the scaffold defaults that pass a naive presence check but still fail a real run: a
-    placeholder API key, the unpushable starter repo, and missing git auth. The live token-mint
-    check (is the GitHub App installed on the repo?) still happens at `run`/`trigger` preflight.
+    placeholder API key, the unpushable starter repo, and missing git auth. When a GitHub App is
+    configured it also makes the live check — minting a token to confirm the App is installed and
+    that the repos in registry.yml are in its selected repositories — so an uninstalled or
+    wrong-repos App is caught here rather than at the first `run`/`trigger`.
     """
     from loopy_core.compile.pipeline import compile_project
 
@@ -497,9 +499,12 @@ def _diagnose_runnability(root: Path, project):  # noqa: ANN001 - compile.model.
 
     Shared by `loopy doctor` and the `loopy init` wizard so both report the exact same gaps.
     Reads the sandbox env_files off disk and merges the control-plane env (real env wins over
-    `loopy.env`), then defers to the pure `diagnose`.
+    `loopy.env`), then defers to the pure `diagnose`. When a GitHub App is configured, it also
+    makes the one live call `diagnose` can't — confirming the repos in registry.yml are in the
+    App's selected repositories — so an installed-but-wrong-repos App is caught here, not at run.
     """
-    from loopy_cli.doctor import diagnose
+    from loopy_cli.doctor import check_repo_access, diagnose
+    from loopy_runtime.scm.github_app import AppCredentials, GitHubAppError
     from loopy_runtime.secrets import _parse_dotenv, load_control_plane_env
 
     def read_env(rel: str) -> dict[str, str] | None:
@@ -510,7 +515,20 @@ def _diagnose_runnability(root: Path, project):  # noqa: ANN001 - compile.model.
     for key, value in load_control_plane_env(root).items():
         merged.setdefault(key, value)  # real/platform env wins over loopy.env
 
-    return diagnose(project.registry, read_env=read_env, control_plane_env=merged)
+    findings = diagnose(project.registry, read_env=read_env, control_plane_env=merged)
+
+    # With an App configured, verify its installation actually reaches the declared repos —
+    # the live gap `diagnose` is blind to. Skipped with no App (diagnose already warns about
+    # missing git auth); a key that won't load is left to the run path's loud error.
+    if merged.get("GITHUB_APP_ID"):
+        try:
+            creds = AppCredentials.from_env(merged, root=root)
+        except GitHubAppError:
+            creds = None
+        if creds is not None:
+            findings.extend(check_repo_access(project.registry, creds))
+
+    return findings
 
 
 def _render_findings(findings) -> bool:
