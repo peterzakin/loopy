@@ -26,6 +26,7 @@ E210 = "LOOPY-E210"  # entity name not Capitalized / reserved `default` misused 
 E211 = "LOOPY-E211"  # duplicate entity name in registry.yml (X1)
 E212 = "LOOPY-E212"  # malformed sandbox repos: entry (not owner/name string nor {url,...})
 E213 = "LOOPY-E213"  # malformed registry limits: (e.g. cascade_spend without a numeric usd)
+E214 = "LOOPY-E214"  # a sandbox definition is missing its required provider: (X1)
 
 # E3xx — templates
 E301 = "LOOPY-E301"  # illegal template: control flow / filters / dotted path
@@ -67,6 +68,7 @@ ALL_CODES: frozenset[str] = frozenset(
         E211,
         E212,
         E213,
+        E214,
         E301,
         E302,
         E303,

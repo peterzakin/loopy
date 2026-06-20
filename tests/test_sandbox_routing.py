@@ -48,9 +48,10 @@ def test_acquire_routes_to_provider_named_by_spec(monkeypatch):
     assert set(built) == {"daytona"}  # only the used backend was built
 
 
-def test_omitted_provider_defaults_to_remote_daytona(monkeypatch):
-    # Remote is the absolute default: a sandbox that declares no provider runs in the cloud.
-    # Anything host-bound (local/docker) is an explicit opt-in in the registry.
+def test_unset_provider_falls_back_to_remote_daytona(monkeypatch):
+    # `provider:` is required on every *defined* sandbox (enforced at compile, E214). This
+    # fallback only covers the degenerate case of an agent that declares no sandbox at all —
+    # which still runs remotely, never silently on the host.
     built = _patched(monkeypatch)
     router = RoutingSandboxProvider()
 

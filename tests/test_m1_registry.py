@@ -189,6 +189,7 @@ def test_repos_parse_string_shorthand_and_object_form(tmp_path):
     registry = (
         "sandboxes:\n"
         "  default:\n"
+        "    provider: local\n"
         "    repos:\n"
         "      - acme/runbooks\n"
         "      - { url: acme/playbooks, ref: main, path: pb, depth: null }\n"
@@ -213,3 +214,17 @@ def test_repos_non_list_reports_e212(tmp_path):
     registry = "sandboxes:\n  default:\n    repos: acme/runbooks\n"
     write_project(tmp_path, {"registry.yml": registry})
     assert_code(compile_project(tmp_path), codes.E212)
+
+
+# ── Sandbox provider is required (E214) ──────────────────────────────────────────
+
+
+def test_sandbox_without_provider_reports_e214(tmp_path):
+    # `provider:` is mandatory on every sandbox — where an agent runs is never inferred.
+    write_project(tmp_path, {"registry.yml": "sandboxes:\n  default:\n    image: {}\n"})
+    assert_code(compile_project(tmp_path), codes.E214, file="registry.yml")
+
+
+def test_sandbox_with_provider_does_not_report_e214(tmp_path):
+    write_project(tmp_path, {"registry.yml": "sandboxes:\n  default:\n    provider: daytona\n"})
+    assert codes.E214 not in result_codes(compile_project(tmp_path))
