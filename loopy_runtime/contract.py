@@ -52,12 +52,37 @@ class StepOutput:
 
 
 @dataclass(frozen=True)
+class Usage:
+    """What one harness invocation consumed, reported back to the runtime.
+
+    `cost_usd` is the enforced signal: the runtime accumulates it across a cascade to enforce
+    a cumulative USD cap (the real terminator for runaway loop-backs — see the cost-budget
+    plan). It's filled only when the harness knows the dollar figure (the claude CLI's
+    `total_cost_usd`); None for cost-blind harnesses, which a dollar cap refuses up front.
+
+    Tokens (`input_tokens`/`output_tokens`) ride along as reported telemetry — universal
+    across providers, useful for observability and as the substrate for a future runtime
+    pricing layer (tokens × rate) that could derive cost for cost-blind harnesses. They are
+    NOT enforced on. A `per_model` breakdown can be added later without breaking this shape."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float | None = None
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+
+@dataclass(frozen=True)
 class StepResult:
-    """What a harness returns for one step: the step output plus a payload per event
-    the step emits (decision #3 = B — the agent produces the emitted event's fields)."""
+    """What a harness returns for one step: the step output, a payload per event the step
+    emits (decision #3 = B — the agent produces the emitted event's fields), and the usage
+    the invocation consumed (cost when the harness reports it; tokens as telemetry)."""
 
     output: StepOutput
     emits: Mapping[EventName, Mapping[str, Any]] = field(default_factory=dict)
+    usage: Usage = field(default_factory=Usage)
 
 
 @dataclass(frozen=True)
@@ -157,8 +182,10 @@ class ToolchainLayer:
 class AgentHarness(Protocol):
     async def run(self, step: StepSpec, ctx: StepContext, sandbox: Sandbox) -> StepResult:
         """Render step.body with ctx, run step.agent in `sandbox`, enforce budget, and return a
-        StepResult: output validated against step.output, plus a payload per `emits:` event.
-        Raise on failure so RetryPolicy decides."""
+        StepResult: output validated against step.output, a payload per `emits:` event, and the
+        `Usage` the invocation consumed. `Usage.cost_usd` (when the harness reports it) is what
+        the runtime accumulates for the cumulative cascade spend cap; tokens ride along as
+        telemetry. Raise on failure so RetryPolicy decides."""
         ...
 
     def required_keys(self, agent: AgentSpec) -> set[str]:

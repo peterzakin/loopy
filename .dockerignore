@@ -1,0 +1,25 @@
+# Keep the build context to just what the wheel needs.
+.git
+.github
+tests
+plans
+docs
+examples
+*.md
+!README.md
+
+# Local state / caches / build artifacts
+.loopy
+.venv
+dist
+build
+**/__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.ruff_cache
+
+# Secrets must never enter an image layer (they're injected at run time).
+loopy.env
+**/secrets
+**/sensors/.env

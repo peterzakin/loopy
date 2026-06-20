@@ -16,7 +16,16 @@ from ruamel.yaml.error import MarkedYAMLError, YAMLError
 from loopy_core.compile import codes
 from loopy_core.compile.diagnostics import DiagnosticCollector
 from loopy_core.discovery import Inventory
-from loopy_core.registry.model import Agent, Event, Harness, Registry, Repo, Sandbox
+from loopy_core.registry.model import (
+    Agent,
+    Event,
+    Harness,
+    Limits,
+    Registry,
+    Repo,
+    Sandbox,
+    WorkflowLimit,
+)
 from loopy_core.registry.types import desugar
 from loopy_core.span import Span, span_at
 
@@ -85,10 +94,71 @@ def load_registry(inv: Inventory, diags: DiagnosticCollector) -> Registry:
     sandboxes = _load_sandboxes(data.get("sandboxes") or {}, file, diags)
     agents = _load_agents(data.get("agents") or {}, default_agent, file)
     events = _load_events(data.get("events") or {}, file, diags)
+    limits = _load_limits(data.get("limits"), file, _line_of(data, "limits"), diags)
 
     _check_naming(sandboxes, agents, events, diags)
 
-    return Registry(sandboxes=sandboxes, agents=agents, events=events)
+    return Registry(sandboxes=sandboxes, agents=agents, events=events, limits=limits)
+
+
+def _spend_usd(raw: object) -> float | None:
+    """A `{ usd: <number> }` spend block's USD value, or None if absent/malformed."""
+    if not isinstance(raw, Mapping):
+        return None
+    usd = raw.get("usd")
+    if not isinstance(usd, (int, float)) or isinstance(usd, bool):
+        return None
+    return float(usd)
+
+
+def _load_limits(value: object, file: str, line: int, diags: DiagnosticCollector) -> Limits | None:
+    """Parse the `limits:` block — the project-wide `cascade_spend: { usd }` and per-named-workflow
+    `workflows.<Name>.spend: { usd }`. A malformed shape is E213; whether a named workflow exists
+    is a cross-check (E505), since workflows aren't loaded yet here."""
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        diags.error(codes.E213, "registry 'limits' must be a mapping", span=span_at(file, line))
+        return None
+
+    cascade_spend = None
+    raw_cascade = value.get("cascade_spend")
+    if raw_cascade is not None:
+        usd = _spend_usd(raw_cascade)
+        if usd is None:
+            diags.error(
+                codes.E213,
+                "registry 'limits.cascade_spend' must be a mapping with a numeric 'usd'",
+                span=span_at(file, _line_of(value, "cascade_spend") or line),
+            )
+        else:
+            cascade_spend = {"usd": usd}
+
+    workflows: dict[str, WorkflowLimit] = {}
+    raw_wfs = value.get("workflows")
+    if raw_wfs is not None:
+        wf_line = _line_of(value, "workflows") or line
+        if not isinstance(raw_wfs, Mapping):
+            diags.error(
+                codes.E213,
+                "registry 'limits.workflows' must be a mapping",
+                span=span_at(file, wf_line),
+            )
+        else:
+            for name, body in raw_wfs.items():
+                usd = _spend_usd(body.get("spend")) if isinstance(body, Mapping) else None
+                if usd is None:
+                    diags.error(
+                        codes.E213,
+                        f"registry 'limits.workflows.{name}' must have spend: {{ usd: <number> }}",
+                        span=span_at(file, _line_of(raw_wfs, name) or wf_line),
+                    )
+                    continue
+                workflows[str(name)] = WorkflowLimit(spend={"usd": usd})
+
+    if cascade_spend is None and not workflows:
+        return None
+    return Limits(cascade_spend=cascade_spend, workflows=workflows)
 
 
 def _load_sandboxes(

@@ -54,7 +54,23 @@ class Event(BaseModel):
     span: Span
 
 
+class WorkflowLimit(BaseModel):
+    spend: dict | None = None  # e.g. {"usd": 10}
+
+
+class Limits(BaseModel):
+    # Project-level controls (FRONTEND §2). `workflows` holds per-named-workflow caps (the
+    # cumulative USD a single workflow's steps spend within a drain) — the supported path.
+    # `cascade_spend` caps the cumulative USD across a whole cascade (incl. cross-workflow
+    # loop-backs); it is EXPERIMENTAL — see ARCHITECTURE.md §3.1 B6: the cost-reporting gate is
+    # project-wide all-or-nothing, so a cross-workflow cascade that spans an agent on a
+    # non-cost-reporting harness (e.g. Codex) can't use it.
+    cascade_spend: dict | None = None  # e.g. {"usd": 50} — experimental
+    workflows: dict[str, WorkflowLimit] = Field(default_factory=dict)
+
+
 class Registry(BaseModel):
     sandboxes: dict[str, Sandbox] = Field(default_factory=dict)
     agents: dict[str, Agent] = Field(default_factory=dict)
     events: dict[str, Event] = Field(default_factory=dict)
+    limits: Limits | None = None

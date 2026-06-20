@@ -13,7 +13,7 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
-from loopy_runtime.contract import ToolchainLayer
+from loopy_runtime.contract import ToolchainLayer, Usage
 from loopy_runtime.harness.base import HarnessError, JsonProtocolHarness
 from loopy_runtime.manifest_model import AgentSpec, StepSpec
 from loopy_runtime.providers import required_model_key
@@ -73,11 +73,22 @@ class ClaudeCodeHarness(JsonProtocolHarness):
         argv += ["--permission-mode", "bypassPermissions"]  # the sandbox is the boundary
         return argv
 
-    def _parse_response(self, stdout: str, step: StepSpec) -> tuple[str, float]:
+    def _parse_response(self, stdout: str, step: StepSpec) -> tuple[str, Usage]:
         try:
             envelope = json.loads(stdout)
         except json.JSONDecodeError as exc:
             raise HarnessError(f"step '{step.id}': claude output was not JSON") from exc
         if not isinstance(envelope, dict):
             raise HarnessError(f"step '{step.id}': claude JSON envelope was not an object")
-        return str(envelope.get("result", "")), float(envelope.get("total_cost_usd", 0.0))
+        # `usage` → input/output tokens (the portable signal the cascade cap enforces on);
+        # `total_cost_usd` → optional metadata (a client-side estimate, not enforced in v1).
+        # Cache/reasoning token fields are deliberately left out of the v1 floor.
+        block = envelope.get("usage")
+        block = block if isinstance(block, dict) else {}
+        cost = envelope.get("total_cost_usd")
+        usage = Usage(
+            input_tokens=int(block.get("input_tokens") or 0),
+            output_tokens=int(block.get("output_tokens") or 0),
+            cost_usd=float(cost) if cost is not None else None,
+        )
+        return str(envelope.get("result", "")), usage

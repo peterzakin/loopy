@@ -281,20 +281,36 @@ def _make_token_provider(root: Path, *, enabled: bool, announce: bool):
     return GitHubAppTokenProvider(creds)
 
 
-def build_runtime(manifest, *, root: Path, sandbox: str, bus, state=None, tokens=None):
+def build_runtime(
+    manifest,
+    *,
+    root: Path,
+    sandbox: str,
+    bus,
+    state=None,
+    tokens=None,
+):
     """Construct the InMemoryRuntime with its standard dependency wiring.
 
     The single runtime-construction site shared by `run` and `trigger`, so the serve and
     one-shot paths can't drift in how the harness, sandboxes, secrets, bus, durable state,
     and SCM token provider are wired (that drift is exactly what let `trigger` ship without
     token injection). `state` is passed through when given (so a networked bus can share the
-    runtime's StateStore); omitted otherwise so the runtime uses its own default.
+    runtime's StateStore); omitted otherwise so the runtime uses its own default. The cascade
+    spend cap is a project-level control read from the manifest's `registry.limits.cascade_spend`
+    (authored in registry.yml) — not a launch-time flag — so it's enforced identically however
+    the engine is started; it requires every reachable agent to use a cost-reporting harness
+    (enforced at preflight).
     """
     from loopy_runtime.harness.router import HarnessRouter
     from loopy_runtime.runtime.inmemory import InMemoryRuntime
     from loopy_runtime.sandbox.factory import make_sandbox_provider
     from loopy_runtime.secrets import CONTROL_PLANE_ENV_FILE, EnvFileSecretsResolver
 
+    limits = manifest.registry.limits
+    cascade_budget_usd = (
+        limits.cascade_spend.get("usd") if limits and limits.cascade_spend else None
+    )
     extra = {"state": state} if state is not None else {}
     return InMemoryRuntime(
         manifest,
@@ -304,6 +320,7 @@ def build_runtime(manifest, *, root: Path, sandbox: str, bus, state=None, tokens
         bus=bus,
         tokens=tokens,
         github_auth_hint=str(root / CONTROL_PLANE_ENV_FILE),
+        cascade_budget_usd=cascade_budget_usd,
         **extra,
     )
 
@@ -321,9 +338,97 @@ def _run_record(run_id, runtime, outputs) -> dict:
     }
 
 
+def _source_root() -> Path | None:
+    """The loopy source checkout (the dir holding pyproject.toml), or None.
+
+    Container mode builds the engine image from source, so it needs the build context. Walks up
+    from this package; returns None for a wheel install with no source tree alongside it.
+    """
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").exists():
+            return parent
+    return None
+
+
+def _run_in_docker(
+    *, root: Path, manifest: Path, port: int | None, sandbox: str, detach: bool, build: bool
+) -> None:
+    """Bring up the single-node stack (engine + redis) via the bundled compose file.
+
+    The Docker plumbing is an implementation detail: everything compose needs is derived from
+    the same flags `loopy run` already takes (`--root`, the manifest, `--port`, `--sandbox`) plus
+    the project's `loopy.env` (Daytona creds), and passed through the child's environment — there
+    is no user-authored compose file or `.env`.
+    """
+    import shutil
+    import subprocess
+
+    from loopy_runtime.secrets import load_control_plane_env
+
+    if shutil.which("docker") is None:
+        typer.echo("error: docker is not installed or not on PATH.", err=True)
+        raise typer.Exit(code=1)
+
+    context = _source_root()
+    if context is None:
+        typer.echo(
+            "error: `loopy run` (container mode) currently requires a source checkout (no "
+            "pyproject.toml found alongside the package to build the engine image from). "
+            "Use `loopy run --in-process` for a dev server without Docker.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    deploy = Path(__file__).resolve().parent / "deploy"
+    compose = deploy / "docker-compose.yml"
+    dockerfile_rel = os.path.relpath(deploy / "Dockerfile", context)
+
+    root_abs = root.resolve()
+    # The container mounts only --root at /project, so the manifest is referenced relative to it.
+    # A relative manifest is interpreted against --root (the natural "run from the project" case).
+    manifest_abs = manifest if manifest.is_absolute() else (root / manifest)
+    manifest_rel = os.path.relpath(manifest_abs.resolve(), root_abs)
+    if manifest_rel.startswith(".."):
+        typer.echo(
+            f"error: manifest {manifest} is outside the project root {root_abs}; "
+            "in container mode the manifest must live under --root (it's mounted at /project).",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    # Inherit the parent env, then layer the project's loopy.env (Daytona creds) under it
+    # (non-override: a value set in the real environment wins), then the compose substitutions.
+    env = dict(os.environ)
+    for key, value in load_control_plane_env(root).items():
+        env.setdefault(key, value)
+    env.update(
+        {
+            "LOOPY_BUILD_CONTEXT": str(context),
+            "LOOPY_DOCKERFILE": dockerfile_rel,
+            "LOOPY_PROJECT": str(root_abs),
+            "LOOPY_MANIFEST": Path(manifest_rel).as_posix(),
+            # `local` is the in-process default; in a container daytona is the sensible default.
+            "LOOPY_SANDBOX": "daytona" if sandbox == "local" else sandbox,
+            "LOOPY_PORT": str(port or 8000),
+        }
+    )
+    cmd = ["docker", "compose", "-f", str(compose), "up"]
+    if build:
+        cmd.append("--build")
+    if detach:
+        cmd.append("--detach")
+    typer.echo(
+        f"loopy: bringing up engine + redis via docker (project {root_abs}, "
+        f"sandbox {env['LOOPY_SANDBOX']}, port {env['LOOPY_PORT']})"
+    )
+    raise typer.Exit(code=subprocess.call(cmd, env=env))
+
+
 @app.command()
 def run(
-    manifest: Path = typer.Argument(..., help="Path to manifest.json."),
+    manifest: Path = typer.Argument(
+        Path("manifest.json"), help="Path to the manifest (default: manifest.json)."
+    ),
     root: Path = typer.Option(Path("."), "--root", help="Project root (for env_file + sensors)."),
     config: Path = typer.Option(
         Path("loopy.yaml"), "--config", help="Deployment defaults (loopy.yaml); flags override it."
@@ -345,9 +450,32 @@ def run(
     state_path: str | None = typer.Option(
         None, "--state-path", help="SQLite state DB path (default .loopy/state.db, under --root)."
     ),
+    in_process: bool = typer.Option(
+        False,
+        "--in-process",
+        help="Run the engine in this process (dev) instead of the default container stack.",
+    ),
+    detach: bool = typer.Option(
+        False, "--detach", "-d", help="Run the container stack in the background."
+    ),
+    build: bool = typer.Option(
+        True, "--build/--no-build", help="(Re)build the engine image before starting the stack."
+    ),
 ) -> None:
-    """Start the Loopy server: host sensor webhooks; incoming events drive workflow runs."""
+    """Start Loopy: bring up the engine + redis container stack (redis bus, sqlite state, daytona
+    sandbox) hosting the sensor webhooks. Pass `--in-process` to run the engine in this process
+    instead (the dev inner loop; no Docker/Daytona needed)."""
     import asyncio
+
+    # The default is the containerized single-node stack. `--in-process` opts into running the
+    # engine in *this* process (and is also what the container itself runs internally, so the
+    # stack doesn't recurse into launching Docker again). Short-circuit to docker before the
+    # in-process wiring below.
+    if not in_process:
+        _run_in_docker(
+            root=root, manifest=manifest, port=port, sandbox=sandbox, detach=detach, build=build
+        )
+        return
 
     from loopy_runtime.bus.factory import make_event_bus
     from loopy_runtime.config import ConfigError, load_config, resolve, resolve_redis_url
@@ -382,7 +510,15 @@ def run(
         raise typer.Exit(code=1) from exc
     resolved_redis_url = resolve_redis_url(redis_url)
 
-    m = load_manifest(manifest)
+    try:
+        m = load_manifest(manifest)
+    except FileNotFoundError as exc:
+        typer.echo(
+            f"error: manifest {manifest} not found. Run `loopy compile <project> "
+            f"--out {manifest}` first, or pass the manifest path.",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
     # Sensor-layer secrets: a single runner-wide `sensors/.env`, merged into the process env so
     # in-process @sensor functions read them via os.environ. Non-override (setdefault) so a value
     # explicitly set in the real environment wins, matching dotenv convention.
@@ -402,7 +538,12 @@ def run(
         # stays here at the control-plane; only the ephemeral token crosses into the sandbox.
         tokens = _make_token_provider(root, enabled=True, announce=True)
         runtime = build_runtime(
-            m, root=root, sandbox=sandbox, bus=event_bus, state=state, tokens=tokens
+            m,
+            root=root,
+            sandbox=sandbox,
+            bus=event_bus,
+            state=state,
+            tokens=tokens,
         )
         runtime.preflight()  # fail fast at startup if any sandbox can't supply its harness keys
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
@@ -543,7 +684,11 @@ def trigger(
         # configured-but-broken App surfaces as a clean error, not a traceback.
         tokens = _make_token_provider(root, enabled=not no_tokens, announce=True)
         runtime = build_runtime(
-            m, root=root, sandbox=sandbox, bus=InProcessEventBus(), tokens=tokens
+            m,
+            root=root,
+            sandbox=sandbox,
+            bus=InProcessEventBus(),
+            tokens=tokens,
         )
         runtime.preflight()  # fail fast before firing the event if any sandbox lacks its keys
         run_id, outputs = asyncio.run(_execute(runtime))

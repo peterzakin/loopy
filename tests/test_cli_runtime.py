@@ -88,6 +88,19 @@ def test_build_runtime_passes_state_through_when_given(tmp_path):
     assert rt.tokens is None  # default: no injection unless wired
 
 
+def test_build_runtime_defaults_cascade_budget_to_none(tmp_path):
+    rt = build_runtime(_manifest(), root=tmp_path, sandbox="local", bus=InProcessEventBus())
+    assert rt.cascade_budget_usd is None  # disabled unless registry limits.cascade_spend is set
+
+
+def test_build_runtime_reads_cascade_budget_from_registry_limits(tmp_path):
+    # The cap is a project-level control authored in the registry and carried by the manifest —
+    # not a launch-time flag — so build_runtime derives it from registry.limits.cascade_spend.
+    manifest = _manifest(limits={"cascade_spend": {"usd": 12.50}})
+    rt = build_runtime(manifest, root=tmp_path, sandbox="local", bus=InProcessEventBus())
+    assert rt.cascade_budget_usd == 12.50
+
+
 # --- trigger CLI surface ------------------------------------------------------
 
 
@@ -132,13 +145,16 @@ def test_run_record_includes_failures():
     assert _run_record("r1", rt, {})["failed"] == [{"run_id": "r1", "error": "boom"}]
 
 
-def _manifest():
+def _manifest(*, limits=None):
     from loopy_runtime.manifest_model import Manifest
 
+    registry = {"sandboxes": {}, "agents": {}, "events": {"Go": {"fields": {}}}}
+    if limits is not None:
+        registry["limits"] = limits
     return Manifest.model_validate(
         {
             "schema_version": "1",
-            "registry": {"sandboxes": {}, "agents": {}, "events": {"Go": {"fields": {}}}},
+            "registry": registry,
             "workflows": {"wf": {"entry": "run", "steps": {}}},
             "sensors": [],
             "lineage": {"events": {}},
