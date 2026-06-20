@@ -930,7 +930,7 @@ wheels = [
 ]
 
 [[package]]
-name = "loopy-core"
+name = "loopy-computer"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

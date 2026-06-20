@@ -710,7 +710,7 @@ def _run_in_docker(
         cmd.append("--build")
     if detach:
         cmd.append("--detach")
-    via = "local source" if source is not None else f"PyPI (loopy-core=={__version__})"
+    via = "local source" if source is not None else f"PyPI (loopy-computer=={__version__})"
     typer.echo(
         f"loopy: bringing up engine + redis via docker (image loopy-engine:{__version__}, "
         f"built from {via}; project {root_abs}, port {env['LOOPY_PORT']})"

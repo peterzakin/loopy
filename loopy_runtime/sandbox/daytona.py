@@ -60,7 +60,7 @@ class DaytonaSandboxProvider:
             except ImportError as exc:  # pragma: no cover - core dep; only a broken install hits
                 raise RuntimeError(
                     "the Daytona SDK failed to import; it ships as a core dependency of "
-                    "loopy-core — reinstall with `pip install loopy-core`"
+                    "loopy-computer — reinstall with `pip install loopy-computer`"
                 ) from exc
             self._client = AsyncDaytona()  # reads DAYTONA_API_KEY / DAYTONA_API_URL
         return self._client
