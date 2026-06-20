@@ -599,29 +599,39 @@ def _run_in_docker(
     project's `loopy.env` (Daytona creds), and passed through the child's environment — there
     is no user-authored compose file or `.env`. Sandbox selection rides the manifest
     (each sandbox's `provider:`), not the launch command.
+
+    Docker is the only requirement — there is no source-checkout requirement. The engine image
+    is tagged by loopy version and built on first use (then reused; `--build` forces a rebuild):
+    from a local source tree when one is present, otherwise from the pinned PyPI release via the
+    shipped `Dockerfile.pypi`, which needs no build context.
     """
     import shutil
     import subprocess
 
+    from loopy_core import __version__
     from loopy_runtime.secrets import load_control_plane_env
 
     if shutil.which("docker") is None:
-        typer.echo("error: docker is not installed or not on PATH.", err=True)
-        raise typer.Exit(code=1)
-
-    context = _source_root()
-    if context is None:
         typer.echo(
-            "error: `loopy run` (container mode) currently requires a source checkout (no "
-            "pyproject.toml found alongside the package to build the engine image from). "
-            "Use `loopy run --in-process` for a dev server without Docker.",
+            "error: Docker is required for `loopy run` (the container stack). Install Docker, or "
+            "use `loopy run --in-process` for the no-Docker dev/testing server.",
             err=True,
         )
         raise typer.Exit(code=1)
 
     deploy = Path(__file__).resolve().parent / "deploy"
     compose = deploy / "docker-compose.yml"
-    dockerfile_rel = os.path.relpath(deploy / "Dockerfile", context)
+
+    # Where to build the engine image from. A source checkout builds the local tree (fast,
+    # offline, picks up edits); a pip install with no source builds the pinned PyPI release via
+    # Dockerfile.pypi (context is just the deploy dir — no source tree needed).
+    source = _source_root()
+    if source is not None:
+        build_context = source
+        dockerfile_rel = os.path.relpath(deploy / "Dockerfile", source)
+    else:
+        build_context = deploy
+        dockerfile_rel = "Dockerfile.pypi"
 
     root_abs = root.resolve()
     # The container mounts only --root at /project, so the manifest is referenced relative to it.
@@ -643,8 +653,10 @@ def _run_in_docker(
         env.setdefault(key, value)
     env.update(
         {
-            "LOOPY_BUILD_CONTEXT": str(context),
-            "LOOPY_DOCKERFILE": dockerfile_rel,
+            "LOOPY_ENGINE_IMAGE": f"loopy-engine:{__version__}",
+            "LOOPY_VERSION": __version__,
+            "LOOPY_BUILD_CONTEXT": str(build_context),
+            "LOOPY_DOCKERFILE": Path(dockerfile_rel).as_posix(),
             "LOOPY_PROJECT": str(root_abs),
             "LOOPY_MANIFEST": Path(manifest_rel).as_posix(),
             "LOOPY_PORT": str(port or 8000),
@@ -655,9 +667,10 @@ def _run_in_docker(
         cmd.append("--build")
     if detach:
         cmd.append("--detach")
+    via = "local source" if source is not None else f"PyPI (loopy-core=={__version__})"
     typer.echo(
-        f"loopy: bringing up engine + redis via docker (project {root_abs}, "
-        f"port {env['LOOPY_PORT']})"
+        f"loopy: bringing up engine + redis via docker (image loopy-engine:{__version__}, "
+        f"built from {via}; project {root_abs}, port {env['LOOPY_PORT']})"
     )
     raise typer.Exit(code=subprocess.call(cmd, env=env))
 
@@ -689,18 +702,22 @@ def run(
     in_process: bool = typer.Option(
         False,
         "--in-process",
-        help="Run the engine in this process (dev) instead of the default container stack.",
+        help="Run the engine in this process — a dev/testing convenience (no Docker).",
     ),
     detach: bool = typer.Option(
         False, "--detach", "-d", help="Run the container stack in the background."
     ),
     build: bool = typer.Option(
-        True, "--build/--no-build", help="(Re)build the engine image before starting the stack."
+        False,
+        "--build/--no-build",
+        help="Force a rebuild of the engine image (it's built once per version, then reused).",
     ),
 ) -> None:
-    """Start Loopy: bring up the engine + redis container stack (redis bus, sqlite state, daytona
-    sandbox) hosting the sensor webhooks. Pass `--in-process` to run the engine in this process
-    instead (the dev inner loop; no Docker/Daytona needed)."""
+    """Start Loopy: bring up the engine + redis container stack (redis bus, sqlite state) hosting
+    the sensor webhooks. Requires Docker; the engine image is built once per version and reused.
+    `--in-process` runs the engine in this process instead — a dev/testing convenience (no Docker),
+    not a fallback. Either way, agents run in the sandboxes each `provider:` names in registry.yml
+    (so a `daytona` sandbox still needs DAYTONA_API_KEY)."""
     import asyncio
 
     _enable_progress_logging()  # surface sandbox build/boot breadcrumbs (otherwise swallowed)
