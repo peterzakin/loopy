@@ -10,6 +10,15 @@ class BudgetExceeded(Exception):
     pass
 
 
+class CascadeBudgetExceeded(BudgetExceeded):
+    """The cumulative usage of a cascade reached its cap — the runtime's terminator for a
+    runaway loop-back, where each step stays within its per-step budget while the cumulative
+    cost grows unbounded (`max_iterations` is a count, not a budget). Raised by the runtime
+    before running a step once the accumulated tokens reach the cap; recorded as a failed run
+    (not an engine crash) so the cascade winds down on its own. v1 caps on tokens; see the
+    cost-budget plan for the deferred dollar cap."""
+
+
 class BudgetEnforcer:
     @staticmethod
     def wall_clock_seconds(budget: BudgetSpec | None) -> float | None:

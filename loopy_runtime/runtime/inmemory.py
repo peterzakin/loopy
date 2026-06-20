@@ -18,7 +18,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from loopy_runtime.budget import BudgetExceeded
+from loopy_runtime.budget import BudgetExceeded, CascadeBudgetExceeded
 from loopy_runtime.contract import (
     Event,
     RunEvent,
@@ -72,6 +72,7 @@ class InMemoryRuntime:
         tokens=None,
         github_auth_hint: str | None = None,
         max_iterations: int = 100_000,
+        cascade_token_budget: int | None = None,
     ):
         self.manifest = manifest
         self.harness = harness
@@ -87,10 +88,17 @@ class InMemoryRuntime:
         self._github_auth_hint = github_auth_hint
         self.retry = retry or ExponentialBackoffRetry()
         self.state = state or InMemoryStateStore()
-        # Backstop against an unbounded event loop. The *real* terminator is budgets
-        # (cumulative spend / window), enforced with durability; this just stops a
-        # runaway from spinning forever. Set high — legitimate loops run for many turns.
+        # Backstop against an unbounded event loop. A count, not a budget — it just stops a
+        # runaway from spinning forever (set high; legitimate loops run for many turns). The
+        # money-aware terminator is `cascade_token_budget` below.
         self.max_iterations = max_iterations
+        # The real terminator for a runaway loop-back cascade: a cumulative cap on the tokens
+        # consumed across one cascade (reset per drain). None disables it. Each step stays
+        # within its per-step budget while cumulative cost grows unbounded — this caps the sum.
+        # v1 is token-based (the universally-reported signal); a dollar cap is deferred. (See
+        # the cost-budget plan.)
+        self.cascade_token_budget = cascade_token_budget
+        self._cascade_tokens = 0
 
         self._event_seq = 0
         self._runs: dict[RunId, RunStatus] = {}
@@ -278,6 +286,11 @@ class InMemoryRuntime:
         if self._draining:
             return None
         self._draining = True
+        # One `_drain()` is one cascade in practice (a step's `emits` enqueues the next run
+        # into this same loop), so reset the cumulative-token accumulator here. Caveat: under
+        # serve(), two unrelated events that share a drain share the counter — that only trips
+        # the cap *earlier* (safe); precise per-cascade-id scoping is a follow-up.
+        self._cascade_tokens = 0
         first_run_id: RunId | None = None
         iterations = 0
         try:
@@ -294,6 +307,16 @@ class InMemoryRuntime:
         finally:
             self._draining = False
         return first_run_id
+
+    def _check_cascade_budget(self, step_id: str) -> None:
+        """Raise CascadeBudgetExceeded if the cascade has already consumed its token cap.
+        Checked before each step so an over-budget run never starts the agent."""
+        cap = self.cascade_token_budget
+        if cap is not None and self._cascade_tokens >= cap:
+            raise CascadeBudgetExceeded(
+                f"cascade consumed {self._cascade_tokens} tokens, reaching the cap of {cap} "
+                f"before step '{step_id}'"
+            )
 
     async def _execute(self, wf_name: str, event: Event) -> RunId:
         wf = self.manifest.workflows[wf_name]
@@ -318,6 +341,10 @@ class InMemoryRuntime:
                 step = wf.steps[local_name]
                 current_local = local_name
                 current_step_id = step.id
+                # Check before running: an over-budget cascade short-circuits here → emits
+                # nothing → the loop-back winds down on its own. Raised, then caught below and
+                # recorded as a failed run (composes with the run-failure path, no new plumbing).
+                self._check_cascade_budget(step.id)
                 ctx = StepContext(
                     run_id=run_id,
                     step_id=step.id,
@@ -326,6 +353,7 @@ class InMemoryRuntime:
                     idempotency_key=f"{run_id}:{step.id}",
                 )
                 result = await self._run_step(step, ctx)
+                self._cascade_tokens += result.usage.total_tokens
                 outputs[local_name] = result.output
                 step_states[local_name] = "completed"
                 self.execution_log.append(step.id)

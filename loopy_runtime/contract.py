@@ -52,12 +52,36 @@ class StepOutput:
 
 
 @dataclass(frozen=True)
+class Usage:
+    """What one harness invocation consumed, reported back to the runtime so it can enforce
+    a cumulative cascade cap (the real terminator for runaway loop-backs — see the
+    cost-budget plan).
+
+    Tokens are the portable floor: every major provider reports prompt/completion counts, so
+    mapping them to `input_tokens`/`output_tokens` is each adapter's job and the token cap is
+    enforceable everywhere. `cost_usd` is optional metadata a harness fills only when it
+    already knows the dollar figure (the claude CLI's `total_cost_usd`); it is NOT enforced in
+    v1 — reserved for the deferred dollar cap / runtime pricing layer. A `per_model` breakdown
+    can be added later (with pricing/observability) without breaking this defaulted shape."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float | None = None
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+
+@dataclass(frozen=True)
 class StepResult:
-    """What a harness returns for one step: the step output plus a payload per event
-    the step emits (decision #3 = B — the agent produces the emitted event's fields)."""
+    """What a harness returns for one step: the step output, a payload per event the step
+    emits (decision #3 = B — the agent produces the emitted event's fields), and the usage
+    the invocation consumed (tokens required of real harnesses; stubs report zeros)."""
 
     output: StepOutput
     emits: Mapping[EventName, Mapping[str, Any]] = field(default_factory=dict)
+    usage: Usage = field(default_factory=Usage)
 
 
 @dataclass(frozen=True)
@@ -157,8 +181,11 @@ class ToolchainLayer:
 class AgentHarness(Protocol):
     async def run(self, step: StepSpec, ctx: StepContext, sandbox: Sandbox) -> StepResult:
         """Render step.body with ctx, run step.agent in `sandbox`, enforce budget, and return a
-        StepResult: output validated against step.output, plus a payload per `emits:` event.
-        Raise on failure so RetryPolicy decides."""
+        StepResult: output validated against step.output, a payload per `emits:` event, and the
+        `Usage` the invocation consumed. Reporting usage tokens (`input_tokens`/`output_tokens`)
+        is part of the contract so the runtime can enforce a cumulative cascade cap; `cost_usd`
+        is optional (filled only when the harness already knows it). Raise on failure so
+        RetryPolicy decides."""
         ...
 
     def required_keys(self, agent: AgentSpec) -> set[str]:

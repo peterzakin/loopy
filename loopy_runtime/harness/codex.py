@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 
-from loopy_runtime.contract import ToolchainLayer
+from loopy_runtime.contract import ToolchainLayer, Usage
 from loopy_runtime.harness.base import HarnessError, JsonProtocolHarness
 from loopy_runtime.manifest_model import AgentSpec, StepSpec
 
@@ -51,9 +51,12 @@ class CodexHarness(JsonProtocolHarness):
         argv += ["--dangerously-bypass-approvals-and-sandbox"]
         return argv
 
-    def _parse_response(self, stdout: str, step: StepSpec) -> tuple[str, float]:
+    def _parse_response(self, stdout: str, step: StepSpec) -> tuple[str, Usage]:
         message = self._final_message(stdout, step)
-        return message, 0.0  # codex reports token usage only, no USD cost
+        # codex emits token usage (no USD cost), but mapping its JSONL token events to the
+        # `Usage` floor is a follow-up — for now report zero-token, cost-less usage so the
+        # contract is satisfied. (See the cost-budget plan; v1 fills tokens for claude-code.)
+        return message, Usage()
 
     @classmethod
     def _final_message(cls, stdout: str, step: StepSpec) -> str:

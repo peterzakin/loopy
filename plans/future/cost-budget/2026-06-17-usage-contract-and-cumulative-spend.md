@@ -1,6 +1,6 @@
 # Usage reporting contract + cumulative cascade spend cap
 
-**Status:** draft (design only — NOT started; do not implement yet)
+**Status:** v1 SHIPPED (token cap) — 2026-06-20; dollar cap still deferred
 **Owner:** peter
 **Date:** 2026-06-17
 
@@ -110,15 +110,21 @@ class StepResult:
   `input_tokens + output_tokens`.
 - CLI (v1): `--max-tokens` on `run` and `trigger`.
 
-## Steps (v1 — high-level, flesh out when scheduled)
-- [ ] `Usage` type (tokens required, `cost_usd` optional) + `StepResult.usage`; document the harness
-      contract obligation (tokens required).
-- [ ] `ClaudeCodeHarness` fills `Usage` from the envelope (tokens; `cost_usd` as optional metadata).
-- [ ] `CascadeBudgetExceeded`; runtime token accumulator + per-step check + reset;
-      `cascade_token_budget` knob.
-- [ ] `--max-tokens` CLI flag (run + trigger).
-- [ ] Tests: looping cascade trips the token cap and winds down (not via `max_iterations`);
-      under-budget cascade completes; stub harness reports zero usage.
+## Steps (v1 — SHIPPED 2026-06-20)
+- [x] `Usage` type (tokens required, `cost_usd` optional, `total_tokens` helper) + `StepResult.usage`
+      (`loopy_runtime/contract.py`); harness contract obligation documented on `AgentHarness.run`.
+- [x] `ClaudeCodeHarness` fills `Usage` from the envelope (`usage` block → tokens; `total_cost_usd`
+      → optional `cost_usd`). Base `_parse_response` now returns `(message, Usage)`.
+- [x] `CascadeBudgetExceeded` (subclass of `BudgetExceeded`); runtime token accumulator
+      (`_cascade_tokens`) + per-step check (`_check_cascade_budget`) + reset at drain start;
+      `InMemoryRuntime(cascade_token_budget=…)` knob. Over-budget → recorded failed run.
+- [x] `--max-tokens` CLI flag on `run` + `trigger`, threaded through `build_runtime`.
+- [x] Tests: looping cascade trips the token cap and winds down (not via `max_iterations`);
+      under-budget cascade completes; no-cap default; accumulator resets between drains; claude
+      harness usage parsing; CLI flag wiring (`tests/test_b6_cascade_token_budget.py`,
+      `tests/test_b2_claude_harness.py`, `tests/test_cli_runtime.py`).
+- [ ] Follow-up (NOT v1): `CodexHarness` reports zero usage today — map its JSONL token events to
+      the `Usage` floor so a codex cascade is also token-capped.
 
 ## Deferred: dollar cap (`--max-spend`) — NOT v1
 A dollar-denominated cap is a clean later layer on the same accumulator, but it cannot be universal
@@ -199,6 +205,10 @@ implementations rather than memory. Researched 2026-06-18 (links below).
   usage-reporting survey". Tokens universal; cost native in 3/4 but Codex emits none, and even
   reported cost is client-side `tokens × table`. Decision: **token-based cumulative cap for v1**,
   `cost_usd` optional metadata, dollar cap as an optional later layer. Still design-only; no code.
+- 2026-06-20: **v1 shipped** — `Usage` contract output, `ClaudeCodeHarness` token reporting,
+  cumulative per-drain token accumulator, `CascadeBudgetExceeded` (recorded as a failed run),
+  and `--max-tokens` on `run`/`trigger`. Codex still reports zero usage (token-event parsing is
+  the noted follow-up); dollar `--max-spend` cap remains deferred per the scope call below.
 - 2026-06-18: Scope call — **the dollar `--max-spend` cap is explicitly NOT in v1.** v1 enforces a
   token cap only. The harness-capability gating that a dollar cap needs (`reports_cost` flag,
   all-reachable-agents compile gate, `None`-is-an-error) is designed and recorded under "Deferred:
