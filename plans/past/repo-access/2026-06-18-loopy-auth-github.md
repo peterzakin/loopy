@@ -1,6 +1,8 @@
 # `loopy auth github` — one-command GitHub App onboarding (manifest flow)
 
-**Status:** draft
+**Status:** SHIPPED — `loopy auth github`/`auth status` + the runtime `TokenProvider` follow-up are
+all built (see Notes). Later hardening: install-gap detection at auth/doctor (#66), browser-open
+announce (#67), paginated installation repos (#68). Per-sandbox `repos:` scoping remains deferred.
 **Owner:** peter
 **Date:** 2026-06-18
 

@@ -1,6 +1,9 @@
 # loopy.yaml — deployment config mapping to CLI flags
 
-**Status:** draft
+**Status:** SHIPPED — `loopy_runtime/config.py` (`LoopyConfig` + `load_config` + `resolve`), the
+`--config` flag on `run`, flag>yaml>default precedence, and `REDIS_URL`-from-env are all built
+(`tests/test_config.py`; documented in `DEPLOYMENT.md`). The reserved `state:` selector also landed
+(durable SQLite default). The steps below are kept as the original draft record.
 **Owner:** peter
 **Date:** 2026-06-18
 
