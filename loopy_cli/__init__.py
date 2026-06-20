@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 
 import typer
@@ -110,11 +111,29 @@ def init(
     directory: Path = typer.Option(
         Path("."), "--dir", help="Parent directory to create the project under (default: cwd)."
     ),
+    non_interactive: bool = typer.Option(
+        False,
+        "--non-interactive",
+        "-y",
+        help="Skip the setup prompts: write the placeholder scaffold verbatim (scripts/CI).",
+    ),
 ) -> None:
-    """Scaffold a new Loopy project: registry, a runnable starter workflow, and an env file."""
+    """Scaffold a new Loopy project: registry, a runnable starter workflow, and an env file.
+
+    By default a short wizard offers to close the gaps the scaffold leaves on purpose —
+    reusing an `ANTHROPIC_API_KEY` already in your environment, and wiring git auth — then
+    reports whatever's still missing (the same checks as `loopy doctor`). `--non-interactive`
+    skips the prompts entirely and just writes the placeholder scaffold.
+    """
     from loopy_cli.scaffold import InvalidProjectName, scaffold_project, validate_project_name
 
+    # Prompt only when we actually have a human on a terminal; `--non-interactive` forces off.
+    interactive = not non_interactive and sys.stdin.isatty()
+
     if not name:
+        if not interactive:
+            typer.echo("error: project name is required with --non-interactive", err=True)
+            raise typer.Exit(code=1)
         name = typer.prompt("Project name")
     try:
         name = validate_project_name(name)
@@ -137,34 +156,120 @@ def init(
     for rel in created:
         typer.echo("      " + typer.style(f"{name}/{rel.as_posix()}", fg=typer.colors.GREEN))
     typer.echo()
+
+    # Offer to close the gaps the scaffold leaves on purpose before reporting what's left.
+    if interactive:
+        _offer_ambient_anthropic_key(target)
+        _offer_github_auth(target)
+
     # A clean compile is *not* a runnable project: the scaffold ships placeholders on purpose
-    # (a fake API key, an unpushable repo, no git auth). Spell out the gap so "it compiled"
-    # isn't mistaken for "it'll run", and point at `loopy doctor` to check it mechanically.
-    typer.echo("  Before your first run:")
-    typer.echo(typer.style(f"    cd {name}", fg=typer.colors.BRIGHT_WHITE))
+    # (a fake API key, an unpushable repo, no git auth). Run the same checks as `loopy doctor`
+    # so the user sees the *actual* remaining gaps — anything resolved above is already gone.
+    _report_remaining_setup(target, name)
+
+
+def _offer_ambient_anthropic_key(target: Path) -> None:
+    """If a real `ANTHROPIC_API_KEY` is in the environment, offer to write it into the env_file.
+
+    The scaffold ships a `sk-ant-...` placeholder that compiles green but fails the first run.
+    Most people trying loopy already have a key exported, so reuse it on the spot rather than
+    making them hand-edit `secrets/dev.env`. Skips silently when no usable key is present.
+    """
+    from loopy_cli.doctor import PLACEHOLDER_ANTHROPIC_KEY
+
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not key or key == PLACEHOLDER_ANTHROPIC_KEY:
+        return
+
+    env_path = target / "secrets" / "dev.env"
+    placeholder_line = f"ANTHROPIC_API_KEY={PLACEHOLDER_ANTHROPIC_KEY}"
+    if not env_path.is_file() or placeholder_line not in env_path.read_text():
+        return  # nothing to replace (already set, or layout changed) — don't guess
+
+    masked = f"{key[:7]}…{key[-4:]}" if len(key) > 12 else "the value"
+    if not typer.confirm(
+        f"  Found ANTHROPIC_API_KEY in your environment ({masked}). "
+        f"Write it into secrets/dev.env?",
+        default=True,
+    ):
+        return
+
+    text = env_path.read_text().replace(placeholder_line, f"ANTHROPIC_API_KEY={key}")
+    env_path.write_text(text)
     typer.echo(
-        "      1. set a real ANTHROPIC_API_KEY in "
-        + typer.style("secrets/dev.env", fg=typer.colors.YELLOW)
-        + " (replaces the sk-ant-... placeholder)"
-    )
-    typer.echo(
-        "      2. point "
-        + typer.style("registry.yml", fg=typer.colors.YELLOW)
-        + " repos: at a repo you can push to (the starter is read-only)"
-    )
-    typer.echo(
-        "      3. "
-        + typer.style("loopy auth github", fg=typer.colors.BRIGHT_WHITE)
-        + typer.style("   # wire git auth (writes loopy.env here)", fg=typer.colors.BRIGHT_BLACK)
+        "  "
+        + typer.style("✓", fg=typer.colors.GREEN)
+        + " wrote ANTHROPIC_API_KEY to secrets/dev.env"
     )
     typer.echo()
+
+
+def _offer_github_auth(target: Path) -> None:
+    """Offer to wire git auth now by running the `loopy auth github` manifest flow in-process.
+
+    Declining just leaves the step for later — `_report_remaining_setup` will flag it. A failed
+    or aborted auth run is caught so it never takes the whole `init` down with it.
+    """
+    from loopy_runtime.secrets import load_control_plane_env
+
+    # Already configured (e.g. re-init over an existing tree) — nothing to offer.
+    if load_control_plane_env(target).get("GITHUB_APP_ID"):
+        return
+
+    if not typer.confirm(
+        "  Wire git auth now? Runs `loopy auth github` (creates a GitHub App, opens a browser)",
+        default=True,
+    ):
+        return
+
+    from loopy_cli.auth import run_github_auth
+
+    try:
+        run_github_auth(root=target)
+    except typer.Exit:
+        typer.echo("  (skipped — git auth not completed; run `loopy auth github` later)")
+    except Exception as exc:  # noqa: BLE001 - never let onboarding crash the scaffold
+        typer.echo(f"  (git auth didn't complete: {exc} — run `loopy auth github` later)")
+
+
+def _report_remaining_setup(target: Path, name: str) -> None:
+    """Compile the fresh project and print the gaps still blocking a first run (doctor's checks).
+
+    Replaces the old static checklist: because the wizard may have already set the key or wired
+    auth, we report the *actual* remaining findings instead of a fixed list the user has to
+    re-verify by hand. Then we point at the run commands.
+    """
+    from loopy_core.compile.pipeline import compile_project
+
+    result = compile_project(target)
+    findings = (
+        _diagnose_runnability(target, result.project)
+        if not result.diagnostics.has_errors() and result.project is not None
+        else None
+    )
+
+    if findings:
+        count = len(findings)
+        noun = "thing" if count == 1 else "things"
+        typer.echo(f"  Before your first run — {count} {noun} left:")
+        _render_findings(findings)
+        typer.echo()
+    elif findings == []:
+        typer.echo(
+            "  "
+            + typer.style("✓  ready to run", fg=typer.colors.GREEN, bold=True)
+            + typer.style(
+                "   — no placeholders, repo is pushable, git auth is wired",
+                fg=typer.colors.BRIGHT_BLACK,
+            )
+        )
+        typer.echo()
+
     typer.echo("  Then:")
+    typer.echo(typer.style(f"    cd {name}", fg=typer.colors.BRIGHT_WHITE))
     typer.echo(
         typer.style("    loopy doctor", fg=typer.colors.BRIGHT_WHITE)
-        + typer.style(
-            "   # check those are done — compiling green isn't enough",
-            fg=typer.colors.BRIGHT_BLACK,
-        )
+        + typer.style("   # re-check the above any time", fg=typer.colors.BRIGHT_BLACK)
     )
     typer.echo(
         typer.style("    loopy compile .", fg=typer.colors.BRIGHT_WHITE)
@@ -227,9 +332,7 @@ def doctor(
     placeholder API key, the unpushable starter repo, and missing git auth. The live token-mint
     check (is the GitHub App installed on the repo?) still happens at `run`/`trigger` preflight.
     """
-    from loopy_cli.doctor import diagnose
     from loopy_core.compile.pipeline import compile_project
-    from loopy_runtime.secrets import _parse_dotenv, load_control_plane_env
 
     # A project that doesn't compile can't be reasoned about — send the user to fix that first.
     result = compile_project(path)
@@ -242,17 +345,7 @@ def doctor(
         )
         raise typer.Exit(code=1)
 
-    root = Path(path)
-
-    def read_env(rel: str) -> dict[str, str] | None:
-        env_path = root / rel
-        return _parse_dotenv(env_path.read_text()) if env_path.is_file() else None
-
-    merged = dict(os.environ)
-    for key, value in load_control_plane_env(root).items():
-        merged.setdefault(key, value)  # real/platform env wins over loopy.env
-
-    findings = diagnose(result.project.registry, read_env=read_env, control_plane_env=merged)
+    findings = _diagnose_runnability(Path(path), result.project)
 
     typer.echo()
     if not findings:
@@ -266,7 +359,35 @@ def doctor(
         typer.echo()
         return
 
-    errors = [f for f in findings if f.level == "error"]
+    has_errors = _render_findings(findings)
+    typer.echo()
+    # Warnings alone don't fail the run, so they don't fail doctor; errors do.
+    raise typer.Exit(code=1 if has_errors else 0)
+
+
+def _diagnose_runnability(root: Path, project):  # noqa: ANN001 - compile.model.Project
+    """Run the `doctor` preflight against an already-compiled project.
+
+    Shared by `loopy doctor` and the `loopy init` wizard so both report the exact same gaps.
+    Reads the sandbox env_files off disk and merges the control-plane env (real env wins over
+    `loopy.env`), then defers to the pure `diagnose`.
+    """
+    from loopy_cli.doctor import diagnose
+    from loopy_runtime.secrets import _parse_dotenv, load_control_plane_env
+
+    def read_env(rel: str) -> dict[str, str] | None:
+        env_path = root / rel
+        return _parse_dotenv(env_path.read_text()) if env_path.is_file() else None
+
+    merged = dict(os.environ)
+    for key, value in load_control_plane_env(root).items():
+        merged.setdefault(key, value)  # real/platform env wins over loopy.env
+
+    return diagnose(project.registry, read_env=read_env, control_plane_env=merged)
+
+
+def _render_findings(findings) -> bool:
+    """Print doctor findings (error/warn) with their hints; return True if any are errors."""
     for finding in findings:
         if finding.level == "error":
             mark, color = "✗", typer.colors.RED
@@ -275,9 +396,7 @@ def doctor(
         typer.echo("  " + typer.style(f"{mark}  {finding.message}", fg=color))
         if finding.hint:
             typer.echo("      " + typer.style(f"→ {finding.hint}", fg=typer.colors.BRIGHT_BLACK))
-    typer.echo()
-    # Warnings alone don't fail the run, so they don't fail doctor; errors do.
-    raise typer.Exit(code=1 if errors else 0)
+    return any(f.level == "error" for f in findings)
 
 
 def _make_token_provider(root: Path, *, enabled: bool, announce: bool):
