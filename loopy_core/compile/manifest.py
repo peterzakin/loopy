@@ -31,11 +31,14 @@ def to_manifest(project: Project) -> dict:
 
 
 def _registry(registry: Registry) -> dict:
-    return {
+    out = {
         "sandboxes": {name: _sandbox(sb) for name, sb in registry.sandboxes.items()},
         "agents": {name: _agent(ag) for name, ag in registry.agents.items()},
         "events": {name: _event(ev) for name, ev in registry.events.items()},
     }
+    if registry.limits is not None:
+        out["limits"] = {"cascade_spend": registry.limits.cascade_spend}
+    return out
 
 
 def _sandbox(sb: Sandbox) -> dict:

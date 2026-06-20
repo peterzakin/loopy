@@ -202,7 +202,6 @@ def build_runtime(
     bus,
     state=None,
     tokens=None,
-    max_spend=None,
 ):
     """Construct the InMemoryRuntime with its standard dependency wiring.
 
@@ -210,16 +209,21 @@ def build_runtime(
     one-shot paths can't drift in how the harness, sandboxes, secrets, bus, durable state,
     and SCM token provider are wired (that drift is exactly what let `trigger` ship without
     token injection). `state` is passed through when given (so a networked bus can share the
-    runtime's StateStore); omitted otherwise so the runtime uses its own default. `max_spend`
-    (the `--max-spend` flag) caps a cascade's cumulative USD cost — the runaway-loop-back
-    terminator — and requires every reachable agent to use a cost-reporting harness (enforced at
-    preflight).
+    runtime's StateStore); omitted otherwise so the runtime uses its own default. The cascade
+    spend cap is a project-level control read from the manifest's `registry.limits.cascade_spend`
+    (authored in registry.yml) — not a launch-time flag — so it's enforced identically however
+    the engine is started; it requires every reachable agent to use a cost-reporting harness
+    (enforced at preflight).
     """
     from loopy_runtime.harness.router import HarnessRouter
     from loopy_runtime.runtime.inmemory import InMemoryRuntime
     from loopy_runtime.sandbox.factory import make_sandbox_provider
     from loopy_runtime.secrets import CONTROL_PLANE_ENV_FILE, EnvFileSecretsResolver
 
+    limits = manifest.registry.limits
+    cascade_budget_usd = (
+        limits.cascade_spend.get("usd") if limits and limits.cascade_spend else None
+    )
     extra = {"state": state} if state is not None else {}
     return InMemoryRuntime(
         manifest,
@@ -229,7 +233,7 @@ def build_runtime(
         bus=bus,
         tokens=tokens,
         github_auth_hint=str(root / CONTROL_PLANE_ENV_FILE),
-        cascade_budget_usd=max_spend,
+        cascade_budget_usd=cascade_budget_usd,
         **extra,
     )
 
@@ -359,12 +363,6 @@ def run(
     state_path: str | None = typer.Option(
         None, "--state-path", help="SQLite state DB path (default .loopy/state.db, under --root)."
     ),
-    max_spend: float | None = typer.Option(
-        None,
-        "--max-spend",
-        help="Cap the cumulative USD a cascade may spend (terminates runaway loop-backs; "
-        "needs cost-reporting harnesses).",
-    ),
     in_process: bool = typer.Option(
         False,
         "--in-process",
@@ -459,7 +457,6 @@ def run(
             bus=event_bus,
             state=state,
             tokens=tokens,
-            max_spend=max_spend,
         )
         runtime.preflight()  # fail fast at startup if any sandbox can't supply its harness keys
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
@@ -560,12 +557,6 @@ def trigger(
     no_tokens: bool = typer.Option(
         False, "--no-tokens", help="Skip GitHub App token injection (for fully offline tests)."
     ),
-    max_spend: float | None = typer.Option(
-        None,
-        "--max-spend",
-        help="Cap the cumulative USD the cascade may spend (terminates runaway loop-backs; "
-        "needs cost-reporting harnesses).",
-    ),
     as_json: bool = typer.Option(
         False, "--json", help="Emit the full run record (steps, outputs, emits, failures) as JSON."
     ),
@@ -610,7 +601,6 @@ def trigger(
             sandbox=sandbox,
             bus=InProcessEventBus(),
             tokens=tokens,
-            max_spend=max_spend,
         )
         runtime.preflight()  # fail fast before firing the event if any sandbox lacks its keys
         run_id, outputs = asyncio.run(_execute(runtime))

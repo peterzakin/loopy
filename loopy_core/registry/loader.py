@@ -16,7 +16,7 @@ from ruamel.yaml.error import MarkedYAMLError, YAMLError
 from loopy_core.compile import codes
 from loopy_core.compile.diagnostics import DiagnosticCollector
 from loopy_core.discovery import Inventory
-from loopy_core.registry.model import Agent, Event, Harness, Registry, Repo, Sandbox
+from loopy_core.registry.model import Agent, Event, Harness, Limits, Registry, Repo, Sandbox
 from loopy_core.registry.types import desugar
 from loopy_core.span import Span, span_at
 
@@ -85,10 +85,33 @@ def load_registry(inv: Inventory, diags: DiagnosticCollector) -> Registry:
     sandboxes = _load_sandboxes(data.get("sandboxes") or {}, file, diags)
     agents = _load_agents(data.get("agents") or {}, default_agent, file)
     events = _load_events(data.get("events") or {}, file, diags)
+    limits = _load_limits(data.get("limits"), file, _line_of(data, "limits"), diags)
 
     _check_naming(sandboxes, agents, events, diags)
 
-    return Registry(sandboxes=sandboxes, agents=agents, events=events)
+    return Registry(sandboxes=sandboxes, agents=agents, events=events, limits=limits)
+
+
+def _load_limits(value: object, file: str, line: int, diags: DiagnosticCollector) -> Limits | None:
+    """Parse the project-level `limits:` block. Only `cascade_spend: { usd: <number> }` today;
+    a malformed shape is E213 (and the limit is dropped rather than silently misapplied)."""
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        diags.error(codes.E213, "registry 'limits' must be a mapping", span=span_at(file, line))
+        return None
+    raw = value.get("cascade_spend")
+    if raw is None:
+        return None
+    usd = raw.get("usd") if isinstance(raw, Mapping) else None
+    if not isinstance(usd, (int, float)) or isinstance(usd, bool):
+        diags.error(
+            codes.E213,
+            "registry 'limits.cascade_spend' must be a mapping with a numeric 'usd'",
+            span=span_at(file, _line_of(value, "cascade_spend") or line),
+        )
+        return None
+    return Limits(cascade_spend={"usd": float(usd)})
 
 
 def _load_sandboxes(

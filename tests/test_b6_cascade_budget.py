@@ -92,7 +92,7 @@ def _runtime(manifest: Manifest, harness, **kw) -> InMemoryRuntime:
     )
 
 
-# --- dollar cap (--max-spend) -------------------------------------------------
+# --- dollar cap (registry limits.cascade_spend) -------------------------------
 
 
 def test_looping_cascade_trips_dollar_cap_not_iteration_cap():
@@ -158,7 +158,7 @@ def test_none_cost_is_fine_without_a_cap():
     assert asyncio.run(rt.status(run_id)).state == "completed"
 
 
-# --- preflight gate: all reachable agents must report cost under --max-spend ---
+# --- preflight gate: all reachable agents must report cost under the cap -------
 
 
 def _agent_manifest(runtime: str) -> Manifest:
@@ -200,7 +200,7 @@ def test_preflight_rejects_dollar_cap_with_cost_blind_agent():
     rt = _preflight_runtime(_agent_manifest("codex"), cascade_budget_usd=5.0)
     with pytest.raises(PreflightError) as exc:
         rt.preflight()
-    assert "--max-spend" in str(exc.value)
+    assert "limits.cascade_spend" in str(exc.value)
     assert "Coder" in str(exc.value)
 
 

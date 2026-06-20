@@ -140,7 +140,8 @@ class InMemoryRuntime:
         step that needs the key. The per-step check in `_run_step` remains as a backstop
         for paths that don't run preflight (direct `drain`/`tick`, tests).
 
-        When a dollar cap (`--max-spend` / `cascade_budget_usd`) is active, also enforce the
+        When a dollar cap (registry `limits.cascade_spend` / `cascade_budget_usd`) is active,
+        also enforce the
         all-or-nothing cost-capability gate here: every agent reachable in the project must use a
         harness that reports USD cost (`reports_cost`), because one cost-blind step in a cascade
         makes its spend invisible and lets a runaway slip the cap. Rejected up front with the
@@ -175,11 +176,11 @@ class InMemoryRuntime:
         sections: list[str] = []
         if cost_blind:
             sections.append(
-                f"--max-spend (${self.cascade_budget_usd}) is set but agent(s) "
+                f"registry limits.cascade_spend (${self.cascade_budget_usd}) is set but agent(s) "
                 f"{', '.join(sorted(cost_blind))} use a harness that reports no USD cost, so a "
                 "cascade-wide spend cap can't be enforced (one cost-blind step makes its spend "
                 "invisible).\n  → move those agents to a cost-reporting harness (e.g. "
-                "claude-code), or drop --max-spend."
+                "claude-code), or remove limits.cascade_spend from registry.yml."
             )
         if problems:
             sections.append(
@@ -359,7 +360,7 @@ class InMemoryRuntime:
             return
         if usage.cost_usd is None:
             raise RuntimeError(
-                f"step '{step_id}' ran under an active --max-spend cap but its harness reported "
+                f"step '{step_id}' ran under an active cascade spend cap but its harness reported "
                 "no USD cost for this call, so the cap can't be enforced (never counted as $0) — "
                 "use a harness/provider that reports cost."
             )

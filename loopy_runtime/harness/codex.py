@@ -9,8 +9,8 @@ Two provider differences from Claude Code, both handled in the base via `provide
 * Eligible models are OpenAI's (`gpt-*`, the o-series, `codex-*`) — enforced at
   construction by the model-eligibility rule.
 * `codex exec` reports **token usage only, no USD cost** (see the cost-budget plan), so
-  `Usage.cost_usd` is None here and a `spend.usd` budget (or a cascade-wide `--max-spend`)
-  on a codex step is rejected rather than silently ignored.
+  `Usage.cost_usd` is None here and a `spend.usd` budget (or a cascade-wide spend cap from
+  registry `limits.cascade_spend`) on a codex step is rejected rather than silently ignored.
 
 `codex exec --json` emits a JSONL event stream on stdout; the agent's answer is the last
 `agent_message` item in it. Non-JSON banner lines and partial deltas are tolerated.
@@ -54,7 +54,8 @@ class CodexHarness(JsonProtocolHarness):
     def _parse_response(self, stdout: str, step: StepSpec) -> tuple[str, Usage]:
         message = self._final_message(stdout, step)
         # codex emits no USD cost (token usage only), so it reports cost-less `Usage` and is
-        # refused up front under a `--max-spend` cap. Mapping its JSONL token events into the
+        # refused up front under an active cascade spend cap. Mapping its JSONL token events
+        # into the
         # telemetry fields is a follow-up. (See the cost-budget plan.)
         return message, Usage()
 

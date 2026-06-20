@@ -57,6 +57,15 @@
             "required": ["fields"],
             "properties": { "fields": { "type": "object" } }
           }
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "cascade_spend": {
+              "type": "object",
+              "properties": { "usd": { "type": "number" } }
+            }
+          }
         }
       }
     },

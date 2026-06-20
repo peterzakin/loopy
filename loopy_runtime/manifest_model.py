@@ -47,10 +47,15 @@ class EventContract(_Model):
     fields: dict[str, dict] = Field(default_factory=dict)
 
 
+class LimitsSpec(_Model):
+    cascade_spend: dict | None = None  # e.g. {"usd": 50}
+
+
 class RegistrySpec(_Model):
     sandboxes: dict[str, SandboxSpec] = Field(default_factory=dict)
     agents: dict[str, AgentSpec] = Field(default_factory=dict)
     events: dict[str, EventContract] = Field(default_factory=dict)
+    limits: LimitsSpec | None = None
 
 
 class TriggerSpec(_Model):

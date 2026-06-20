@@ -30,6 +30,21 @@ def test_unparseable_registry_reports_e001(tmp_path):
     assert_code(result, codes.E001, file="registry.yml")
 
 
+def test_registry_limits_cascade_spend_parses(tmp_path):
+    write_project(tmp_path, {"registry.yml": MINIMAL + "limits:\n  cascade_spend:\n    usd: 50\n"})
+    result = compile_project(tmp_path)
+    assert result.diagnostics.items == []
+    assert result.project.registry.limits.cascade_spend == {"usd": 50.0}
+
+
+def test_limits_cascade_spend_without_numeric_usd_reports_e213(tmp_path):
+    write_project(
+        tmp_path, {"registry.yml": MINIMAL + "limits:\n  cascade_spend:\n    usd: lots\n"}
+    )
+    result = compile_project(tmp_path)
+    assert_code(result, codes.E213, file="registry.yml")
+
+
 def test_defaults_deep_merge_harness_replace_lists(tmp_path):
     registry = (
         "defaults:\n"

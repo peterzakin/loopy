@@ -16,12 +16,14 @@ plan/source. When an item ships, check its box (`- [x]`) and strike the heading
   signal) plus tokens as telemetry; `ClaudeCodeHarness` fills it from the `--output-format json`
   envelope. The runtime accumulates cost per-drain and raises `CascadeBudgetExceeded` before
   each step once the cap is reached (recorded as a failed run, so the cascade winds down).
-  Surface is **`--max-spend`** (`cascade_budget_usd`) only — dollars are the legible unit; a
-  token cap was considered and dropped as illegible. The dollar cap is gated all-or-nothing at
-  preflight (every reachable agent must use a `reports_cost=True` harness) and backstopped at
-  runtime (a `cost_usd is None` under an active cap is a recorded failure, never counted as $0).
-  Cost-blind harnesses (Codex) are refused under `--max-spend` and have no cumulative cap until
-  a runtime pricing layer (tokens × rate) lands — a noted follow-up.
+  Surface is the registry **`limits.cascade_spend.usd`** (project-level, carried by the manifest
+  as `cascade_budget_usd`) only — dollars are the legible unit; a token cap was considered and
+  dropped as illegible. A cascade can span workflows via event loop-backs, so the cap is a
+  project policy, not a per-workflow one — and it's declarative config, never a launch-time flag.
+  The dollar cap is gated all-or-nothing at preflight (every reachable agent must use a
+  `reports_cost=True` harness) and backstopped at runtime (a `cost_usd is None` under an active
+  cap is a recorded failure, never counted as $0). Cost-blind harnesses (Codex) are refused under
+  an active cap and have no cumulative cap until a runtime pricing layer (tokens × rate) lands.
 
 - [ ] **2. Durability — DurableLite backend (B7 + B10), Phase 11**
   — `ARCHITECTURE.md` §5 (phase 11), §8, §9
@@ -277,7 +279,7 @@ B7/B10. Legend: ✅ shipped · ⚠️ partial · ❌ not built / deferred.
 | **B3** | Runtime template resolution (`{{ event.* }}`/`{{ step.* }}`) | ✅ | |
 | **B4** | Agent invocation + typed output capture | ✅ | `claude-code` + `codex` harnesses, dispatched per agent runtime by `HarnessRouter` with per-harness model eligibility |
 | **B5** | Event emission onto the bus | ✅ | in-proc + Redis bus |
-| **B6** | Budget enforcement | ⚠️ | `wall_clock` + per-step `spend.usd` + cumulative cascade USD cap (`--max-spend`, gated on cost-reporting harnesses — TODO #1) done; `window`/`latency` deferred (durable timers, B7) |
+| **B6** | Budget enforcement | ⚠️ | `wall_clock` + per-step `spend.usd` + cumulative cascade USD cap (registry `limits.cascade_spend.usd`, gated on cost-reporting harnesses — TODO #1) done; `window`/`latency` deferred (durable timers, B7) |
 | **B7** | Durable timers | ❌ | poll scheduler is in-process only → TODO #2 (DurableLite) |
 | **B8** | Cron watermarks | ⚠️ | watermarks exist in the poll scheduler; durability deferred → TODO #2 |
 | **B9** | Idempotent side effects + retries | ⚠️ | retries = backend default (exponential backoff, no manifest surface — TODO #4, decided); idempotent side effects deferred to durability (TODO #2) |
@@ -298,5 +300,5 @@ folds into the durability work (TODO #2). Update a row's status when its capabil
   `os.environ` at `loopy run`); finer-grained, isolated delivery is deferred to the same boundary
   as producer auth (when sensors externalize / go polyglot). See `ARCHITECTURE.md` §6.
 - Cumulative wall-clock cap, runtime pricing table + `per_model` breakdown (which would let
-  `--max-spend` cover cost-blind harnesses too), declared (frontmatter/registry) cascade
-  budgets — see the cost-budget plan's non-goals.
+  the cascade cap cover cost-blind harnesses too) — see the cost-budget plan's non-goals. (The
+  cascade cap itself is now declarative: registry `limits.cascade_spend`.)
