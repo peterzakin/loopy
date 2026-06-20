@@ -279,16 +279,21 @@ def _verify(root: str | Path) -> None:
         )
 
 
-@auth_app.command()
-def github(
-    org: str | None = typer.Option(None, "--org", help="Create under this org (default: account)."),
-    name: str | None = typer.Option(None, "--name", help="App name (default: loopy[-org])."),
-    port: int = typer.Option(DEFAULT_PORT, "--port", help="Local callback port (0 = ephemeral)."),
-    root: Path = typer.Option(Path("."), "--root", help="Project root (where loopy.env lives)."),
-    force: bool = typer.Option(False, "--force", help="Overwrite existing stored App credentials."),
-    no_browser: bool = typer.Option(False, "--no-browser", help="Print the URL, don't open it."),
+def run_github_auth(
+    *,
+    org: str | None = None,
+    name: str | None = None,
+    port: int = DEFAULT_PORT,
+    root: Path = Path("."),
+    force: bool = False,
+    no_browser: bool = False,
 ) -> None:
-    """Create your own GitHub App via the manifest flow and store its credentials."""
+    """Create a GitHub App via the manifest flow and store its credentials.
+
+    The plain-function core of `loopy auth github`, callable in-process (e.g. from the
+    `loopy init` wizard) without going through Typer's argument parsing — calling the
+    decorated command directly would pass `OptionInfo` sentinels instead of real values.
+    """
     from loopy_runtime.scm import github_app
     from loopy_runtime.secrets import load_control_plane_env
 
@@ -327,6 +332,21 @@ def github(
     typer.echo("\n  Verifying credentials…")
     _verify(root)
     typer.echo()
+
+
+@auth_app.command()
+def github(
+    org: str | None = typer.Option(None, "--org", help="Create under this org (default: account)."),
+    name: str | None = typer.Option(None, "--name", help="App name (default: loopy[-org])."),
+    port: int = typer.Option(DEFAULT_PORT, "--port", help="Local callback port (0 = ephemeral)."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root (where loopy.env lives)."),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing stored App credentials."),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Print the URL, don't open it."),
+) -> None:
+    """Create your own GitHub App via the manifest flow and store its credentials."""
+    run_github_auth(
+        org=org, name=name, port=port, root=root, force=force, no_browser=no_browser
+    )
 
 
 @auth_app.command()
