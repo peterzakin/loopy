@@ -272,10 +272,8 @@ def _report_remaining_setup(target: Path, name: str) -> None:
         + typer.style("   # re-check the above any time", fg=typer.colors.BRIGHT_BLACK)
     )
     typer.echo(
-        typer.style(
-            "    loopy trigger . --event CodeTask --fields '{...}'", fg=typer.colors.BRIGHT_WHITE
-        )
-        + typer.style("   # compiles + fires one task", fg=typer.colors.BRIGHT_BLACK)
+        typer.style("    loopy run", fg=typer.colors.BRIGHT_WHITE)
+        + typer.style("   # compiles + starts the engine", fg=typer.colors.BRIGHT_BLACK)
     )
     typer.echo()
 

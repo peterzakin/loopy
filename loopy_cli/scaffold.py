@@ -212,14 +212,18 @@ loopy auth status            # then visit the printed install URL to pick repos
 # 4. check the above is actually done — a green compile is not a runnable project
 loopy doctor
 
-# 5. fire one task — `trigger .` compiles the project on the fly, then runs it
-#    (the sandbox runs on whatever registry.yml's `provider:` names)
+# 5. start the engine — `loopy run` compiles the project on the fly, then brings up the
+#    server (hosts sensors, drives runs; sandboxes run on whatever registry.yml's `provider:`
+#    names). Container stack by default — add `--in-process` for a no-Docker dev server.
+loopy run
+
+# fire one task by hand to watch the loop end-to-end (compiles too):
 loopy trigger . \\
   --event CodeTask \\
   --fields '{"task": "add a CONTRIBUTING.md", "branch": "codefix/contributing"}'
 ```
 
-`trigger`/`run` accept a project directory and compile it for you; `loopy compile .` is still
+`run`/`trigger` accept a project directory and compile it for you; `loopy compile .` is still
 there to write a standalone `manifest.json` (the deploy artifact) or as a CI gate (`--check`).
 Run every command from this directory so `loopy.env` and `--root` stay in sync. See the
 top-level Loopy README for the authoring model.
