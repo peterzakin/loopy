@@ -220,6 +220,46 @@ def test_mint_installation_token_unscoped_sends_no_body(monkeypatch, rsa_keys):
     assert captured["payload"] is None  # whole-installation token when unscoped
 
 
+def test_list_installation_repositories_paginates(monkeypatch):
+    # An "all repositories" install on a busy account spans many pages; the helper
+    # must accumulate every page, not just the first 30 GitHub returns by default.
+    # Otherwise the doctor preflight flags reachable repos as "not selected".
+    pages = {
+        1: {"total_count": 150, "repositories": [{"full_name": f"me/r{i}"} for i in range(100)]},
+        2: {"total_count": 150, "repositories": [{"full_name": f"me/r{i}"} for i in range(100, 150)]},
+    }
+    calls = []
+
+    def fake(method, url, *, headers=None, payload=None):
+        calls.append(url)
+        page = 2 if "page=2" in url else 1
+        return pages[page]
+
+    monkeypatch.setattr(github_app, "_request_json", fake)
+    result = github_app.list_installation_repositories("t")
+
+    assert result["total_count"] == 150
+    assert len(result["repositories"]) == 150
+    assert result["repositories"][-1]["full_name"] == "me/r149"
+    assert any("per_page=100" in url for url in calls)  # asks for the larger page
+    assert len(calls) == 2  # walked both pages, then stopped
+
+
+def test_list_installation_repositories_single_page_stops(monkeypatch):
+    # A small install fits on one page — don't fetch a needless second page.
+    calls = []
+
+    def fake(method, url, *, headers=None, payload=None):
+        calls.append(url)
+        return {"total_count": 2, "repositories": [{"full_name": "me/a"}, {"full_name": "me/b"}]}
+
+    monkeypatch.setattr(github_app, "_request_json", fake)
+    result = github_app.list_installation_repositories("t")
+
+    assert len(result["repositories"]) == 2
+    assert len(calls) == 1
+
+
 # --- block-until-installed wait ---------------------------------------------
 
 

@@ -199,7 +199,31 @@ def mint_installation_token(
 
 
 def list_installation_repositories(token: str, *, base_url: str = GITHUB_API) -> dict:
-    """List the repos an installation token can reach (`{total_count, repositories}`)."""
-    return _request_json(
-        "GET", f"{base_url}/installation/repositories", headers={"Authorization": f"token {token}"}
-    )
+    """List the repos an installation token can reach (`{total_count, repositories}`).
+
+    Walks every page of `/installation/repositories`. GitHub paginates this at 30
+    repos/page by default; we ask for 100 and accumulate until we've collected
+    `total_count`. Skipping this is a silent footgun: an installation set to "all
+    repositories" on an account with more repos than one page holds would report
+    only the first slice, so the doctor preflight flags perfectly reachable repos
+    as "not in its selected repositories".
+    """
+    headers = {"Authorization": f"token {token}"}
+    repositories: list[dict] = []
+    total_count = 0
+    page = 1
+    while True:
+        payload = _request_json(
+            "GET",
+            f"{base_url}/installation/repositories?per_page=100&page={page}",
+            headers=headers,
+        )
+        total_count = payload.get("total_count", total_count)
+        batch = payload.get("repositories") or []
+        repositories.extend(batch)
+        # Stop once we've seen every repo GitHub promised, or a short/empty page
+        # (the latter guards against a missing/zero total_count).
+        if not batch or len(repositories) >= total_count:
+            break
+        page += 1
+    return {"total_count": total_count, "repositories": repositories}
