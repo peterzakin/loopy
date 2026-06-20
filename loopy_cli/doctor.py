@@ -1,11 +1,12 @@
 """`loopy doctor` — a first-run preflight for a project's *runnability*.
 
 `loopy compile` proves the manifest is **valid**; it says nothing about whether a real run
-would succeed. The scaffold (`loopy init`) deliberately compiles green while still carrying
-placeholders that pass a naive presence check but fail the moment an agent actually runs: a
-literal `ANTHROPIC_API_KEY=sk-ant-...`, a `repos:` pointed at `octocat/Hello-World` (which you
-can't push to), and no git auth wired yet. The runtime's own `preflight()` only checks that a
-key is *present*, so the placeholder slips straight through.
+would succeed. The scaffold (`loopy init`) deliberately compiles green while still carrying a
+placeholder that passes a naive presence check but fails the moment an agent actually runs: a
+literal `ANTHROPIC_API_KEY=sk-ant-...`. It also catches two repo-shaped traps a project can
+fall into — a `repos:` pointed at `octocat/Hello-World` (which you can't push to) and repos
+declared with no git auth wired. The runtime's own `preflight()` only checks that a key is
+*present*, so the placeholder slips straight through.
 
 `diagnose` is pure (no I/O) so it's unit-testable: it takes the compiled registry, a
 `read_env` callback that returns a parsed env_file (or `None` if missing), and the merged

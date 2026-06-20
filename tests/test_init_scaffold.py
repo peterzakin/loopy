@@ -30,19 +30,47 @@ def _key_line(target) -> str:
     return next(line for line in lines if line.startswith("ANTHROPIC_API_KEY="))
 
 
-def test_scaffold_compiles_green(tmp_path):
+def test_coding_scaffold_compiles_green(tmp_path):
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo", repos=["me/app"])
+
+    result = compile_project(target)
+    assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
+    # With a repo, the starter is the coding loop: a single CodeTask-triggered workflow.
+    assert "codefix" in result.project.workflows
+
+
+def test_orchestrator_scaffold_compiles_green(tmp_path):
+    """No repo ⇒ the non-coding starter: a Note → summary loop that compiles and runs as-is."""
     target = tmp_path / "demo"
     scaffold_project(target, "demo")
 
     result = compile_project(target)
     assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
-    # The starter loop is the documented one: a single CodeTask-triggered workflow.
-    assert "codefix" in result.project.workflows
+    # A real, keepable workflow — not an empty shell or a placeholder to fix.
+    assert "summarize" in result.project.workflows
+    # No repo declared, and crucially never the old unpushable placeholder.
+    assert result.project.registry.sandboxes["Dev"].repos == []
+    assert "octocat" not in (target / "registry.yml").read_text().lower()
 
 
-def test_scaffold_writes_canonical_layout(tmp_path):
+def test_scaffold_writes_named_repos(tmp_path):
+    """Repos named at init land verbatim in the Dev sandbox's `repos:` and compile green."""
     target = tmp_path / "demo"
-    created = scaffold_project(target, "demo")
+    scaffold_project(target, "demo", repos=["me/app", "me/other"])
+
+    registry = (target / "registry.yml").read_text()
+    assert "repos: [me/app, me/other]" in registry
+
+    result = compile_project(target)
+    assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
+    repos = [r.url for r in result.project.registry.sandboxes["Dev"].repos]
+    assert repos == ["me/app", "me/other"]
+
+
+def test_coding_scaffold_writes_canonical_layout(tmp_path):
+    target = tmp_path / "demo"
+    created = scaffold_project(target, "demo", repos=["me/app"])
 
     rels = {p.as_posix() for p in created}
     assert {
@@ -62,11 +90,30 @@ def test_scaffold_writes_canonical_layout(tmp_path):
     assert "# demo" in (target / "registry.yml").read_text()
 
 
+def test_orchestrator_scaffold_writes_summarize_layout(tmp_path):
+    target = tmp_path / "demo"
+    created = scaffold_project(target, "demo")
+
+    rels = {p.as_posix() for p in created}
+    assert {
+        "registry.yml",
+        "workflows/summarize/summarize.md",
+        "skills/summarize/SKILL.md",
+        "sensors/sensors.py",
+        "secrets/dev.env",
+        "loopy.env",
+        ".gitignore",
+    } <= rels
+    # No codefix/PR files leak into the non-coding starter.
+    assert not any("codefix" in r for r in rels)
+    assert "# demo" in (target / "registry.yml").read_text()
+
+
 def test_scaffolded_loopy_env_does_not_block_auth_github(tmp_path):
-    """The control-plane template must leave GitHub App vars commented out — an uncommented
+    """The coding control-plane template must leave GitHub App vars commented out — an uncommented
     GITHUB_APP_ID would make `loopy auth github` think an App is already configured."""
     target = tmp_path / "demo"
-    scaffold_project(target, "demo")
+    scaffold_project(target, "demo", repos=["me/app"])
 
     assert (target / "loopy.env").is_file()
     env = load_control_plane_env(target)
@@ -156,8 +203,13 @@ def test_init_non_interactive_writes_placeholder_scaffold(tmp_path, monkeypatch)
     assert result.exit_code == 0, result.output
     target = tmp_path / "demo"
     assert _key_line(target) == f"ANTHROPIC_API_KEY={PLACEHOLDER_ANTHROPIC_KEY}"
-    # The doctor-backed summary replaces the old static checklist.
-    assert "things left" in result.output
+    # The doctor-backed summary replaces the old static checklist. With no repo (the
+    # non-interactive default), the only gap is the placeholder model key.
+    assert "1 thing left" in result.output
+    # No repo ⇒ the non-coding orchestrator starter, never an unpushable placeholder repo.
+    registry = (target / "registry.yml").read_text()
+    assert "summarize" in registry
+    assert "octocat" not in registry.lower()
 
 
 def test_init_non_interactive_requires_name(tmp_path):

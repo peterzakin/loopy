@@ -36,17 +36,17 @@ def _diagnose(root, *, control_plane_env=None):
     return diagnose(result.project.registry, read_env=read_env, control_plane_env=merged)
 
 
-def _fix_key_and_repo(root) -> None:
-    """Replace the two scaffold placeholders that aren't auth-related."""
+def _fix_key(root) -> None:
+    """Replace the placeholder model key — the one scaffold gap unrelated to repos/auth."""
     dev = root / "secrets/dev.env"
     dev.write_text(dev.read_text().replace("sk-ant-...", "sk-ant-real-key"))
-    reg = root / "registry.yml"
-    reg.write_text(reg.read_text().replace("octocat/Hello-World", "me/my-fork"))
 
 
-def test_fresh_scaffold_flags_all_three_gaps(tmp_path):
+def test_starter_repo_scaffold_flags_all_three_gaps(tmp_path):
+    # A project pointed at the unpushable starter repo trips every gap: placeholder key, the
+    # repo itself, and (because it now declares a repo) missing git auth.
     root = tmp_path / "demo"
-    scaffold_project(root, "demo")
+    scaffold_project(root, "demo", repos=["octocat/Hello-World"])
 
     findings = _diagnose(root)
     errors = {f.message for f in findings if f.level == "error"}
@@ -57,10 +57,22 @@ def test_fresh_scaffold_flags_all_three_gaps(tmp_path):
     assert any("git auth" in m for m in warns)
 
 
-def test_clean_project_has_no_findings(tmp_path):
+def test_blank_repo_scaffold_flags_only_the_model_key(tmp_path):
+    # The default scaffold ships no repo: a valid workflow orchestrator. The only gap is the
+    # placeholder model key — there's no repo to push to, so no repo gap and no git auth to wire.
     root = tmp_path / "demo"
     scaffold_project(root, "demo")
-    _fix_key_and_repo(root)
+
+    findings = _diagnose(root)
+    assert any(f.level == "error" and "ANTHROPIC_API_KEY" in f.message for f in findings)
+    assert not any("repos:" in f.message for f in findings)
+    assert not any("git auth" in f.message for f in findings)
+
+
+def test_clean_project_has_no_findings(tmp_path):
+    root = tmp_path / "demo"
+    scaffold_project(root, "demo", repos=["me/my-fork"])
+    _fix_key(root)
 
     # A configured App (GITHUB_APP_ID present at the control plane) satisfies git auth.
     findings = _diagnose(root, control_plane_env={"GITHUB_APP_ID": "123456"})
@@ -78,23 +90,20 @@ def test_missing_env_file_is_an_error(tmp_path):
 
 def test_github_token_in_env_file_satisfies_auth(tmp_path):
     root = tmp_path / "demo"
-    scaffold_project(root, "demo")
+    scaffold_project(root, "demo", repos=["me/app"])  # a declared repo makes git auth relevant
     dev = root / "secrets/dev.env"
     dev.write_text(dev.read_text().replace("# GITHUB_TOKEN=ghp_...", "GITHUB_TOKEN=ghp_real"))
 
     findings = _diagnose(root)
-    # The key/repo placeholders still flag, but git auth is now satisfied (no warn).
+    # The key placeholder still flags, but git auth is now satisfied (no warn).
     assert not any(f.level == "warn" and "git auth" in f.message for f in findings)
 
 
 def test_no_auth_warning_when_no_repos_declared(tmp_path):
+    # The default scaffold declares no repos — nothing needs cloning, so auth isn't required.
     root = tmp_path / "demo"
     scaffold_project(root, "demo")
-    _fix_key_and_repo(root)
-    # Drop the repos: line entirely — nothing needs cloning, so auth isn't required.
-    reg = root / "registry.yml"
-    lines = [ln for ln in reg.read_text().splitlines() if "repos:" not in ln]
-    reg.write_text("\n".join(lines) + "\n")
+    _fix_key(root)
 
     findings = _diagnose(root)
     assert findings == [], [f.message for f in findings]
