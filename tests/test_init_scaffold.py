@@ -15,6 +15,7 @@ from loopy_cli.scaffold import (
     validate_project_name,
 )
 from loopy_core.compile.pipeline import compile_project
+from loopy_runtime.secrets import load_control_plane_env
 
 
 def test_scaffold_compiles_green(tmp_path):
@@ -38,6 +39,7 @@ def test_scaffold_writes_canonical_layout(tmp_path):
         "skills/codefix/SKILL.md",
         "sensors/sensors.py",
         "secrets/dev.env",
+        "loopy.env",
         ".gitignore",
     } <= rels
     # Secrets and control-plane creds are gitignored from the start.
@@ -46,6 +48,18 @@ def test_scaffold_writes_canonical_layout(tmp_path):
     assert "secrets/" in gitignore
     # The project name lands in the header comment via the sentinel replacement.
     assert "# demo" in (target / "registry.yml").read_text()
+
+
+def test_scaffolded_loopy_env_does_not_block_auth_github(tmp_path):
+    """The control-plane template must leave GitHub App vars commented out — an uncommented
+    GITHUB_APP_ID would make `loopy auth github` think an App is already configured."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo")
+
+    assert (target / "loopy.env").is_file()
+    env = load_control_plane_env(target)
+    assert "GITHUB_APP_ID" not in env  # commented placeholder only — auth github stays unblocked
+    assert env == {}  # nothing active yet; all placeholders are comments
 
 
 def test_scaffold_refuses_nonempty_dir(tmp_path):
