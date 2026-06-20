@@ -320,7 +320,7 @@ SensorFn = Callable[..., Any]
 
 @runtime_checkable
 class SensorRunner(Protocol):
-    def register_webhook(self, path: str, fn: SensorFn) -> None: ...
+    def register_webhook(self, path: str, fn: SensorFn, *, verify: Any = None) -> None: ...
     async def start(self) -> None: ...  # serves the webhooks; each Event goes to the EventReceiver
 
 

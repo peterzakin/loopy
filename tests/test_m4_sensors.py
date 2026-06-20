@@ -116,7 +116,8 @@ def test_unregistered_emits_reports_e401(tmp_path):
     assert_code(compile_project(tmp_path), codes.E401)
 
 
-def test_duplicate_webhook_path_reports_e403(tmp_path):
+def test_duplicate_webhook_path_same_event_reports_e403(tmp_path):
+    # Same path AND same emits is the ambiguous duplicate we reject.
     body = (
         sensor_py('webhook="/dup", emits="Incident"', fn="a")
         + "\n"
@@ -124,6 +125,19 @@ def test_duplicate_webhook_path_reports_e403(tmp_path):
     )
     write_project(tmp_path, {"registry.yml": REGISTRY, "sensors/s.py": body})
     assert_code(compile_project(tmp_path), codes.E403)
+
+
+def test_shared_webhook_path_distinct_events_is_allowed(tmp_path):
+    # Fan-out: many sensors on one URL emitting different events (the GitHub model).
+    body = (
+        sensor_py('webhook="/hooks/github", emits="Incident"', fn="a")
+        + "\n"
+        + sensor_py('webhook="/hooks/github", emits="MetricThreshold"', fn="b")
+    )
+    write_project(tmp_path, {"registry.yml": REGISTRY, "sensors/s.py": body})
+    result = compile_project(tmp_path)
+    assert_no_sensor_errors(result)
+    assert {s.name for s in result.project.sensors} == {"a", "b"}
 
 
 def test_malformed_poll_interval_reports_e403(tmp_path):

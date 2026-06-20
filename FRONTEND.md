@@ -213,7 +213,9 @@ resolves `{{ }}` at run time against recorded values.
   non-statically-analyzable → `LOOPY-E402`.
 - **S2** that event is **registered** in `registry.yml`; otherwise the project fails to compile
   (`LOOPY-E401`) — this is the README's hard rule.
-- **S3** webhook `path` unique across sensors; `poll` interval well-formed.
+- **S3** webhook `(path, emits)` unique across sensors — several sensors may share a `path`
+  (one provider URL fanned out to many sensors), but not while emitting the same event;
+  `poll` interval well-formed.
 - Record `{name, trigger(webhook|poll), emits, module, fn}` per sensor. `module` is a
   **language-appropriate locator** — a dotted module path for Python (`sensors/github/issues.py` →
   `sensors.github.issues`), an import specifier/path for other languages. A `lang` discriminator is
@@ -406,7 +408,7 @@ Some codes are shared where the same failure surfaces from more than one place (
 | **E305** | T3 | P6 | `<field>` not a top-level key of that step's `output:` schema |
 | **E401** | S2 | P7 | a sensor's declared `emits` event isn't registered |
 | **E402** | S1 | P7 | sensor `emits` missing or not statically analyzable (e.g. imperatively built registry) |
-| **E403** | S3 | P7 | duplicate webhook `path`, or malformed `poll` interval |
+| **E403** | S3 | P7 | duplicate webhook `(path, emits)`, or malformed `poll` interval |
 | **E501** | X2 | P8 | step `agent:` doesn't resolve to a registered Agent |
 | **E502** | X2 | P8 | an agent's `sandbox` doesn't resolve |
 | **E506** | X2 | P8 | an agent declares no `sandbox` (every agent must name one) |
