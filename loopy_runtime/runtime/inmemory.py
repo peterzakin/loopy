@@ -69,6 +69,7 @@ class InMemoryRuntime:
         retry=None,
         state=None,
         tokens=None,
+        github_auth_hint: str | None = None,
         max_iterations: int = 100_000,
     ):
         self.manifest = manifest
@@ -80,6 +81,9 @@ class InMemoryRuntime:
         # injected into each sandbox's env (the App key stays at the control-plane).
         # None preserves the original behavior — no token, no extra network.
         self.tokens = tokens
+        # Where the control-plane creds were looked for (e.g. `<root>/loopy.env`), shown in
+        # the GitHub-auth preflight error so a mispointed --root is self-diagnosing.
+        self._github_auth_hint = github_auth_hint
         self.retry = retry or ExponentialBackoffRetry()
         self.state = state or InMemoryStateStore()
         # Backstop against an unbounded event loop. The *real* terminator is budgets
@@ -161,9 +165,16 @@ class InMemoryRuntime:
             return None
         names = ", ".join(sorted(sandboxes))
         if self.tokens is None:
+            where = (
+                f" in {self._github_auth_hint} or the environment"
+                if self._github_auth_hint
+                else ""
+            )
             return (
-                f"sandbox(es) {names} clone repos but no GitHub auth is configured.\n"
-                "  → run `loopy auth github` to set up a GitHub App."
+                f"sandbox(es) {names} clone repos but no GitHub auth is configured "
+                f"(no GITHUB_APP_ID found{where}).\n"
+                "  → run `loopy auth github` from the project dir to set up a GitHub App,\n"
+                "    or put GITHUB_TOKEN in the sandbox's env_file."
             )
         try:
             asyncio.run(self.tokens.preflight())

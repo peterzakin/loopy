@@ -206,7 +206,7 @@ def build_runtime(manifest, *, root: Path, sandbox: str, bus, state=None, tokens
     from loopy_runtime.harness.router import HarnessRouter
     from loopy_runtime.runtime.inmemory import InMemoryRuntime
     from loopy_runtime.sandbox.factory import make_sandbox_provider
-    from loopy_runtime.secrets import EnvFileSecretsResolver
+    from loopy_runtime.secrets import CONTROL_PLANE_ENV_FILE, EnvFileSecretsResolver
 
     extra = {"state": state} if state is not None else {}
     return InMemoryRuntime(
@@ -216,6 +216,7 @@ def build_runtime(manifest, *, root: Path, sandbox: str, bus, state=None, tokens
         secrets=EnvFileSecretsResolver(root),
         bus=bus,
         tokens=tokens,
+        github_auth_hint=str(root / CONTROL_PLANE_ENV_FILE),
         **extra,
     )
 

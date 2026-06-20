@@ -117,7 +117,7 @@ class _StubTokens:
             raise self.error
 
 
-def _runtime(secrets, tokens=None):
+def _runtime(secrets, tokens=None, github_auth_hint=None):
     m = load_manifest(GOLDEN)
     return InMemoryRuntime(
         m,
@@ -126,6 +126,7 @@ def _runtime(secrets, tokens=None):
         secrets=secrets,
         bus=InProcessEventBus(),
         tokens=tokens,
+        github_auth_hint=github_auth_hint,
     )
 
 
@@ -160,6 +161,20 @@ def test_preflight_fails_when_repos_need_github_but_no_auth():
         rt.preflight()
     assert "GitHub auth" in str(exc.value)
     assert "loopy auth github" in str(exc.value)
+
+
+def test_preflight_no_auth_message_names_where_it_looked():
+    # A mispointed --root is the #1 cause of this error; naming the loopy.env path it checked
+    # makes that self-diagnosing instead of sending the user to re-run a command they already ran.
+    from loopy_runtime.runtime.inmemory import PreflightError
+
+    rt = _runtime(
+        StaticSecretsResolver({"ANTHROPIC_API_KEY": "sk-test"}),
+        github_auth_hint="/proj/loopy.env",
+    )
+    with pytest.raises(PreflightError) as exc:
+        rt.preflight()
+    assert "/proj/loopy.env" in str(exc.value)
 
 
 def test_preflight_fails_when_token_unmintable():
