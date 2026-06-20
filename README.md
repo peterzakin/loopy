@@ -245,8 +245,9 @@ A few things worth knowing before the first run:
   must declare its `provider:` (`local | docker | daytona`) — a sandbox without one is a
   compile-time error (E214), so where an agent runs is always explicit, never inferred. The
   runtime dispatches each step to the backend its sandbox names; there is no `--sandbox` flag, so
-  two sandboxes in one manifest can target different backends. `loopy init` scaffolds the remote
-  `daytona` provider.
+  two sandboxes in one manifest can target different backends. Every agent must itself name a
+  sandbox — directly or via `defaults.agent.sandbox` — or it's a compile error (E506). `loopy init`
+  scaffolds a `daytona` (remote) sandbox and points the default agent at it.
 - **The sandbox inherits nothing from your shell.** Everything an agent needs — the model key,
   any git token — must be in the sandbox's `env_file`; exporting `ANTHROPIC_API_KEY` in your shell
   is not enough. (The bare `local` provider also needs `PATH`/`HOME` there; `docker`/`daytona` get

@@ -8,7 +8,7 @@ from loopy_core.discovery import discover
 from tests.helpers import assert_code, write_project
 from tests.helpers import codes as result_codes
 
-MINIMAL = "sandboxes:\n  default:\n    provider: local\nagents:\n  Worker: {}\n"
+MINIMAL = "sandboxes:\n  default:\n    provider: local\nagents:\n  Worker: { sandbox: default }\n"
 
 
 def test_minimal_registry_compiles_clean(tmp_path):

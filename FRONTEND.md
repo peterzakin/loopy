@@ -409,6 +409,7 @@ Some codes are shared where the same failure surfaces from more than one place (
 | **E403** | S3 | P7 | duplicate webhook `path`, or malformed `poll` interval |
 | **E501** | X2 | P8 | step `agent:` doesn't resolve to a registered Agent |
 | **E502** | X2 | P8 | an agent's `sandbox` doesn't resolve |
+| **E506** | X2 | P8 | an agent declares no `sandbox` (every agent must name one) |
 | **E503** | X2 | P8 | an `agent.skills[]` entry doesn't resolve in `skills/` |
 | **E504** | X3 | P8 | a step's `on:` / `emits:` names an unregistered event |
 | **W501** | X5 | P8 | dead trigger — a registered `on:` event with no producer |
