@@ -9,8 +9,8 @@ Two provider differences from Claude Code, both handled in the base via `provide
 * Eligible models are OpenAI's (`gpt-*`, the o-series, `codex-*`) — enforced at
   construction by the model-eligibility rule.
 * `codex exec` reports **token usage only, no USD cost** (see the cost-budget plan), so
-  cost is 0.0 here and a `spend.usd` budget on a codex step is rejected rather than
-  silently ignored.
+  `Usage.cost_usd` is None here and a `spend.usd` budget (or a cascade-wide `--max-spend`)
+  on a codex step is rejected rather than silently ignored.
 
 `codex exec --json` emits a JSONL event stream on stdout; the agent's answer is the last
 `agent_message` item in it. Non-JSON banner lines and partial deltas are tolerated.
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 
-from loopy_runtime.contract import ToolchainLayer
+from loopy_runtime.contract import ToolchainLayer, Usage
 from loopy_runtime.harness.base import HarnessError, JsonProtocolHarness
 from loopy_runtime.manifest_model import AgentSpec, StepSpec
 
@@ -51,9 +51,12 @@ class CodexHarness(JsonProtocolHarness):
         argv += ["--dangerously-bypass-approvals-and-sandbox"]
         return argv
 
-    def _parse_response(self, stdout: str, step: StepSpec) -> tuple[str, float]:
+    def _parse_response(self, stdout: str, step: StepSpec) -> tuple[str, Usage]:
         message = self._final_message(stdout, step)
-        return message, 0.0  # codex reports token usage only, no USD cost
+        # codex emits no USD cost (token usage only), so it reports cost-less `Usage` and is
+        # refused up front under a `--max-spend` cap. Mapping its JSONL token events into the
+        # telemetry fields is a follow-up. (See the cost-budget plan.)
+        return message, Usage()
 
     @classmethod
     def _final_message(cls, stdout: str, step: StepSpec) -> str:

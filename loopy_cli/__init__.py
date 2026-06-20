@@ -194,14 +194,26 @@ def _make_token_provider(root: Path, *, enabled: bool, announce: bool):
     return GitHubAppTokenProvider(creds)
 
 
-def build_runtime(manifest, *, root: Path, sandbox: str, bus, state=None, tokens=None):
+def build_runtime(
+    manifest,
+    *,
+    root: Path,
+    sandbox: str,
+    bus,
+    state=None,
+    tokens=None,
+    max_spend=None,
+):
     """Construct the InMemoryRuntime with its standard dependency wiring.
 
     The single runtime-construction site shared by `run` and `trigger`, so the serve and
     one-shot paths can't drift in how the harness, sandboxes, secrets, bus, durable state,
     and SCM token provider are wired (that drift is exactly what let `trigger` ship without
     token injection). `state` is passed through when given (so a networked bus can share the
-    runtime's StateStore); omitted otherwise so the runtime uses its own default.
+    runtime's StateStore); omitted otherwise so the runtime uses its own default. `max_spend`
+    (the `--max-spend` flag) caps a cascade's cumulative USD cost — the runaway-loop-back
+    terminator — and requires every reachable agent to use a cost-reporting harness (enforced at
+    preflight).
     """
     from loopy_runtime.harness.router import HarnessRouter
     from loopy_runtime.runtime.inmemory import InMemoryRuntime
@@ -217,6 +229,7 @@ def build_runtime(manifest, *, root: Path, sandbox: str, bus, state=None, tokens
         bus=bus,
         tokens=tokens,
         github_auth_hint=str(root / CONTROL_PLANE_ENV_FILE),
+        cascade_budget_usd=max_spend,
         **extra,
     )
 
@@ -257,6 +270,12 @@ def run(
     ),
     state_path: str | None = typer.Option(
         None, "--state-path", help="SQLite state DB path (default .loopy/state.db, under --root)."
+    ),
+    max_spend: float | None = typer.Option(
+        None,
+        "--max-spend",
+        help="Cap the cumulative USD a cascade may spend (terminates runaway loop-backs; "
+        "needs cost-reporting harnesses).",
     ),
 ) -> None:
     """Start the Loopy server: host sensor webhooks; incoming events drive workflow runs."""
@@ -315,7 +334,13 @@ def run(
         # stays here at the control-plane; only the ephemeral token crosses into the sandbox.
         tokens = _make_token_provider(root, enabled=True, announce=True)
         runtime = build_runtime(
-            m, root=root, sandbox=sandbox, bus=event_bus, state=state, tokens=tokens
+            m,
+            root=root,
+            sandbox=sandbox,
+            bus=event_bus,
+            state=state,
+            tokens=tokens,
+            max_spend=max_spend,
         )
         runtime.preflight()  # fail fast at startup if any sandbox can't supply its harness keys
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
@@ -416,6 +441,12 @@ def trigger(
     no_tokens: bool = typer.Option(
         False, "--no-tokens", help="Skip GitHub App token injection (for fully offline tests)."
     ),
+    max_spend: float | None = typer.Option(
+        None,
+        "--max-spend",
+        help="Cap the cumulative USD the cascade may spend (terminates runaway loop-backs; "
+        "needs cost-reporting harnesses).",
+    ),
     as_json: bool = typer.Option(
         False, "--json", help="Emit the full run record (steps, outputs, emits, failures) as JSON."
     ),
@@ -455,7 +486,12 @@ def trigger(
         # configured-but-broken App surfaces as a clean error, not a traceback.
         tokens = _make_token_provider(root, enabled=not no_tokens, announce=True)
         runtime = build_runtime(
-            m, root=root, sandbox=sandbox, bus=InProcessEventBus(), tokens=tokens
+            m,
+            root=root,
+            sandbox=sandbox,
+            bus=InProcessEventBus(),
+            tokens=tokens,
+            max_spend=max_spend,
         )
         runtime.preflight()  # fail fast before firing the event if any sandbox lacks its keys
         run_id, outputs = asyncio.run(_execute(runtime))
