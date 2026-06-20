@@ -9,8 +9,8 @@ Two provider differences from Claude Code, both handled in the base via `provide
 * Eligible models are OpenAI's (`gpt-*`, the o-series, `codex-*`) — enforced at
   construction by the model-eligibility rule.
 * `codex exec` reports **token usage only, no USD cost** (see the cost-budget plan), so
-  cost is 0.0 here and a `spend.usd` budget on a codex step is rejected rather than
-  silently ignored.
+  `Usage.cost_usd` is None here and a `spend.usd` budget (or a cascade-wide `--max-spend`)
+  on a codex step is rejected rather than silently ignored.
 
 `codex exec --json` emits a JSONL event stream on stdout; the agent's answer is the last
 `agent_message` item in it. Non-JSON banner lines and partial deltas are tolerated.

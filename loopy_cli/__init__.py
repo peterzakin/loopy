@@ -195,7 +195,15 @@ def _make_token_provider(root: Path, *, enabled: bool, announce: bool):
 
 
 def build_runtime(
-    manifest, *, root: Path, sandbox: str, bus, state=None, tokens=None, max_tokens=None
+    manifest,
+    *,
+    root: Path,
+    sandbox: str,
+    bus,
+    state=None,
+    tokens=None,
+    max_tokens=None,
+    max_spend=None,
 ):
     """Construct the InMemoryRuntime with its standard dependency wiring.
 
@@ -204,7 +212,9 @@ def build_runtime(
     and SCM token provider are wired (that drift is exactly what let `trigger` ship without
     token injection). `state` is passed through when given (so a networked bus can share the
     runtime's StateStore); omitted otherwise so the runtime uses its own default. `max_tokens`
-    (the `--max-tokens` flag) caps the cumulative tokens one cascade may consume.
+    (the `--max-tokens` flag) caps the cumulative tokens one cascade may consume; `max_spend`
+    (the `--max-spend` flag) caps its cumulative USD cost (requires every reachable agent to use
+    a cost-reporting harness, enforced at preflight).
     """
     from loopy_runtime.harness.router import HarnessRouter
     from loopy_runtime.runtime.inmemory import InMemoryRuntime
@@ -221,6 +231,7 @@ def build_runtime(
         tokens=tokens,
         github_auth_hint=str(root / CONTROL_PLANE_ENV_FILE),
         cascade_token_budget=max_tokens,
+        cascade_budget_usd=max_spend,
         **extra,
     )
 
@@ -266,6 +277,11 @@ def run(
         None,
         "--max-tokens",
         help="Cap the cumulative tokens one cascade may consume (terminates runaway loop-backs).",
+    ),
+    max_spend: float | None = typer.Option(
+        None,
+        "--max-spend",
+        help="Cap the cumulative USD a cascade may spend (needs cost-reporting harnesses).",
     ),
 ) -> None:
     """Start the Loopy server: host sensor webhooks; incoming events drive workflow runs."""
@@ -331,6 +347,7 @@ def run(
             state=state,
             tokens=tokens,
             max_tokens=max_tokens,
+            max_spend=max_spend,
         )
         runtime.preflight()  # fail fast at startup if any sandbox can't supply its harness keys
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
@@ -436,6 +453,11 @@ def trigger(
         "--max-tokens",
         help="Cap the cumulative tokens the cascade may consume (terminates runaway loop-backs).",
     ),
+    max_spend: float | None = typer.Option(
+        None,
+        "--max-spend",
+        help="Cap the cumulative USD the cascade may spend (needs cost-reporting harnesses).",
+    ),
     as_json: bool = typer.Option(
         False, "--json", help="Emit the full run record (steps, outputs, emits, failures) as JSON."
     ),
@@ -481,6 +503,7 @@ def trigger(
             bus=InProcessEventBus(),
             tokens=tokens,
             max_tokens=max_tokens,
+            max_spend=max_spend,
         )
         runtime.preflight()  # fail fast before firing the event if any sandbox lacks its keys
         run_id, outputs = asyncio.run(_execute(runtime))

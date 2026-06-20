@@ -30,6 +30,7 @@ from loopy_runtime.contract import (
     TriggerId,
 )
 from loopy_runtime.manifest_model import Manifest, SandboxSpec, StepSpec, WorkflowSpec
+from loopy_runtime.providers import provider
 from loopy_runtime.retry import ExponentialBackoffRetry
 from loopy_runtime.sandbox.toolchain import compose_image
 from loopy_runtime.sensors.scheduler import cron_prev
@@ -48,6 +49,16 @@ def _sandbox_needs_github(spec: SandboxSpec) -> bool:
     stays in lockstep with `repos:` and can't drift. A push-to-an-unlisted-repo case would
     need an explicit sandbox knob; deferred until a workflow actually requires it."""
     return bool(spec.repos)
+
+
+def _agent_reports_cost(agent) -> bool:  # noqa: ANN001 - AgentSpec
+    """Whether `agent`'s harness surfaces a USD cost the runtime can accumulate toward a
+    dollar cap. Static, from the agent→harness→provider map; an unknown runtime can't report
+    cost (and is a compile-time error anyway)."""
+    try:
+        return provider(agent.harness.runtime).reports_cost
+    except ValueError:
+        return False
 
 
 class PreflightError(RuntimeError):
@@ -73,6 +84,7 @@ class InMemoryRuntime:
         github_auth_hint: str | None = None,
         max_iterations: int = 100_000,
         cascade_token_budget: int | None = None,
+        cascade_budget_usd: float | None = None,
     ):
         self.manifest = manifest
         self.harness = harness
@@ -92,13 +104,18 @@ class InMemoryRuntime:
         # runaway from spinning forever (set high; legitimate loops run for many turns). The
         # money-aware terminator is `cascade_token_budget` below.
         self.max_iterations = max_iterations
-        # The real terminator for a runaway loop-back cascade: a cumulative cap on the tokens
-        # consumed across one cascade (reset per drain). None disables it. Each step stays
-        # within its per-step budget while cumulative cost grows unbounded — this caps the sum.
-        # v1 is token-based (the universally-reported signal); a dollar cap is deferred. (See
-        # the cost-budget plan.)
+        # The real terminator for a runaway loop-back cascade: a cumulative cap on what one
+        # cascade consumes (reset per drain). Each step stays within its per-step budget while
+        # cumulative cost grows unbounded — these cap the sum. Two units, either/both/None:
+        #   • token cap — the universally-reported signal (every harness emits tokens);
+        #   • dollar cap (`cascade_budget_usd`) — only enforceable when every reachable agent
+        #     uses a cost-reporting harness, gated all-or-nothing in `preflight()` and backstopped
+        #     at runtime (a `cost_usd is None` under an active dollar cap is a recorded failure,
+        #     never counted as $0). See the cost-budget plan.
         self.cascade_token_budget = cascade_token_budget
+        self.cascade_budget_usd = cascade_budget_usd
         self._cascade_tokens = 0
+        self._cascade_cost = 0.0
 
         self._event_seq = 0
         self._runs: dict[RunId, RunStatus] = {}
@@ -125,9 +142,16 @@ class InMemoryRuntime:
         *all* missing keys across every agent into a single error so a misconfigured
         project is reported up front, in full, instead of dying mid-cascade on the first
         step that needs the key. The per-step check in `_run_step` remains as a backstop
-        for paths that don't run preflight (direct `drain`/`tick`, tests)."""
+        for paths that don't run preflight (direct `drain`/`tick`, tests).
+
+        When a dollar cap (`--max-spend` / `cascade_budget_usd`) is active, also enforce the
+        all-or-nothing cost-capability gate here: every agent reachable in the project must use a
+        harness that reports USD cost (`reports_cost`), because one cost-blind step in a cascade
+        makes its spend invisible and lets a runaway slip the cap. Rejected up front with the
+        offending agents named, before anything runs."""
         problems: list[str] = []
         github_sandboxes: set[str] = set()
+        cost_blind: list[str] = []  # agents on a harness that reports no USD cost
         seen: set[str] = set()
         for wf in self.manifest.workflows.values():
             for step in wf.steps.values():
@@ -149,8 +173,18 @@ class InMemoryRuntime:
                     )
                 if _sandbox_needs_github(spec):
                     github_sandboxes.add(sandbox_name)
+                if self.cascade_budget_usd is not None and not _agent_reports_cost(agent):
+                    cost_blind.append(name)
 
         sections: list[str] = []
+        if cost_blind:
+            sections.append(
+                f"--max-spend (${self.cascade_budget_usd}) is set but agent(s) "
+                f"{', '.join(sorted(cost_blind))} use a harness that reports no USD cost, so a "
+                "cascade-wide dollar cap can't be enforced (one cost-blind step makes its spend "
+                "invisible).\n  → use --max-tokens instead, or move those agents to a "
+                "cost-reporting harness (e.g. claude-code)."
+            )
         if problems:
             sections.append(
                 "sandbox(es) cannot supply the harness's required provider key(s):\n  "
@@ -291,6 +325,7 @@ class InMemoryRuntime:
         # serve(), two unrelated events that share a drain share the counter — that only trips
         # the cap *earlier* (safe); precise per-cascade-id scoping is a follow-up.
         self._cascade_tokens = 0
+        self._cascade_cost = 0.0
         first_run_id: RunId | None = None
         iterations = 0
         try:
@@ -309,14 +344,37 @@ class InMemoryRuntime:
         return first_run_id
 
     def _check_cascade_budget(self, step_id: str) -> None:
-        """Raise CascadeBudgetExceeded if the cascade has already consumed its token cap.
-        Checked before each step so an over-budget run never starts the agent."""
+        """Raise CascadeBudgetExceeded if the cascade has already reached a cumulative cap
+        (tokens and/or dollars). Checked before each step so an over-budget run never starts
+        the agent → it emits nothing → the loop-back winds down on its own."""
         cap = self.cascade_token_budget
         if cap is not None and self._cascade_tokens >= cap:
             raise CascadeBudgetExceeded(
                 f"cascade consumed {self._cascade_tokens} tokens, reaching the cap of {cap} "
                 f"before step '{step_id}'"
             )
+        cap_usd = self.cascade_budget_usd
+        if cap_usd is not None and self._cascade_cost >= cap_usd:
+            raise CascadeBudgetExceeded(
+                f"cascade spent ${self._cascade_cost:.4f}, reaching the cap of ${cap_usd} "
+                f"before step '{step_id}'"
+            )
+
+    def _accumulate_cost(self, step_id: str, usage) -> None:  # noqa: ANN001 - Usage
+        """Add a step's USD cost to the cascade total when a dollar cap is active. A
+        `cost_usd is None` under an active cap is a hard error (recorded as a failed run),
+        never counted as $0 — the gate ('never silently no-op') the preflight check enforces
+        statically, backstopped here for a harness that reports cost in general but returns
+        None for a specific call. No-op when no dollar cap is set."""
+        if self.cascade_budget_usd is None:
+            return
+        if usage.cost_usd is None:
+            raise RuntimeError(
+                f"step '{step_id}' ran under an active --max-spend cap but its harness reported "
+                "no USD cost for this call, so the cap can't be enforced (never counted as $0) — "
+                "use --max-tokens, or a harness/provider that reports cost."
+            )
+        self._cascade_cost += usage.cost_usd
 
     async def _execute(self, wf_name: str, event: Event) -> RunId:
         wf = self.manifest.workflows[wf_name]
@@ -354,6 +412,7 @@ class InMemoryRuntime:
                 )
                 result = await self._run_step(step, ctx)
                 self._cascade_tokens += result.usage.total_tokens
+                self._accumulate_cost(step.id, result.usage)
                 outputs[local_name] = result.output
                 step_states[local_name] = "completed"
                 self.execution_log.append(step.id)
