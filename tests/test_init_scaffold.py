@@ -40,6 +40,33 @@ def test_scaffold_compiles_green(tmp_path):
     assert "codefix" in result.project.workflows
 
 
+def test_scaffold_without_repo_leaves_repos_blank(tmp_path):
+    """No repo ⇒ an empty `repos:` list, never the old unpushable placeholder — and still green."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo")
+
+    registry = (target / "registry.yml").read_text()
+    assert "repos: []" in registry
+    assert "octocat" not in registry.lower()
+
+    result = compile_project(target)
+    assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
+
+
+def test_scaffold_writes_named_repos(tmp_path):
+    """Repos named at init land verbatim in the Dev sandbox's `repos:` and compile green."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo", repos=["me/app", "me/other"])
+
+    registry = (target / "registry.yml").read_text()
+    assert "repos: [me/app, me/other]" in registry
+
+    result = compile_project(target)
+    assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
+    repos = [r.url for r in result.project.registry.sandboxes["Dev"].repos]
+    assert repos == ["me/app", "me/other"]
+
+
 def test_scaffold_writes_canonical_layout(tmp_path):
     target = tmp_path / "demo"
     created = scaffold_project(target, "demo")
@@ -156,8 +183,11 @@ def test_init_non_interactive_writes_placeholder_scaffold(tmp_path, monkeypatch)
     assert result.exit_code == 0, result.output
     target = tmp_path / "demo"
     assert _key_line(target) == f"ANTHROPIC_API_KEY={PLACEHOLDER_ANTHROPIC_KEY}"
-    # The doctor-backed summary replaces the old static checklist.
-    assert "things left" in result.output
+    # The doctor-backed summary replaces the old static checklist. With no repo (the
+    # non-interactive default), the only gap is the placeholder model key.
+    assert "1 thing left" in result.output
+    # No repo placeholder is scaffolded — a fresh project is a valid orchestrator, not broken.
+    assert "repos: []" in (target / "registry.yml").read_text()
 
 
 def test_init_non_interactive_requires_name(tmp_path):

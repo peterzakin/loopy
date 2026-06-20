@@ -17,6 +17,10 @@ from pathlib import Path
 # choke on them — a plain `.replace` of an unambiguous token is safer.
 _NAME = "__PROJECT_NAME__"
 
+# Sentinel for the Dev sandbox's `repos:` line — rendered from the repo(s) the user names at
+# `init` time (or an empty list). Same `.replace` rationale as `_NAME`.
+_REPOS_LINE = "__REPOS_LINE__"
+
 # A project name doubles as the new directory name, so keep it a single safe path segment.
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -53,7 +57,8 @@ defaults:
 # Sandbox — compute + egress. `daytona` runs each agent in an isolated cloud sandbox built
 # from the `image:` spec below (set DAYTONA_API_KEY in loopy.env). Swap `provider:` to `docker`
 # for a fully local, hermetic run — both build from the same `image:` spec.
-#   • point `repos:` at a repo you can push to (fork something, or change it to you/your-repo)
+#   • `repos:` is what the agent clones to edit code — point it at a repo you can push to. With
+#     none, loopy is still a useful workflow orchestrator; it just won't touch a code repo.
 #   • `env_file:` is the gitignored dotenv injected as the sandbox's environment
 sandboxes:
   Dev:
@@ -61,7 +66,7 @@ sandboxes:
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
     network: [github.com, api.anthropic.com]   # git over https + the model API
     env_file: secrets/dev.env                  # gitignored; resolved at run time
-    repos: [octocat/Hello-World]               # cloned at acquire time (git auth injected)
+    __REPOS_LINE__
 
 # Agents — capability comes from the sandbox, skills, injected git creds, and budget.
 agents:
@@ -242,20 +247,39 @@ _FILES: dict[str, str] = {
 }
 
 
-def scaffold_project(target: Path, name: str) -> list[Path]:
+def _render_repos_line(repos: list[str]) -> str:
+    """The Dev sandbox's `repos:` line: the repos the agent should work on, or an empty list.
+
+    A repo is what the starter `codefix` workflow clones, edits, and opens a PR against. With
+    none, the scaffold is still a valid, runnable project — a workflow orchestrator that simply
+    doesn't touch a code repo. We never scaffold an unpushable placeholder, so a fresh project
+    never ships a repo the user can't actually use.
+    """
+    if repos:
+        return f"repos: [{', '.join(repos)}]   # cloned at acquire time (git auth injected)"
+    return "repos: []   # no repo — a pure workflow orchestrator (add one to edit code)"
+
+
+def scaffold_project(
+    target: Path, name: str, *, repos: list[str] | None = None
+) -> list[Path]:
     """Write the starter project into `target`, returning the created files (relative paths).
 
     `target` is created if absent; an existing **non-empty** directory is refused so we never
     clobber work. The caller is expected to have validated `name` via `validate_project_name`.
+    `repos` names the repo(s) the Dev sandbox clones; an empty/omitted list scaffolds a
+    repo-less orchestrator (never the old unpushable placeholder).
     """
     target = Path(target)
     if target.exists() and any(target.iterdir()):
         raise FileExistsError(f"{target} already exists and is not empty")
 
+    repos_line = _render_repos_line(repos or [])
     created: list[Path] = []
     for rel, template in _FILES.items():
         path = target / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(template.replace(_NAME, name))
+        body = template.replace(_NAME, name).replace(_REPOS_LINE, repos_line)
+        path.write_text(body)
         created.append(Path(rel))
     return sorted(created, key=lambda p: p.as_posix())

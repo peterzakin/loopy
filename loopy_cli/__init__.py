@@ -141,9 +141,13 @@ def init(
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
+    # Ask up front which repo(s) the agent works on so the scaffold lands the real value
+    # (a checkout to edit) instead of an unpushable placeholder. Blank is a first-class answer.
+    repos = _prompt_for_repos() if interactive else None
+
     target = (directory / name).resolve()
     try:
-        created = scaffold_project(target, name)
+        created = scaffold_project(target, name, repos=repos)
     except FileExistsError as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -160,12 +164,51 @@ def init(
     # Offer to close the gaps the scaffold leaves on purpose before reporting what's left.
     if interactive:
         _offer_ambient_anthropic_key(target)
-        _offer_github_auth(target)
+        # Git auth only matters if the agent actually clones a repo. With none configured,
+        # creating a GitHub App would have nothing to install on — so skip it and say why.
+        if repos:
+            _offer_github_auth(target)
+        else:
+            _note_orchestrator_mode()
 
     # A clean compile is *not* a runnable project: the scaffold ships placeholders on purpose
-    # (a fake API key, an unpushable repo, no git auth). Run the same checks as `loopy doctor`
-    # so the user sees the *actual* remaining gaps — anything resolved above is already gone.
+    # (a fake API key, maybe no git auth). Run the same checks as `loopy doctor` so the user
+    # sees the *actual* remaining gaps — anything resolved above is already gone.
     _report_remaining_setup(target, name)
+
+
+def _prompt_for_repos() -> list[str]:
+    """Ask which repo(s) the agent should work on; an empty answer is a first-class choice.
+
+    A repo is what the starter `codefix` workflow clones to edit and open a PR against. But
+    loopy is still useful with none — you get a workflow orchestrator that just doesn't touch a
+    code repo — so blank means "no repo", not "unfinished", and we never fall back to an
+    unpushable placeholder.
+    """
+    raw = typer.prompt(
+        "  Which repo(s) should the agent work on? (owner/repo, comma-separated; "
+        "blank = no repo)",
+        default="",
+        show_default=False,
+    )
+    return [r.strip() for r in raw.split(",") if r.strip()]
+
+
+def _note_orchestrator_mode() -> None:
+    """Frame a repo-less scaffold as a valid orchestrator, not a half-finished setup."""
+    typer.echo(
+        "  "
+        + typer.style("ⓘ", fg=typer.colors.BLUE)
+        + " No repo set — scaffolded as a workflow orchestrator (no code-repo access)."
+    )
+    typer.echo(
+        typer.style(
+            "    Point sandboxes.Dev.repos at a repo and run `loopy auth github` when you want "
+            "the agent to edit code.",
+            fg=typer.colors.BRIGHT_BLACK,
+        )
+    )
+    typer.echo()
 
 
 def _offer_ambient_anthropic_key(target: Path) -> None:
@@ -259,7 +302,7 @@ def _report_remaining_setup(target: Path, name: str) -> None:
             "  "
             + typer.style("✓  ready to run", fg=typer.colors.GREEN, bold=True)
             + typer.style(
-                "   — no placeholders, repo is pushable, git auth is wired",
+                "   — nothing blocking a first run",
                 fg=typer.colors.BRIGHT_BLACK,
             )
         )
@@ -436,7 +479,7 @@ def doctor(
         typer.echo(
             typer.style("  ✓  ready to run", fg=typer.colors.GREEN, bold=True)
             + typer.style(
-                "   — no placeholders, repo is pushable, git auth is wired",
+                "   — nothing blocking a first run",
                 fg=typer.colors.BRIGHT_BLACK,
             )
         )
