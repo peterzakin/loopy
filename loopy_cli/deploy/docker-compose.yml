@@ -1,14 +1,6 @@
-# Single-node Loopy deployment.
-#
-#   loopy   — one process: sensor webhooks + scheduler + event-bus consumer + runtime.
-#   redis   — the event bus: decouples ingress from execution and buffers the backlog.
-#   Daytona — the agent sandbox. It is NOT a service here; the engine talks to it over
-#             the network via DAYTONA_API_KEY / DAYTONA_API_URL.
-#
-# Prereqs (see DEPLOYMENT.md §5):
-#   1. Compile your project:  loopy compile <project> --out <project>/manifest.json
-#   2. Copy .env.example to .env and fill in DAYTONA_API_KEY (+ LOOPY_PROJECT path).
-#   3. docker compose up --build
+# Internal deployment asset — driven by `loopy run --docker`, not invoked by hand.
+# All ${...} values are supplied by the CLI's process env (see loopy_cli._run_in_docker);
+# there is no user-authored .env.
 name: loopy
 
 services:
@@ -26,7 +18,9 @@ services:
       retries: 5
 
   loopy:
-    build: .
+    build:
+      context: ${LOOPY_BUILD_CONTEXT}
+      dockerfile: ${LOOPY_DOCKERFILE}
     depends_on:
       redis:
         condition: service_healthy
@@ -38,17 +32,17 @@ services:
       - --host=0.0.0.0
       - --port=8000
       - --bus=redis
-      - --sandbox=daytona
+      - --sandbox=${LOOPY_SANDBOX:-daytona}
       - --state=sqlite
       - --state-path=/state/state.db
     environment:
       # Infra creds only — agent secrets ride the sandbox env_file, not the engine env.
       REDIS_URL: redis://redis:6379
-      DAYTONA_API_KEY: ${DAYTONA_API_KEY:?set DAYTONA_API_KEY in .env}
+      DAYTONA_API_KEY: ${DAYTONA_API_KEY:-}
       DAYTONA_API_URL: ${DAYTONA_API_URL:-}
     volumes:
       # The project (manifest + sensors + env files) is read-only at run time.
-      - ${LOOPY_PROJECT:-./project}:/project:ro
+      - ${LOOPY_PROJECT}:/project:ro
       # SQLite run history lives on its own volume, scoped to this one writer, so it
       # survives container recreation. This service must stay at a single replica.
       - loopy-state:/state

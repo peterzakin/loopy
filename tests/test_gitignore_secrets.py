@@ -24,7 +24,6 @@ SECRET_PATHS = [
     "examples/incidents/secrets/default.env",
     "sensors/.env",
     ".loopy/key.pem",
-    ".env",
 ]
 
 

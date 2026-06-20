@@ -1,6 +1,9 @@
-# Loopy engine image — the single long-lived process `loopy run` drives:
-# sensor webhooks + scheduler + event-bus consumer + runtime, all in one.
-# Agents do NOT run here; they run in Daytona sandboxes (a separate domain).
+# Internal deployment asset — built by `loopy run --docker`, not by hand. The build
+# context is the loopy source root, so the COPY paths below are root-relative.
+#
+# The engine image: the single long-lived process `loopy run` drives — sensor webhooks
+# + scheduler + event-bus consumer + runtime, all in one. Agents do NOT run here; they
+# run in Daytona sandboxes (a separate domain).
 FROM python:3.11-slim
 
 # uv for a fast, cached dependency resolve (the repo's install tool).

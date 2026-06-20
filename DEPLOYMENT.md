@@ -471,15 +471,16 @@ no App configured, nothing is injected (unchanged behavior). The token is scoped
 installation — i.e. the repos you selected at install time — which is the least-privilege boundary
 until a per-sandbox `repos:` field narrows it further (a sibling milestone).
 
-### B′. Single-node via Docker Compose — the packaged self-host
+### B′. Single-node, containerized — `loopy run --docker`
 
-Topology B, packaged as two containers plus a managed sandbox. The repo ships a `Dockerfile`,
-`docker-compose.yml`, and `.env.example` at the root.
+Topology B, run as containers — but the Docker plumbing is an implementation detail of one flag,
+not something you author. `loopy run --docker` brings up the same single-node composition (redis
+bus, sqlite state, daytona sandbox) in containers:
 
 ```
-  docker compose up --build
+  loopy run manifest.json --docker
   ├─ loopy   one process: sensor webhooks + scheduler + event-bus consumer + runtime
-  │          (loopy run … --bus redis --sandbox daytona --state sqlite)
+  │          (the same `loopy run`, now inside a container)
   ├─ redis   the EventBus — decouples ingress from execution; buffers the backlog
   └─ Daytona the agent sandbox (external; reached via DAYTONA_API_KEY / DAYTONA_API_URL)
 ```
@@ -491,24 +492,26 @@ engine container.
 
 Two persistence facts make the deploy durable:
 
-- **`loopy-state` volume.** SQLite is a file; a container's filesystem is ephemeral, so the
+- **A named state volume.** SQLite is a file; a container's filesystem is ephemeral, so the
   run-history DB lives on a named volume (mounted at `/state`) to survive container recreation.
-  It's scoped to the `loopy` service — the single SQLite writer — which must stay at one replica.
-- **`redis-data` volume + AOF.** Redis runs with `--appendonly yes` so accepted-but-not-yet-
-  processed events survive a redis restart.
+  It's scoped to the single `loopy` service — the one SQLite writer.
+- **A redis volume + AOF.** Redis runs with `--appendonly yes` so accepted-but-not-yet-processed
+  events survive a redis restart.
 
-Steps:
+Usage:
 
 ```bash
-loopy compile <project> --out <project>/manifest.json   # 1. produce the manifest
-cp .env.example .env                                     # 2. set LOOPY_PROJECT + DAYTONA_API_KEY
-docker compose up --build                                # 3. bring up redis + loopy
+loopy compile <project> --out <project>/manifest.json     # 1. produce the manifest
+loopy run manifest.json --root <project> --docker          # 2. bring up redis + loopy
+# add --detach to background it; --no-build to skip the image rebuild
 ```
 
-The project directory is bind-mounted **read-only** at `/project` (it supplies the manifest,
-sensor source, and `env_file`s). Infra creds (`REDIS_URL`, `DAYTONA_API_KEY`/`URL`) are the
-engine's process env; agent secrets stay in the sandbox `env_file`s under the project, and
-`loopy.env` (read from the project root) still carries the GitHub App creds for token minting.
+Everything compose needs is derived from flags `loopy run` already takes — `--root` (the project,
+bind-mounted **read-only** at `/project`), the manifest, `--port`, `--sandbox` (defaults to
+`daytona` in container mode) — plus the project's `loopy.env` for the Daytona creds. There is no
+compose file or `.env` to write. Agent secrets stay in the sandbox `env_file`s under the project,
+and `loopy.env` (read from the project root) still carries the GitHub App creds for token minting.
+(`--docker` builds the image from a source checkout today.)
 
 ### C. Durable / distributed — the production target (design-complete, behind the same interfaces)
 

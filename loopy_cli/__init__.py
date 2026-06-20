@@ -234,6 +234,92 @@ def _run_record(run_id, runtime, outputs) -> dict:
     }
 
 
+def _source_root() -> Path | None:
+    """The loopy source checkout (the dir holding pyproject.toml), or None.
+
+    `--docker` builds the engine image from source, so it needs the build context. Walks up
+    from this package; returns None for a wheel install with no source tree alongside it.
+    """
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").exists():
+            return parent
+    return None
+
+
+def _run_in_docker(
+    *, root: Path, manifest: Path, port: int | None, sandbox: str, detach: bool, build: bool
+) -> None:
+    """Bring up the single-node stack (engine + redis) via the bundled compose file.
+
+    The Docker plumbing is an implementation detail: everything compose needs is derived from
+    the same flags `loopy run` already takes (`--root`, the manifest, `--port`, `--sandbox`) plus
+    the project's `loopy.env` (Daytona creds), and passed through the child's environment — there
+    is no user-authored compose file or `.env`.
+    """
+    import shutil
+    import subprocess
+
+    from loopy_runtime.secrets import load_control_plane_env
+
+    if shutil.which("docker") is None:
+        typer.echo("error: docker is not installed or not on PATH.", err=True)
+        raise typer.Exit(code=1)
+
+    context = _source_root()
+    if context is None:
+        typer.echo(
+            "error: `loopy run --docker` currently requires a source checkout (no pyproject.toml "
+            "found alongside the package to build the engine image from).",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    deploy = Path(__file__).resolve().parent / "deploy"
+    compose = deploy / "docker-compose.yml"
+    dockerfile_rel = os.path.relpath(deploy / "Dockerfile", context)
+
+    root_abs = root.resolve()
+    # The container mounts only --root at /project, so the manifest is referenced relative to it.
+    # A relative manifest is interpreted against --root (the natural "run from the project" case).
+    manifest_abs = manifest if manifest.is_absolute() else (root / manifest)
+    manifest_rel = os.path.relpath(manifest_abs.resolve(), root_abs)
+    if manifest_rel.startswith(".."):
+        typer.echo(
+            f"error: manifest {manifest} is outside the project root {root_abs}; "
+            "with --docker the manifest must live under --root (it's mounted at /project).",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    # Inherit the parent env, then layer the project's loopy.env (Daytona creds) under it
+    # (non-override: a value set in the real environment wins), then the compose substitutions.
+    env = dict(os.environ)
+    for key, value in load_control_plane_env(root).items():
+        env.setdefault(key, value)
+    env.update(
+        {
+            "LOOPY_BUILD_CONTEXT": str(context),
+            "LOOPY_DOCKERFILE": dockerfile_rel,
+            "LOOPY_PROJECT": str(root_abs),
+            "LOOPY_MANIFEST": Path(manifest_rel).as_posix(),
+            # `local` is the in-process default; in a container daytona is the sensible default.
+            "LOOPY_SANDBOX": "daytona" if sandbox == "local" else sandbox,
+            "LOOPY_PORT": str(port or 8000),
+        }
+    )
+
+    cmd = ["docker", "compose", "-f", str(compose), "up"]
+    if build:
+        cmd.append("--build")
+    if detach:
+        cmd.append("--detach")
+    typer.echo(
+        f"loopy: bringing up engine + redis via docker (project {root_abs}, "
+        f"sandbox {env['LOOPY_SANDBOX']}, port {env['LOOPY_PORT']})"
+    )
+    raise typer.Exit(code=subprocess.call(cmd, env=env))
+
+
 @app.command()
 def run(
     manifest: Path = typer.Argument(..., help="Path to manifest.json."),
@@ -258,9 +344,29 @@ def run(
     state_path: str | None = typer.Option(
         None, "--state-path", help="SQLite state DB path (default .loopy/state.db, under --root)."
     ),
+    docker: bool = typer.Option(
+        False,
+        "--docker",
+        help="Run the engine + redis as containers (redis bus, sqlite state, daytona sandbox).",
+    ),
+    detach: bool = typer.Option(
+        False, "--detach", "-d", help="With --docker, run the stack in the background."
+    ),
+    build: bool = typer.Option(
+        True, "--build/--no-build", help="With --docker, (re)build the engine image first."
+    ),
 ) -> None:
     """Start the Loopy server: host sensor webhooks; incoming events drive workflow runs."""
     import asyncio
+
+    # `--docker` runs the same single-node composition (this very `run` command, with
+    # redis/sqlite/daytona) inside containers. It short-circuits before the in-process
+    # wiring below, since that setup is for running the engine in *this* process.
+    if docker:
+        _run_in_docker(
+            root=root, manifest=manifest, port=port, sandbox=sandbox, detach=detach, build=build
+        )
+        return
 
     from loopy_runtime.bus.factory import make_event_bus
     from loopy_runtime.config import ConfigError, load_config, resolve, resolve_redis_url
