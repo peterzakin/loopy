@@ -22,7 +22,11 @@ _POLL_RE = re.compile(r"^\d+[smhd]$")
 
 def load_sensors(inv: Inventory, registry: Registry, diags: DiagnosticCollector) -> list[Sensor]:
     sensors: list[Sensor] = []
-    webhook_paths: dict[str, str] = {}  # path -> sensor name (for S3 uniqueness)
+    # (path, emits) -> sensor name. Several sensors may share one webhook path — a provider
+    # like GitHub posts every event type to a single URL, and the runner fans each delivery
+    # out to all sensors on that path. What's disallowed is two sensors on the same path
+    # emitting the *same* event (an ambiguous duplicate).
+    webhook_paths: dict[tuple[str, str], str] = {}
 
     for path in inv.sensor_files:
         try:
@@ -78,7 +82,7 @@ def _build_sensor(
     file: str,
     module: str,
     registry: Registry,
-    webhook_paths: dict[str, str],
+    webhook_paths: dict[tuple[str, str], str],
     diags: DiagnosticCollector,
 ) -> Sensor | None:
     span = span_at(file, fn.lineno)
@@ -102,17 +106,19 @@ def _build_sensor(
     if trigger is None:
         return None
 
-    # S3 — webhook path uniqueness.
+    # S3 — webhook (path, emits) uniqueness. Sharing a path is fine (fan-out); two sensors
+    # on the same path emitting the same event is the ambiguous case we reject.
     if trigger.kind == "webhook":
-        if trigger.path in webhook_paths:
+        key = (trigger.path, emits)
+        if key in webhook_paths:
             diags.error(
                 codes.E403,
-                f"duplicate webhook path '{trigger.path}' "
-                f"(sensors '{webhook_paths[trigger.path]}' and '{fn.name}')",
+                f"duplicate webhook path '{trigger.path}' emitting '{emits}' "
+                f"(sensors '{webhook_paths[key]}' and '{fn.name}')",
                 span=span,
             )
         else:
-            webhook_paths[trigger.path] = fn.name
+            webhook_paths[key] = fn.name
 
     # S2 — declared emits must be a registered event.
     if emits not in registry.events:

@@ -809,6 +809,13 @@ def run(
         raise typer.Exit(code=1) from exc
     receiver = LocalEventReceiver(event_bus, m.registry.events)  # shared gate for webhooks + polls
     sensor_runner = FastAPISensorRunner(receiver)
+    # GitHub posts every event type to one URL signed with X-Hub-Signature-256; verify it at the
+    # edge when the secret is configured. Paths under /hooks/github opt in; absent a secret we run
+    # unverified (dev only) and say so loudly.
+    from loopy_runtime.scm.github_webhook import signature_verifier
+
+    github_secret = os.environ.get("GITHUB_WEBHOOK_SECRET")
+    warned_unverified = False
     for sensor in m.sensors:
         if sensor.trigger.kind != "webhook" or not sensor.trigger.path:
             continue
@@ -820,7 +827,18 @@ def run(
                 err=True,
             )
             fn = synthesizing_publisher(m, sensor)
-        sensor_runner.register_webhook(sensor.trigger.path, fn)
+        verify = None
+        if sensor.trigger.path.startswith("/hooks/github"):
+            if github_secret:
+                verify = signature_verifier(github_secret)
+            elif not warned_unverified:
+                typer.echo(
+                    "warning: GITHUB_WEBHOOK_SECRET not set; /hooks/github signatures are "
+                    "unverified (dev only — set it before exposing this endpoint)",
+                    err=True,
+                )
+                warned_unverified = True
+        sensor_runner.register_webhook(sensor.trigger.path, fn, verify=verify)
 
     # Poll sensors run on the in-process scheduler, sharing the runtime's StateStore for
     # watermarks and the same receiver -> bus -> serve() delivery path as webhooks.

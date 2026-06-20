@@ -38,7 +38,7 @@ E305 = "LOOPY-E305"  # <field> not a top-level key of that step's output: (T3)
 # E4xx — sensors
 E401 = "LOOPY-E401"  # a sensor's declared emits event isn't registered (S2)
 E402 = "LOOPY-E402"  # emits missing or not statically analyzable (S1)
-E403 = "LOOPY-E403"  # duplicate webhook path, or malformed poll interval (S3)
+E403 = "LOOPY-E403"  # duplicate webhook (path, emits), or malformed poll interval (S3)
 
 # E5xx — resolution / bindings
 E501 = "LOOPY-E501"  # step agent: doesn't resolve to a registered Agent (X2)
