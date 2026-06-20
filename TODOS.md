@@ -270,13 +270,17 @@ fixed: the docker→daytona missing-user crash is now auto-handled, and there is
   operator to guess `_FILE` was required. Tighten the comment/error so the inline form is unambiguously
   the default.
 
-- [ ] **21. Long cloud runs are silent, and the test command (`trigger`) isn't recorded**
-  — `loopy_cli/__init__.py:408-485` (`trigger`), README:257-268
-  `loopy trigger --sandbox daytona` prints ~one line, then nothing through image-build + boot + agent
-  run, then the final JSON — you can't tell hung from working. And `trigger` (the command the docs hand
-  you for testing) is in-memory/unrecorded, so `loopy admin` can't help; the recorded path is `loopy run`,
-  a different command. Emit progress/heartbeat for the long phases, and either record `trigger` runs too
-  or point users at `run` for anything observable.
+- [x] ~~**21. Long cloud runs are silent (`trigger` build/boot has no heartbeat)**~~
+  — `loopy_cli/__init__.py` (`_enable_progress_logging`, wired into `trigger` + `run --in-process`)
+  `loopy trigger --sandbox daytona` printed ~one line, then nothing through image-build + boot + agent
+  run, then the final JSON — you couldn't tell hung from working. **Resolved (observability half):** the
+  Daytona provider already logged lifecycle breadcrumbs at INFO, but the CLI installed no logging config so
+  they were swallowed at the default WARNING threshold; a small idempotent `_enable_progress_logging()` now
+  attaches a stderr handler scoped to the `loopy_runtime` namespace (third-party SDK chatter stays quiet) at
+  INFO, called from both sandbox-booting paths. **Recording half dropped by decision:** `trigger` is a
+  diagnostic probe, not a recorded run — it stays in-memory/unrecorded by design; `loopy run` remains the
+  recorded path that `loopy admin` reads. (Per-phase agent-run heartbeat beyond the acquire breadcrumbs is a
+  possible future add.)
 
 ## Backend capability status (B1–B12)
 
