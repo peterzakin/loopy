@@ -245,6 +245,47 @@ def test_wait_for_installation_polls_until_installed(monkeypatch, tmp_path):
     assert len(slept) == 2  # slept between the empty polls
 
 
+def test_run_github_auth_opens_install_page(monkeypatch, tmp_path):
+    # After the manifest flow creates the App, the install page must auto-open in the
+    # browser (unless --no-browser) so the user lands straight on the repo-picker.
+    import webbrowser
+
+    monkeypatch.setattr(auth, "obtain_manifest_code", lambda **kwargs: "code123")
+    monkeypatch.setattr(
+        github_app,
+        "exchange_manifest_code",
+        lambda code: {"id": 7, "pem": "PEM", "slug": "loopy-abcd"},
+    )
+    monkeypatch.setattr(auth, "_wait_for_installation", lambda root: None)
+    monkeypatch.setattr(auth, "_verify", lambda root: None)
+    opened: list[str] = []
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url))
+
+    auth.run_github_auth(root=tmp_path)
+
+    assert opened == ["https://github.com/apps/loopy-abcd/installations/new"]
+
+
+def test_run_github_auth_no_browser_skips_open(monkeypatch, tmp_path):
+    # --no-browser prints the URL but must not shell out to a browser (headless/CI/SSH).
+    import webbrowser
+
+    monkeypatch.setattr(auth, "obtain_manifest_code", lambda **kwargs: "code123")
+    monkeypatch.setattr(
+        github_app,
+        "exchange_manifest_code",
+        lambda code: {"id": 7, "pem": "PEM", "slug": "loopy-abcd"},
+    )
+    monkeypatch.setattr(auth, "_wait_for_installation", lambda root: None)
+    monkeypatch.setattr(auth, "_verify", lambda root: None)
+    opened: list[str] = []
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url))
+
+    auth.run_github_auth(root=tmp_path, no_browser=True)
+
+    assert opened == []
+
+
 def test_wait_for_installation_times_out(monkeypatch, tmp_path):
     # Never installed → the wait gives up at the deadline and returns None (the caller
     # then points the user at `loopy auth status`) rather than blocking forever.
