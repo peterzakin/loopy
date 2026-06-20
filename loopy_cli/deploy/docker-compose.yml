@@ -38,9 +38,12 @@ services:
       - --state-path=/state/state.db
     environment:
       # Infra creds only — agent secrets ride the sandbox env_file, not the engine env.
-      REDIS_URL: redis://redis:6379
-      DAYTONA_API_KEY: ${DAYTONA_API_KEY:-}
-      DAYTONA_API_URL: ${DAYTONA_API_URL:-}
+      - REDIS_URL=redis://redis:6379
+      - DAYTONA_API_KEY=${DAYTONA_API_KEY:-}
+      - DAYTONA_API_URL=${DAYTONA_API_URL:-}
+      # Forwarded only when set (bare name = pass through from the host env), so the engine's
+      # --max-spend (envvar LOOPY_MAX_SPEND) enforces the budget cap in container mode too.
+      - LOOPY_MAX_SPEND
     volumes:
       # The project (manifest + sensors + env files) is read-only at run time.
       - ${LOOPY_PROJECT}:/project:ro

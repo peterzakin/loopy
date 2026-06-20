@@ -260,7 +260,14 @@ def _source_root() -> Path | None:
 
 
 def _run_in_docker(
-    *, root: Path, manifest: Path, port: int | None, sandbox: str, detach: bool, build: bool
+    *,
+    root: Path,
+    manifest: Path,
+    port: int | None,
+    sandbox: str,
+    detach: bool,
+    build: bool,
+    max_spend: float | None = None,
 ) -> None:
     """Bring up the single-node stack (engine + redis) via the bundled compose file.
 
@@ -321,6 +328,11 @@ def _run_in_docker(
             "LOOPY_PORT": str(port or 8000),
         }
     )
+    # The engine inside the container reads --max-spend from LOOPY_MAX_SPEND (compose passes it
+    # through only when set), so the budget cap holds in container mode too. Set it only when
+    # given, so an unset cap doesn't reach the container as an unparseable empty string.
+    if max_spend is not None:
+        env["LOOPY_MAX_SPEND"] = str(max_spend)
 
     cmd = ["docker", "compose", "-f", str(compose), "up"]
     if build:
@@ -363,6 +375,7 @@ def run(
     max_spend: float | None = typer.Option(
         None,
         "--max-spend",
+        envvar="LOOPY_MAX_SPEND",
         help="Cap the cumulative USD a cascade may spend (terminates runaway loop-backs; "
         "needs cost-reporting harnesses).",
     ),
@@ -388,14 +401,14 @@ def run(
     # stack doesn't recurse into launching Docker again). Short-circuit to docker before the
     # in-process wiring below.
     if not in_process:
-        if max_spend is not None:
-            typer.echo(
-                "warning: --max-spend is not yet forwarded to the container stack; "
-                "use --in-process to enforce it.",
-                err=True,
-            )
         _run_in_docker(
-            root=root, manifest=manifest, port=port, sandbox=sandbox, detach=detach, build=build
+            root=root,
+            manifest=manifest,
+            port=port,
+            sandbox=sandbox,
+            detach=detach,
+            build=build,
+            max_spend=max_spend,
         )
         return
 
