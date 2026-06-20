@@ -195,16 +195,16 @@ def _prompt_for_repos() -> list[str]:
 
 
 def _note_orchestrator_mode() -> None:
-    """Frame a repo-less scaffold as a valid orchestrator, not a half-finished setup."""
+    """Frame a repo-less scaffold as a real, runnable orchestrator — not a half-finished setup."""
     typer.echo(
         "  "
         + typer.style("ⓘ", fg=typer.colors.BLUE)
-        + " No repo set — scaffolded as a workflow orchestrator (no code-repo access)."
+        + " No repo — scaffolded a workflow orchestrator: a Note → summary + action-items loop."
     )
     typer.echo(
         typer.style(
-            "    Point sandboxes.Dev.repos at a repo and run `loopy auth github` when you want "
-            "the agent to edit code.",
+            "    Try it with `loopy trigger --event Note`. Want code edits instead? Add a repo "
+            "to sandboxes.Dev.repos and run `loopy auth github`.",
             fg=typer.colors.BRIGHT_BLACK,
         )
     )
