@@ -40,7 +40,7 @@ and the *task* rides the event.
 ### 1. Compile
 
 ```bash
-loopy compile examples/codefix --out manifest.json
+loopy compile examples/codefix    # writes manifest.json
 ```
 
 A green compile is the gate: every `on:`/`emits:` names a registered event and every `{{ }}`

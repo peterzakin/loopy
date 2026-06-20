@@ -212,7 +212,7 @@ loopy auth status            # then visit the printed install URL to pick repos
 loopy doctor
 
 # 5. compile + fire one task
-loopy compile . --out manifest.json
+loopy compile .              # writes manifest.json
 loopy trigger manifest.json \\
   --event CodeTask \\
   --fields '{"task": "add a CONTRIBUTING.md", "branch": "codefix/contributing"}' \\

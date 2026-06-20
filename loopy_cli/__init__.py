@@ -145,16 +145,31 @@ def init(
             fg=typer.colors.BRIGHT_BLACK,
         )
     )
-    typer.echo(typer.style("    loopy compile . --out manifest.json", fg=typer.colors.BRIGHT_WHITE))
+    typer.echo(
+        typer.style("    loopy compile .", fg=typer.colors.BRIGHT_WHITE)
+        + typer.style("   # writes manifest.json", fg=typer.colors.BRIGHT_BLACK)
+    )
     typer.echo()
 
 
 @app.command()
 def compile(
     path: Path = typer.Argument(Path("."), help="Project directory to compile."),
-    out: Path | None = typer.Option(None, "--out", help="Write the manifest JSON to this path."),
+    out: Path = typer.Option(
+        Path("manifest.json"),
+        "--out",
+        help="Write the manifest JSON to this path (default: manifest.json).",
+    ),
+    check: bool = typer.Option(
+        False, "--check", help="Validate only; don't write the manifest (CI gate)."
+    ),
 ) -> None:
-    """Compile a project to a validated manifest (and generate loopy.events)."""
+    """Compile a project to a validated manifest (and generate loopy.events).
+
+    Writes the manifest to `manifest.json` by default — the same path `loopy run` reads by
+    default — so the common case is just `loopy compile .`. Pass `--check` to validate without
+    writing (a pure CI gate), or `--out` to write elsewhere.
+    """
     import datetime
 
     from loopy_core import __version__
@@ -171,7 +186,7 @@ def compile(
 
     if not result.diagnostics.has_errors() and result.project is not None:
         write_events(result.project.registry, path)
-        if out is not None:
+        if not check:
             manifest = to_manifest(result.project)
             manifest["compiled_at"] = datetime.datetime.now(datetime.UTC).isoformat()
             manifest["loopy_version"] = __version__

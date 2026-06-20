@@ -473,7 +473,8 @@ DAYTONA_API_URL=https://...</pre>
 <h2>6. The deployment checklist</h2>
 <p>What you need in place for a successful run, in order:</p>
 <ul>
-  <li><strong>A green compile.</strong> <code>loopy compile . --out manifest.json</code> exits 0 — every
+  <li><strong>A green compile.</strong> <code>loopy compile .</code> (writes <code>manifest.json</code>; use
+    <code>--check</code> to validate without writing) exits 0 — every
     <code>on:</code>/<code>emits:</code> names a registered event, every <code>{{ }}</code> ref resolves,
     the DAG is acyclic, every sensor declares a registered <code>emits</code>. Run it in CI.</li>
   <li><strong>The manifest, shipped.</strong> <code>manifest.json</code> is the deploy artifact; carry the

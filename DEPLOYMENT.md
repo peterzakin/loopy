@@ -544,7 +544,8 @@ Postgres" or "run a Temporal cluster." Whoever deploys sees that difference.
 
 What you actually need in place for a successful run, in order:
 
-1. **A green compile.** `loopy compile . --out manifest.json` exits 0. This is the gate —
+1. **A green compile.** `loopy compile .` (writes `manifest.json`; use `--check` to validate
+   without writing) exits 0. This is the gate —
    every `on:`/`emits:` names a registered event, every `{{ }}` ref resolves, the DAG is
    acyclic, every sensor declares a registered `emits`. Run it in CI.
 2. **The manifest, shipped.** `manifest.json` is the deploy artifact. Carry the project root
