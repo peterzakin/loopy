@@ -257,7 +257,7 @@ def test_failed_run_does_not_strand_siblings():
 
     asyncio.run(rt.trigger(_event("Thing", {})))
     assert "ok/s" in rt.execution_log  # sibling ran despite the other run failing
-    assert [s.run_id for s in rt.failed_runs] == ["boom-1"]
+    assert [s.run_id.split("-")[0] for s in rt.failed_runs] == ["boom"]  # the failing workflow
 
 
 def test_serve_survives_a_failing_run():

@@ -2,6 +2,24 @@
 
 Loopy is a framework for authoring agent automations**. The agent's** job is the **body** (prose); config is light **frontmatter**; the workflow's DAG is built from one rule.
 
+## Install
+
+Loopy isn't published to PyPI yet, so install it from a checkout of this repo:
+
+```bash
+uv tool install .            # from the repo root: puts `loopy` on your PATH
+loopy init my-project        # scaffold a project, then `cd my-project`
+```
+
+Every `loopy` command below assumes it's on your PATH. Prefer not to install? Prefix each
+command with `uv run` from the repo (e.g. `uv run loopy compile`).
+
+**Per-project convention.** A project is a directory, and its credentials live inside it:
+`secrets/dev.env` (the sandbox's environment — `ANTHROPIC_API_KEY`) and `loopy.env`
+(control-plane creds, written by `loopy auth github`). Both are gitignored. Run every command
+from the project directory so `loopy.env` and `--root` stay in sync — `loopy init` sets this up
+for you.
+
 ## Workflows
 
 A **workflow** is a directory. Inside it:

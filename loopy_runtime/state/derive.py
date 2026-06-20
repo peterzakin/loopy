@@ -9,6 +9,7 @@ module is the single source of truth those stores agree through.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from loopy_runtime.contract import RunEvent, RunId
@@ -17,12 +18,18 @@ from loopy_runtime.contract import RunEvent, RunId
 # mapping lives — add a new terminal kind here and every store picks it up.
 _TERMINAL: dict[str, str] = {"run_completed": "completed", "run_failed": "failed"}
 
+# A run id is `f"{wf_name}-{token}"`, token = `uuid4().hex[:8]` (8 lowercase hex). Legacy/test
+# ids used a numeric `-<seq>` suffix, still recognized so older stores keep parsing.
+_RUN_TOKEN = re.compile(r"[0-9a-f]{8}")
+
 
 def workflow_of(run_id: RunId) -> str:
-    """The workflow name from a `f"{wf_name}-{seq}"` run id (seq is an int, so split off the
-    trailing `-<seq>`); falls back to the whole id if it doesn't match that shape."""
+    """The workflow name from a `f"{wf_name}-{token}"` run id — split off the trailing token;
+    falls back to the whole id if it doesn't match that shape."""
     head, _, tail = run_id.rpartition("-")
-    return head if head and tail.isdigit() else run_id
+    if head and (_RUN_TOKEN.fullmatch(tail) or tail.isdigit()):
+        return head
+    return run_id
 
 
 def terminal_for_event(ev: RunEvent) -> tuple[str, str | None] | None:

@@ -73,6 +73,16 @@ def test_open_pr_step_produces_a_pr_url(tmp_path: Path):
     assert "summary" in outputs["open-pr"].fields
 
 
+def test_run_ids_are_unique_across_processes(tmp_path: Path):
+    # Each `loopy trigger` is a fresh runtime/process. Two identical tasks must NOT collide on
+    # the same run id (the bug behind two tasks landing on one branch); a per-process counter
+    # would restart at 1 for both.
+    id1 = asyncio.run(_runtime(tmp_path).trigger(_code_task()))
+    id2 = asyncio.run(_runtime(tmp_path).trigger(_code_task()))
+    assert id1 != id2
+    assert id1.startswith("codefix-") and id2.startswith("codefix-")
+
+
 def test_unsubscribed_event_starts_no_run(tmp_path: Path):
     rt = _runtime(tmp_path)
     run_id = asyncio.run(

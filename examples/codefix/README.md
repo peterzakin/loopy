@@ -27,6 +27,9 @@ codefix/
 
 ## Run it locally
 
+> Running from a checkout of this repo, `loopy` isn't on your PATH — prefix each command
+> below with `uv run` (e.g. `uv run loopy compile examples/codefix`).
+
 ### 0. Pick the target repo
 
 `registry.yml`'s `Dev` sandbox clones `octocat/Hello-World` at startup (the `repos:` field).
