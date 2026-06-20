@@ -195,6 +195,68 @@ failures debuggable) → 12, 13, 14 (polish)**. A single integration test that r
   `(base digest + toolchain hash)` so the install runs once, not on every acquire (today layers replay each
   acquire). Invariant that makes it all work: the toolchain contract is purely additive, never a base image.
 
+## Developer experience — from a second end-to-end run (cold-start onboarding)
+
+Findings from a second `codefix`-style run by a fresh operator, focused on the path from `loopy init`
+to a first real PR. The engine works; the gaps are in the *cold-start* path — auth, what `init` hands
+you, and trusting the result. Validated against current code (some of the run's complaints were already
+fixed: the docker→daytona missing-user crash is now auto-handled, and there is no real
+`GITHUB_APP_PRIVATE_KEY` vs `_FILE` mismatch — see #20). Suggested order: **17 (the wall) → 19 (trust)
+→ 18, 21 (onboarding polish) → 20 (docs)**.
+
+- [ ] **17. Git auth is a cold-start cliff — manifest-only, no `GITHUB_TOKEN`/`gh` fallback**
+  — `loopy_cli/auth.py`, `loopy_cli/__init__.py:160-194` (`_make_token_provider`)
+  `loopy auth github` is *only* the interactive browser App-manifest flow, and the resulting App must
+  then be installed on each target repo by hand. `_make_token_provider` is always App-based; the scaffold
+  *mentions* `GITHUB_TOKEN` ("only needed if you are NOT using a GitHub App") but no code path consumes
+  it, and the sandbox inherits nothing from the shell (#6), so an exported `GITHUB_TOKEN` does nothing.
+  A dev starting cold has a multi-step, mostly-undocumented detour before their first PR — the single
+  biggest barrier. Add a token-based fallback: if `GITHUB_TOKEN`/`GH_TOKEN` is present (env_file or, for
+  this one credential, opt-in from the operator), inject it as the SCM token and skip the App dance;
+  keep the App flow as the production/multi-repo path. Unblocks #18.
+
+- [ ] **18. `loopy init` compiles green but can't run as-is**
+  — `loopy_cli/scaffold.py:63,142`, `loopy_cli/__init__.py:83-127`
+  The starter points at `octocat/Hello-World` (no push access) and ships `ANTHROPIC_API_KEY=sk-ant-...`
+  as a literal placeholder, with no git auth. It compiles clean, which is misleading — green compile ≠
+  runnable. Before a first successful run a dev must change the repo, paste a real key into
+  `secrets/dev.env`, and solve #17. Make `init` honest about the gap: print a "before your first run"
+  checklist (set the key, point `repos:` at a repo you can push to, run auth), and/or a `loopy doctor`
+  preflight that names exactly what's still placeholder. (Pairs with #17 — once a token fallback exists,
+  the checklist gets much shorter.)
+
+- [ ] **19. PR success is reported unverified — `pr_url` is taken from agent output, never confirmed**
+  — `loopy_runtime/runtime/inmemory.py:328-333`, `loopy_cli/__init__.py:224-234` (`_run_record`)
+  A step's `output.pr_url` is the agent's own parsed JSON; the run reports it with `failed: []` and no
+  cross-check that the PR object actually exists on GitHub. A fabricated or malformed URL still reads as
+  green. Add an optional post-step verification for SCM outputs (e.g. `GET /repos/{owner}/{repo}/pulls/...`
+  using the already-minted token) that downgrades the run / annotates the record when the PR can't be
+  confirmed. High trust-per-effort; self-contained.
+
+- [ ] **20. Sandbox onboarding docs — `user:` semantics and the dual-key messaging**
+  — `README.md:125-131`, `loopy_runtime/sandbox/docker.py:45-94`, `loopy_runtime/sandbox/daytona_image.py:116-140`,
+  `loopy_cli/scaffold.py:161-165`
+  Doc/consistency cleanup for two things the second run tripped on (both already correct in code, so this
+  is docs + one small correctness call):
+  (a) **`user:` on docker vs daytona.** Daytona now auto-creates the declared user (`useradd`+`chown`,
+  idempotent) so the old `unable to find user … no matching entries in passwd file` crash is gone — but
+  the README registry example and the scaffold don't explain this, and the **docker** provider silently
+  *ignores* `user:` entirely (no `--user`, runs as root). Decide: make docker honor `user:` for parity,
+  or warn/document that it's a no-op locally; either way document the auto-useradd so flipping providers
+  isn't a mystery.
+  (b) **`GITHUB_APP_PRIVATE_KEY` vs `..._FILE`.** Not a bug — the loader accepts the inline key (what
+  `auth` writes and the scaffold documents) and falls back to `_FILE` — but presenting both forms led the
+  operator to guess `_FILE` was required. Tighten the comment/error so the inline form is unambiguously
+  the default.
+
+- [ ] **21. Long cloud runs are silent, and the test command (`trigger`) isn't recorded**
+  — `loopy_cli/__init__.py:408-485` (`trigger`), README:257-268
+  `loopy trigger --sandbox daytona` prints ~one line, then nothing through image-build + boot + agent
+  run, then the final JSON — you can't tell hung from working. And `trigger` (the command the docs hand
+  you for testing) is in-memory/unrecorded, so `loopy admin` can't help; the recorded path is `loopy run`,
+  a different command. Emit progress/heartbeat for the long phases, and either record `trigger` runs too
+  or point users at `run` for anything observable.
+
 ## Backend capability status (B1–B12)
 
 Live status of the backend capabilities defined in `ARCHITECTURE.md §3.1` (full definitions +
