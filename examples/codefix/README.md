@@ -18,7 +18,7 @@ credentials actually have to be wired up. If you're new to Loopy, read the top-l
 
 ```
 codefix/
-  registry.yml                 # Dev sandbox · Coder agent · CodeTask + PROpened events
+  registry.yml                 # Devbox sandbox · Coder agent · CodeTask + PROpened events
   workflows/codefix/open-pr.md # on: CodeTask → edit + open PR → emits PROpened
   skills/codefix/SKILL.md       # how the agent should make the change
   sensors/sensors.py            # a stub poll producer for CodeTask (fire by hand instead)
@@ -32,7 +32,7 @@ codefix/
 
 ### 0. Pick the target repo
 
-`registry.yml`'s `Dev` sandbox clones `octocat/Hello-World` at startup (the `repos:` field).
+`registry.yml`'s `Devbox` sandbox clones `octocat/Hello-World` at startup (the `repos:` field).
 **Point it at a repo you can push to** — fork something, or change `repos:` to `you/your-repo`.
 Repos are static today (no `{{ event.repo }}` templating yet), so the repo lives in the spec
 and the *task* rides the event.

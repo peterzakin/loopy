@@ -47,7 +47,7 @@ _REGISTRY_YML = """\
 # Defaults — every agent inherits these; override a field only when needed.
 defaults:
   agent:
-    sandbox: Dev
+    sandbox: Devbox
     harness: { runtime: claude-code, model: claude-sonnet-4-6 }
 
 # Sandbox — compute + egress. `daytona` runs each agent in an isolated cloud sandbox built
@@ -56,12 +56,12 @@ defaults:
 #   • point `repos:` at a repo you can push to (fork something, or change it to you/your-repo)
 #   • `env_file:` is the gitignored dotenv injected as the sandbox's environment
 sandboxes:
-  Dev:
+  Devbox:
     provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
     network: [github.com, api.anthropic.com]   # git over https + the model API
     env_file: secrets/dev.env                  # gitignored; resolved at run time
-    repos: [octocat/Hello-World]               # cloned at acquire time (git auth injected)
+    repos: [octocat/Hello-World]               # repos you name here, cloned into the workspace at acquire time
 
 # Agents — capability comes from the sandbox, skills, injected git creds, and budget.
 agents:
@@ -135,7 +135,7 @@ def task_queue(req) -> CodeTask:
 """
 
 _DEV_ENV = """\
-# Secrets for the `Dev` sandbox, injected as environment variables at run time. Gitignored —
+# Secrets for the `Devbox` sandbox, injected as environment variables at run time. Gitignored —
 # never commit this file. Lines are KEY=VALUE; values are literal (no ${VAR} interpolation).
 
 # --- model auth (claude-code) ---
@@ -200,7 +200,7 @@ agent that edits a checkout and opens a pull request.
 ## Run it
 
 ```bash
-# 1. point the Dev sandbox at a repo you can push to (registry.yml → sandboxes.Dev.repos)
+# 1. point the Devbox sandbox at a repo you can push to (registry.yml → sandboxes.Devbox.repos)
 
 # 2. give the sandbox its secrets
 #    edit secrets/dev.env and set ANTHROPIC_API_KEY

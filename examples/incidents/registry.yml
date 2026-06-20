@@ -14,7 +14,7 @@ sandboxes:
     image: { debian_slim: "3.12", apt: [git], workdir: /home/daytona, user: daytona }
     network: [github.com]
     env_file: secrets/default.env   # referenced, gitignored; resolved by the backend at run time
-    repos: [acme/runbooks]          # cloned into the workspace at acquire time (auth injected)
+    repos: [acme/runbooks]          # repos you name here, cloned into the workspace at acquire time
 
 # Agents — capability comes from the sandbox (image + egress), skills, injected creds, and
 # budget; numeric caps live in budget, not in a tool name.

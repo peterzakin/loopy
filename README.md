@@ -128,7 +128,7 @@ sandboxes:
     image: { debian_slim: "3.12", apt: [git], workdir: /home/daytona, user: daytona }
     network: [github.com]
     env_file: secrets/dev.env        # gitignored; injected as the sandbox's env
-    repos: [octocat/Hello-World]     # cloned into the workspace at acquire time (git auth injected)
+    repos: [octocat/Hello-World]     # repos you name here, cloned into the workspace at acquire time
 
 # Agents — capability comes from the sandbox (image + egress), skills, injected creds, and
 # budget; numeric caps live in budget, not in a tool name.
