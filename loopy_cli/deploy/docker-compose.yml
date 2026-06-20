@@ -1,0 +1,56 @@
+# Internal deployment asset — driven by `loopy run` (the default container mode), not by hand.
+# All ${...} values are supplied by the CLI's process env (see loopy_cli._run_in_docker);
+# there is no user-authored .env.
+name: loopy
+
+services:
+  redis:
+    image: redis:7-alpine
+    # Append-only persistence so accepted-but-unprocessed events survive a redis restart.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  loopy:
+    build:
+      context: ${LOOPY_BUILD_CONTEXT}
+      dockerfile: ${LOOPY_DOCKERFILE}
+    depends_on:
+      redis:
+        condition: service_healthy
+    # The collapsed single-node topology: redis bus, sqlite state, daytona sandbox.
+    command:
+      - run
+      - ${LOOPY_MANIFEST:-manifest.json}
+      - --in-process
+      - --root=/project
+      - --host=0.0.0.0
+      - --port=8000
+      - --bus=redis
+      - --sandbox=${LOOPY_SANDBOX:-daytona}
+      - --state=sqlite
+      - --state-path=/state/state.db
+    environment:
+      # Infra creds only — agent secrets ride the sandbox env_file, not the engine env.
+      REDIS_URL: redis://redis:6379
+      DAYTONA_API_KEY: ${DAYTONA_API_KEY:-}
+      DAYTONA_API_URL: ${DAYTONA_API_URL:-}
+    volumes:
+      # The project (manifest + sensors + env files) is read-only at run time.
+      - ${LOOPY_PROJECT}:/project:ro
+      # SQLite run history lives on its own volume, scoped to this one writer, so it
+      # survives container recreation. This service must stay at a single replica.
+      - loopy-state:/state
+    ports:
+      - "${LOOPY_PORT:-8000}:8000"
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  loopy-state:

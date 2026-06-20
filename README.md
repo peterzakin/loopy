@@ -254,16 +254,17 @@ A few things worth knowing before the first run:
 
 ## Watching runs
 
-`loopy run` records every run to a durable on-disk store (`.loopy/state.db` by default), and
-`loopy admin` serves a small read-only dashboard over it — a run list with each run's step
-timeline, emitted events, outputs, and any failure:
+The dev server `loopy run --in-process` records every run to a durable on-disk store
+(`.loopy/state.db` by default), and `loopy admin` serves a small read-only dashboard over it — a
+run list with each run's step timeline, emitted events, outputs, and any failure:
 
 ```bash
-loopy run manifest.json     # records runs as they execute
-loopy admin                 # in another terminal → http://127.0.0.1:9000
+loopy run --in-process manifest.json   # dev server: records runs as they execute
+loopy admin                            # in another terminal → http://127.0.0.1:9000
 ```
 
-It reads the same DB `loopy run` writes, so no flags are needed in the common case. (The one-shot
-`loopy trigger` path is in-memory by default and isn't recorded — use `loopy run` to populate the
-dashboard.) See [`DEPLOYMENT.md`](DEPLOYMENT.md) for the `state:` config block and caveats.
+`loopy admin` reads the same DB the dev server writes, so it needs no flags. (A bare `loopy run`
+brings up the containerized stack instead, which keeps its state in a Docker volume; the one-shot
+`loopy trigger` path is in-memory and isn't recorded.) See [`DEPLOYMENT.md`](DEPLOYMENT.md) for the
+`state:` config block and caveats.
 

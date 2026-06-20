@@ -331,18 +331,21 @@ from the image. The [`codefix` example](../examples/codefix/) is a runnable, sin
 walkthrough of exactly this (its README has the per-provider `env_file` matrix and a
 one-command smoke test).
 
-### B. Single-node server — what ships today
+### B. Single-node server, in-process — the dev inner loop
 
 ```
-   loopy run manifest.json --host 0.0.0.0 --port 8000 --sandbox daytona
+   loopy run manifest.json --in-process --host 0.0.0.0 --port 8000 --sandbox daytona
    └─ InMemoryRuntime + InProcessEventBus + InMemoryStateStore
       + ClaudeCodeHarness + DaytonaSandboxProvider
 ```
 
-One server process hosts the sensor webhooks; agents run in isolated Daytona sandboxes. This
-is a genuine deployment for workloads that tolerate process-lifetime state — **if the process
-restarts, in-flight runs are lost** (the InMemory runtime stubs durability). Good for
-short-lived cascades; not yet for day-spanning runs.
+One server process hosts the sensor webhooks; agents run in isolated Daytona sandboxes. No
+Docker/redis needed — ideal for local iteration. This tolerates process-lifetime state only —
+**if the process restarts, in-flight runs are lost** (the InMemory runtime stubs durability).
+Good for short-lived cascades; not yet for day-spanning runs.
+
+A bare `loopy run` (no `--in-process`) brings up the containerized version of this same
+single-node setup — §B′ — which is the **default** and what runs inside the container.
 
 **Fast inner loop on Daytona — `image: { snapshot: … }`.** A default `debian_slim` +
 `apt`/`pip` + `npm install -g @anthropic-ai/claude-code` build is the bulk of each *cold*
@@ -470,6 +473,51 @@ work. Tokens are cached until shortly before they expire, so a burst of steps sh
 no App configured, nothing is injected (unchanged behavior). The token is scoped to the App's
 installation — i.e. the repos you selected at install time — which is the least-privilege boundary
 until a per-sandbox `repos:` field narrows it further (a sibling milestone).
+
+### B′. Single-node, containerized — `loopy run` (the default)
+
+Topology B, run as containers — and this is what a bare `loopy run` does. The Docker plumbing is
+an implementation detail, not something you author: `loopy run` brings up the single-node
+composition (redis bus, sqlite state, daytona sandbox) in containers, defaulting the manifest to
+`manifest.json`. (`--in-process` opts back out to §B.)
+
+```
+  loopy run                       # manifest defaults to manifest.json
+  ├─ loopy   one process: sensor webhooks + scheduler + event-bus consumer + runtime
+  │          (the same `loopy run --in-process`, now inside a container)
+  ├─ redis   the EventBus — decouples ingress from execution; buffers the backlog
+  └─ Daytona the agent sandbox (external; reached via DAYTONA_API_KEY / DAYTONA_API_URL)
+```
+
+The five tiers collapse into the single `loopy` process: the `EventReceiver` (webhook ingress)
+runs in the same process as the `Runtime`, both publishing to and consuming from **redis** as the
+bus. The one tier that stays separate is the **Sandbox** — agents run in Daytona, never in the
+engine container.
+
+Two persistence facts make the deploy durable:
+
+- **A named state volume.** SQLite is a file; a container's filesystem is ephemeral, so the
+  run-history DB lives on a named volume (mounted at `/state`) to survive container recreation.
+  It's scoped to the single `loopy` service — the one SQLite writer.
+- **A redis volume + AOF.** Redis runs with `--appendonly yes` so accepted-but-not-yet-processed
+  events survive a redis restart.
+
+Usage:
+
+```bash
+loopy compile <project> --out <project>/manifest.json     # 1. produce the manifest
+cd <project> && loopy run                                  # 2. bring up redis + loopy
+# or from elsewhere: loopy run --root <project>
+# add --detach to background it; --no-build to skip the image rebuild
+```
+
+Everything compose needs is derived from flags `loopy run` already takes — `--root` (the project,
+bind-mounted **read-only** at `/project`), the manifest (relative to `--root`, default
+`manifest.json`), `--port`, `--sandbox` (defaults to `daytona` here) — plus the project's
+`loopy.env` for the Daytona creds. There is no compose file or `.env` to write. Agent secrets stay
+in the sandbox `env_file`s under the project, and `loopy.env` (read from the project root) still
+carries the GitHub App creds for token minting. (The container stack builds the image from a
+source checkout today.)
 
 ### C. Durable / distributed — the production target (design-complete, behind the same interfaces)
 
