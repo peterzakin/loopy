@@ -248,6 +248,72 @@ def _load_creds(root: str | Path):  # -> AppCredentials
     return github_app.AppCredentials.from_env(merged, root=root)
 
 
+# After the manifest flow *creates* the App, installing it on repos is a separate manual
+# step on GitHub. Poll this often, for at most this long, for the install to land before
+# giving up and pointing the user at `loopy auth status` to finish later.
+_INSTALL_POLL_INTERVAL_SECONDS = 3
+_INSTALL_WAIT_TIMEOUT_SECONDS = 300
+
+
+def _wait_for_installation(
+    root: str | Path,
+    *,
+    timeout: float = _INSTALL_WAIT_TIMEOUT_SECONDS,
+    poll_interval: float = _INSTALL_POLL_INTERVAL_SECONDS,
+    sleep=None,
+    monotonic=None,
+) -> list[dict] | None:
+    """Block until the freshly-created App reports at least one installation.
+
+    The manifest flow only *creates* the App; installing it on the repos it should touch
+    is a separate manual action on GitHub. Printing the install URL and exiting left a
+    created-but-uninstalled App that only failed much later, at `loopy run`, with "the
+    GitHub App has no installations" — far from where the install was skipped. Instead,
+    poll here until the install lands, so the common "I forgot to click Install" case is
+    caught at auth time, right where the URL was printed.
+
+    Returns the installations once non-empty, or None if the user skips (Ctrl-C), the wait
+    times out, or the creds can't be read. Timing is injected in tests so they don't sleep.
+    """
+    import time
+
+    from loopy_runtime.scm import github_app
+
+    sleep = sleep or time.sleep
+    monotonic = monotonic or time.monotonic
+
+    try:
+        creds = _load_creds(root)
+    except github_app.GitHubAppError as exc:
+        typer.echo(f"  (skipped install wait: {exc})")
+        return None
+
+    typer.echo("\n  Waiting for the install to land… (Ctrl-C to skip and finish later)")
+    deadline = monotonic() + timeout
+    try:
+        while True:
+            try:
+                installations = github_app.list_installations(creds)
+            except github_app.GitHubAppError as exc:
+                typer.echo(f"  (stopped waiting: {exc})")
+                return None
+            if installations:
+                return installations
+            if monotonic() >= deadline:
+                typer.echo(
+                    "  ⓘ Timed out waiting for the install. Finish it on GitHub, then run "
+                    "`loopy auth status` to verify."
+                )
+                return None
+            sleep(poll_interval)
+    except KeyboardInterrupt:
+        typer.echo(
+            "\n  (skipped — App created but not installed yet. Install it, then run "
+            "`loopy auth status`.)"
+        )
+        return None
+
+
 def _verify(root: str | Path) -> None:
     """Best-effort: mint a token and report the installations/repos it can see."""
     from loopy_runtime.scm import github_app
@@ -328,6 +394,13 @@ def run_github_auth(
         install_url = f"https://github.com/apps/{slug}/installations/new"
         typer.echo("\n  Next: install the App on the repos loopy should access:")
         typer.echo(typer.style(f"    {install_url}", fg=typer.colors.BLUE))
+        if not no_browser:
+            import webbrowser
+
+            webbrowser.open(install_url)
+        # Creating the App did not install it. Block until the install lands rather than
+        # hand back a created-but-uninstalled App that fails much later at `loopy run`.
+        _wait_for_installation(root)
 
     typer.echo("\n  Verifying credentials…")
     _verify(root)
