@@ -13,10 +13,12 @@ import pytest
 from loopy_cli.doctor import (
     PLACEHOLDER_REPO,
     _repo_slug,
+    check_repo_access,
     diagnose,
 )
 from loopy_cli.scaffold import scaffold_project
 from loopy_core.compile.pipeline import compile_project
+from loopy_runtime.scm import github_app
 from loopy_runtime.secrets import _parse_dotenv, load_control_plane_env
 
 
@@ -120,3 +122,75 @@ def test_no_auth_warning_when_no_repos_declared(tmp_path):
 )
 def test_repo_slug_normalizes_to_starter(url):
     assert _repo_slug(url) == PLACEHOLDER_REPO
+
+
+# --- check_repo_access: the live install/repo-reachability preflight --------
+
+
+def _registry(tmp_path, repos):
+    """A compiled registry for a scaffold pointed at `repos` (drives the live check)."""
+    root = tmp_path / "demo"
+    scaffold_project(root, "demo", repos=repos)
+    result = compile_project(root)
+    assert result.project is not None, [d.render() for d in result.diagnostics.items]
+    return result.project.registry
+
+
+def _stub_installation(monkeypatch, *, installations, reachable):
+    """Stub the App's installation lookup + the repos a minted token can reach."""
+    monkeypatch.setattr(github_app, "list_installations", lambda creds, **k: installations)
+    monkeypatch.setattr(github_app, "mint_installation_token", lambda creds, i, **k: {"token": "t"})
+    monkeypatch.setattr(
+        github_app,
+        "list_installation_repositories",
+        lambda token, **k: {"repositories": [{"full_name": n} for n in reachable]},
+    )
+
+
+def test_check_repo_access_passes_when_repos_reachable(tmp_path, monkeypatch):
+    registry = _registry(tmp_path, ["me/app", "me/lib"])
+    _stub_installation(monkeypatch, installations=[{"id": 7}], reachable=["me/app", "me/lib"])
+    assert check_repo_access(registry, object()) == []
+
+
+def test_check_repo_access_flags_repo_not_in_selection(tmp_path, monkeypatch):
+    # The App is installed, but a declared repo isn't among its selected repositories — the
+    # exact gap that otherwise only surfaced as a clone 403 at run time.
+    registry = _registry(tmp_path, ["me/app", "me/missing"])
+    _stub_installation(monkeypatch, installations=[{"id": 7}], reachable=["me/app"])
+    findings = check_repo_access(registry, object())
+    assert len(findings) == 1
+    assert findings[0].level == "error"
+    assert "me/missing" in findings[0].message
+    assert "selected repositories" in findings[0].message
+
+
+def test_check_repo_access_flags_uninstalled_app(tmp_path, monkeypatch):
+    registry = _registry(tmp_path, ["me/app"])
+    monkeypatch.setattr(github_app, "list_installations", lambda creds, **k: [])
+    findings = check_repo_access(registry, object())
+    assert findings[0].level == "error"
+    assert "not installed" in findings[0].message
+
+
+def test_check_repo_access_skips_when_no_repos(tmp_path, monkeypatch):
+    # An orchestrator project clones nothing, so there's nothing to verify — and no network call.
+    registry = _registry(tmp_path, [])
+
+    def boom(*_a, **_k):
+        raise AssertionError("should not call GitHub when no repos are declared")
+
+    monkeypatch.setattr(github_app, "list_installations", boom)
+    assert check_repo_access(registry, object()) == []
+
+
+def test_check_repo_access_degrades_to_warn_on_error(tmp_path, monkeypatch):
+    # A GitHub/network error must not fail the whole preflight — it degrades to one warn.
+    registry = _registry(tmp_path, ["me/app"])
+
+    def boom(creds, **_k):
+        raise github_app.GitHubAppError("boom")
+
+    monkeypatch.setattr(github_app, "list_installations", boom)
+    findings = check_repo_access(registry, object())
+    assert len(findings) == 1 and findings[0].level == "warn"

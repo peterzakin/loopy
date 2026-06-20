@@ -218,3 +218,40 @@ def test_mint_installation_token_unscoped_sends_no_body(monkeypatch, rsa_keys):
     monkeypatch.setattr(github_app, "_request_json", fake)
     github_app.mint_installation_token(creds, 1)
     assert captured["payload"] is None  # whole-installation token when unscoped
+
+
+# --- block-until-installed wait ---------------------------------------------
+
+
+def test_wait_for_installation_polls_until_installed(monkeypatch, tmp_path):
+    # Creating an App does not install it; the wait must keep polling until an
+    # installation appears, not check once and give up.
+    monkeypatch.setattr(auth, "_load_creds", lambda root: object())
+    responses = [[], [], [{"id": 99}]]  # empty twice, then installed
+    calls = {"n": 0}
+
+    def fake_list(creds, **kwargs):
+        out = responses[calls["n"]]
+        calls["n"] += 1
+        return out
+
+    monkeypatch.setattr(github_app, "list_installations", fake_list)
+    slept: list[float] = []
+    result = auth._wait_for_installation(
+        tmp_path, sleep=slept.append, monotonic=lambda: 0.0
+    )
+    assert result == [{"id": 99}]
+    assert calls["n"] == 3  # polled until non-empty
+    assert len(slept) == 2  # slept between the empty polls
+
+
+def test_wait_for_installation_times_out(monkeypatch, tmp_path):
+    # Never installed → the wait gives up at the deadline and returns None (the caller
+    # then points the user at `loopy auth status`) rather than blocking forever.
+    monkeypatch.setattr(auth, "_load_creds", lambda root: object())
+    monkeypatch.setattr(github_app, "list_installations", lambda creds, **k: [])
+    clock = iter([0.0, 0.0, 999.0])  # deadline check, first poll, then past the deadline
+    result = auth._wait_for_installation(
+        tmp_path, timeout=10, sleep=lambda _s: None, monotonic=lambda: next(clock)
+    )
+    assert result is None
