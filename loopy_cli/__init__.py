@@ -467,7 +467,36 @@ def _diagnose_runnability(root: Path, project):  # noqa: ANN001 - compile.model.
     for key, value in load_control_plane_env(root).items():
         merged.setdefault(key, value)  # real/platform env wins over loopy.env
 
-    return diagnose(project.registry, read_env=read_env, control_plane_env=merged)
+    return diagnose(
+        project.registry,
+        read_env=read_env,
+        control_plane_env=merged,
+        is_tracked=lambda rel: _is_git_tracked(root, rel),
+    )
+
+
+def _is_git_tracked(root: Path, rel: str) -> bool:
+    """True if `rel` (relative to the project root) is tracked by git.
+
+    Backs doctor's guardrail warning for committed-secret env_files. Returns False whenever
+    there's nothing to warn about — git isn't installed, the project isn't a repo, or the path
+    is untracked/ignored — so the check degrades silently rather than failing the preflight.
+    """
+    import shutil
+    import subprocess
+
+    if shutil.which("git") is None:
+        return False
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--error-unmatch", rel],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0
 
 
 def _render_findings(findings) -> bool:

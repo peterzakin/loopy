@@ -61,6 +61,15 @@ cp examples/codefix/dev.env.example examples/codefix/secrets/dev.env
 # then edit secrets/dev.env
 ```
 
+> **These are live secrets on disk.** `env_file` values are read literally (no `${VAR}`
+> interpolation — that's deliberate: one file tells you exactly what the sandbox sees), so
+> `secrets/dev.env` holds a real `ANTHROPIC_API_KEY` in cleartext. `.gitignore` is the only
+> thing keeping it out of a commit — `loopy init` and this example's layout gitignore
+> `secrets/` for you, so keep your env_file under that path and never `git add` it. `loopy
+> doctor` warns if it sees an env_file tracked by git; if it does, untrack it with
+> `git rm --cached <path>`. Prefer the GitHub App for git auth (below) so no token lands here
+> at all, and Claude OAuth on `local` so no model key does either.
+
 What the `env_file` must supply, by the sandbox's `provider:` (set in `registry.yml`):
 
 | Var | `provider: docker` (default) | `provider: local` (no Docker) |

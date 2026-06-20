@@ -53,14 +53,21 @@ def diagnose(
     *,
     read_env: Callable[[str], dict[str, str] | None],
     control_plane_env: Mapping[str, str],
+    is_tracked: Callable[[str], bool] | None = None,
 ) -> list[Finding]:
     """Return the runnability problems in a compiled project (empty ⇒ ready to run).
 
-    Checks the three scaffold defaults that compile clean but break a real run:
+    Checks the scaffold/setup defaults that compile clean but break (or endanger) a real run:
       1. a placeholder `ANTHROPIC_API_KEY` (or a referenced env_file that's missing),
       2. a sandbox still pointing `repos:` at the unpushable starter repo,
       3. no git auth wired (no GitHub App in `loopy.env`, no `GITHUB_TOKEN` in an env_file)
-         while sandboxes declare repos that need cloning/pushing.
+         while sandboxes declare repos that need cloning/pushing,
+      4. an env_file holding live secrets that's tracked by git (`is_tracked`, when supplied) —
+         a guardrail, since `.gitignore` is the only thing keeping real keys off a commit.
+
+    `is_tracked(rel)` answers "is this project-relative path tracked by git?"; it's injected
+    (the CLI shells out to `git`) so `diagnose` itself stays pure and unit-testable. Omitted ⇒
+    the tracking guardrail is skipped.
     """
     findings: list[Finding] = []
 
@@ -98,6 +105,21 @@ def diagnose(
                 "set a real key, or rely on Claude Code OAuth reachable via the sandbox HOME",
             )
         )
+
+    # 1b. Live secrets committed to git. An env_file carries real keys — most acutely the
+    # API-key-authed Anthropic case, where the value is on disk in cleartext — and `.gitignore`
+    # is the only guard. It's easy to `git add` the file before (or instead of) gitignoring it,
+    # so warn if any referenced env_file is tracked. A guardrail, not a blocker (warn, not error).
+    if is_tracked is not None:
+        for rel in env_files:
+            if is_tracked(rel):
+                findings.append(
+                    Finding(
+                        "warn",
+                        f"env_file '{rel}' is tracked by git — it holds live secrets",
+                        f"untrack it: add '{rel}' to .gitignore, then `git rm --cached {rel}`",
+                    )
+                )
 
     # 2. The unpushable starter repo.
     starter_sandboxes: list[str] = []

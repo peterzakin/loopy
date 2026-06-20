@@ -152,19 +152,21 @@ failures debuggable) → 12, 13, 14 (polish)**. A single integration test that r
   templating yet; (b) an optional `workspace: <local path>` copy/mount for offline/local-only checkouts;
   (c) a `crosscheck` rule that `repos` hosts ⊆ `network`.
 
-- [ ] **13. Live secrets on disk in `env_file` (only `.gitignore` guards them)**
-  — `loopy_runtime/secrets.py:32-40`
+- [x] ~~**13. Live secrets on disk in `env_file` (only `.gitignore` guards them)**~~
+  — `loopy_cli/doctor.py`, `loopy_cli/__init__.py`, `examples/codefix/README.md`
   `env_file` values are parsed literally, so running the demo means writing a live `ANTHROPIC_API_KEY`
   (and historically a GitHub token) to disk with only `.gitignore` between them and a commit.
   **Decided against `${VAR}` process-env interpolation**: explicit env_files are a feature — one file
   tells you exactly what the sandbox sees, with no implicit coupling to the operator's shell env (which
-  #6 just worked to stop leaking into the local sandbox). The residual concern is narrower than first
-  framed, since the on-disk surface has already shrunk: **#7** mints scoped GitHub tokens at run time
-  (no `GH_TOKEN` in an env_file) and **#8** lets Claude Code OAuth creds satisfy the model key via
-  `HOME` (no `ANTHROPIC_API_KEY` on disk when subscription-authed). What's left is the API-key-authed
-  Anthropic case. Treat as a docs/guardrail item rather than interpolation: document the live-value /
-  gitignore requirement in the "Run locally" quickstart (#14), and consider a `doctor`-style warning if
-  an env_file appears to be tracked by git.
+  #6 just worked to stop leaking into the local sandbox). The on-disk surface had already shrunk via
+  **#7** (scoped GitHub tokens minted at run time — no `GH_TOKEN` on disk) and **#8** (Claude OAuth
+  creds satisfy the model key via `HOME` — no `ANTHROPIC_API_KEY` on disk when subscription-authed),
+  leaving the API-key-authed Anthropic case. **Resolved as a docs/guardrail item:** `loopy doctor` now
+  emits a `warn` when any referenced `env_file` is tracked by git (`diagnose` takes an injected
+  `is_tracked` callback so it stays pure; the CLI backs it with `git ls-files --error-unmatch`,
+  degrading to "not tracked" when git is absent or the project isn't a repo), with a `git rm --cached`
+  hint. The codefix "Run locally" quickstart now spells out the live-value / `.gitignore` requirement
+  and points back at the App (#7) and OAuth (#8) paths that keep secrets off disk entirely.
 
 - [x] ~~**14. Docs/examples assume the Daytona + `run` happy path; the local path is undocumented**~~
   The README + `incidents` example implied tokens are auto-injected on every path — untrue on the
