@@ -497,9 +497,13 @@ workflow `.md`.
 1. **Durability target for the first production backend** — DurableLite (self-contained,
    sqlite/pg) vs Temporal adapter (offload durability, take the operational dependency). Deferred
    to Phase 11 by design; the interface work in Phase 6 keeps both open.
-2. **Retry policy surface** — README's `budget` covers wall_clock/spend but not failure-retry.
-   Add a `retry:` block to step frontmatter, or keep retry policy backend-config-only? (Leaning:
-   backend default + optional step override.)
+2. ~~**Retry policy surface**~~ — *Decided (2026-06-20): backend default only, no manifest surface.*
+   README's `budget` covers wall_clock/spend but not failure-retry. The retry mechanism operates as
+   a backend default (`ExponentialBackoffRetry()` in the step executor, `loopy_runtime/runtime/inmemory.py`),
+   so every step gets exponential backoff with nothing to author. A per-step `retry:` frontmatter
+   override was considered and dropped as not worth the schema/compile surface for now; reintroduce a
+   purpose-built field if a concrete need appears. (Deciding *which* errors are retryable — the
+   terminal-vs-transient classification — is tracked separately in `TODOS.md` #3.)
 3. **MVP cut** — ship Phases 1–7 (compile + in-memory run of the example) as milestone 1?
 
 ---
