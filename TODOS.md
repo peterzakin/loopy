@@ -32,10 +32,16 @@ plan/source. When an item ships, check its box (`- [x]`) and strike the heading
   A misconfig becomes a recorded failed run; under `serve()` a server re-produces identical
   failures forever. Add a fail-fast / classify pass for config vs transient errors.
 
-- [ ] **4. Retry policy surface**
-  — `ARCHITECTURE.md` §7 open decision #2
-  `budget` covers wall_clock/spend but there's no failure-retry surface. Settle the decision
-  (leaning: backend default + optional `retry:` step override).
+- [x] ~~**4. Retry policy surface**~~
+  — `ARCHITECTURE.md` §7 open decision #2 (now decided)
+  `budget` covers wall_clock/spend but there's no failure-retry *surface*. **Decided: backend
+  default only, no manifest surface.** The retry mechanism already operates as a backend default
+  (`ExponentialBackoffRetry()` wired into the step executor, `loopy_runtime/runtime/inmemory.py`), so
+  every step gets exponential backoff with no config to author. A per-step `retry:` override (the old
+  leaning) was judged not worth the schema/compile surface for now; reintroduce a purpose-built field
+  if a concrete need appears. The *idempotent-side-effects* half of B9 is unaffected — it still rides
+  with durability (TODO #2). Note this only makes retries *configurable-by-default*; deciding which
+  errors are even retryable is the separate terminal-vs-transient classification (#3).
 
 ## Developer experience — from a real end-to-end run
 
@@ -206,13 +212,14 @@ B7/B10. Legend: ✅ shipped · ⚠️ partial · ❌ not built / deferred.
 | **B6** | Budget enforcement | ⚠️ | `wall_clock` + per-step `spend.usd` done; `window`/`latency` need durable timers (B7) |
 | **B7** | Durable timers | ❌ | poll scheduler is in-process only → TODO #2 (DurableLite) |
 | **B8** | Cron watermarks | ⚠️ | watermarks exist in the poll scheduler; durability deferred → TODO #2 |
-| **B9** | Idempotent side effects + retries | ❌ | not built → TODO #4 (retry-policy open decision) |
+| **B9** | Idempotent side effects + retries | ⚠️ | retries = backend default (exponential backoff, no manifest surface — TODO #4, decided); idempotent side effects deferred to durability (TODO #2) |
 | **B10** | Crash recoverability | ❌ | Phase 11 (DurableLite/DBOS) → TODO #2 |
 | **B11** | Manifest-version pinning | ❌ | not built |
 | **B12** | Observability | ⚠️ | `status()` / `failed_runs` / `drain_errors` + a durable SQLite run store and read-only `loopy admin` dashboard (run list/timeline/outputs); no OTel yet |
 
-Open backend work clusters into the items above: **B7 + B10** (+ remaining B6/B8) → TODO #2;
-**B9** → TODO #4. Update a row's status when its capability lands.
+Open backend work clusters into the items above: **B7 + B10** (+ remaining B6/B8) → TODO #2.
+**B9**'s retry half is a settled backend default (TODO #4, decided); its idempotent-side-effects half
+folds into the durability work (TODO #2). Update a row's status when its capability lands.
 
 ## Explicitly deferred (do not build speculatively)
 
