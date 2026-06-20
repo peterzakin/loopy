@@ -103,6 +103,12 @@ def test_unresolved_agent_sandbox_reports_e502(tmp_path):
     assert_code(compile_project(tmp_path), codes.E502)
 
 
+def test_agent_without_sandbox_reports_e506(tmp_path):
+    # Every agent must name a sandbox (directly or via defaults.agent.sandbox) — never inferred.
+    write_project(tmp_path, {"registry.yml": "agents:\n  Worker: {}\n"})
+    assert_code(compile_project(tmp_path), codes.E506)
+
+
 def test_unresolved_skill_reports_e503(tmp_path):
     write_project(
         tmp_path,

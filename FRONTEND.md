@@ -398,6 +398,7 @@ Some codes are shared where the same failure surfaces from more than one place (
 | **E201** | X4 | P2/P3 | unknown type shorthand in event `fields:` or step `output:` (desugar) |
 | **E210** | X1 | P8 | entity name not Capitalized, or reserved `default` misused |
 | **E211** | X1 | P8 | duplicate entity name in `registry.yml` |
+| **E214** | X1 | P8 | a sandbox definition is missing its required `provider:` (`local`/`docker`/`daytona`) |
 | **E301** | T-grammar / T5 | P5/P6 | illegal template: control flow, filters, multi-segment / dotted path |
 | **E302** | T1 | P6 | `event.<field>` not in the triggering event's contract |
 | **E303** | T2 | P6 | cron trigger field other than `scheduled_at` / `last_run` |
@@ -408,6 +409,7 @@ Some codes are shared where the same failure surfaces from more than one place (
 | **E403** | S3 | P7 | duplicate webhook `path`, or malformed `poll` interval |
 | **E501** | X2 | P8 | step `agent:` doesn't resolve to a registered Agent |
 | **E502** | X2 | P8 | an agent's `sandbox` doesn't resolve |
+| **E506** | X2 | P8 | an agent declares no `sandbox` (every agent must name one) |
 | **E503** | X2 | P8 | an `agent.skills[]` entry doesn't resolve in `skills/` |
 | **E504** | X3 | P8 | a step's `on:` / `emits:` names an unregistered event |
 | **W501** | X5 | P8 | dead trigger — a registered `on:` event with no producer |

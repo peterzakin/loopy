@@ -72,7 +72,7 @@ def test_token_provider_raises_when_configured_but_key_unloadable(tmp_path, monk
 def test_build_runtime_wires_tokens_and_bus(tmp_path):
     bus = InProcessEventBus()
     sentinel = object()
-    rt = build_runtime(_manifest(), root=tmp_path, sandbox="local", bus=bus, tokens=sentinel)
+    rt = build_runtime(_manifest(), root=tmp_path, bus=bus, tokens=sentinel)
     assert isinstance(rt, InMemoryRuntime)
     assert rt.tokens is sentinel  # the seam that injects creds into the sandbox
     assert rt.bus is bus
@@ -81,15 +81,13 @@ def test_build_runtime_wires_tokens_and_bus(tmp_path):
 
 def test_build_runtime_passes_state_through_when_given(tmp_path):
     state = InMemoryStateStore()
-    rt = build_runtime(
-        _manifest(), root=tmp_path, sandbox="local", bus=InProcessEventBus(), state=state
-    )
+    rt = build_runtime(_manifest(), root=tmp_path, bus=InProcessEventBus(), state=state)
     assert rt.state is state  # a networked bus shares the runtime's StateStore
     assert rt.tokens is None  # default: no injection unless wired
 
 
 def test_build_runtime_defaults_cascade_budget_to_none(tmp_path):
-    rt = build_runtime(_manifest(), root=tmp_path, sandbox="local", bus=InProcessEventBus())
+    rt = build_runtime(_manifest(), root=tmp_path, bus=InProcessEventBus())
     assert rt.cascade_budget_usd is None  # disabled unless registry limits.cascade_spend is set
 
 
@@ -97,7 +95,7 @@ def test_build_runtime_reads_cascade_budget_from_registry_limits(tmp_path):
     # The cap is a project-level control authored in the registry and carried by the manifest —
     # not a launch-time flag — so build_runtime derives it from registry.limits.cascade_spend.
     manifest = _manifest(limits={"cascade_spend": {"usd": 12.50}})
-    rt = build_runtime(manifest, root=tmp_path, sandbox="local", bus=InProcessEventBus())
+    rt = build_runtime(manifest, root=tmp_path, bus=InProcessEventBus())
     assert rt.cascade_budget_usd == 12.50
 
 

@@ -42,9 +42,18 @@ def cross_check(project: Project, inv: Inventory, diags: DiagnosticCollector) ->
                         span=step.span,
                     )
 
-    # X2 — every registered agent's sandbox + skills resolve.
+    # X2 — every registered agent names a sandbox, and it (+ its skills) resolve.
     for agent in registry.agents.values():
-        if agent.sandbox is not None and agent.sandbox not in registry.sandboxes:
+        if agent.sandbox is None:
+            # Where an agent runs is never inferred — it must name a sandbox (directly or via
+            # `defaults.agent.sandbox`). Pairs with E214 (that sandbox must declare a provider).
+            diags.error(
+                codes.E506,
+                f"agent '{agent.name}' declares no sandbox; every agent must name one "
+                f"(set sandbox: on the agent or defaults.agent.sandbox)",
+                span=agent.span,
+            )
+        elif agent.sandbox not in registry.sandboxes:
             diags.error(
                 codes.E502,
                 f"agent '{agent.name}' references sandbox '{agent.sandbox}', "

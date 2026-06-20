@@ -558,8 +558,8 @@ class InMemoryRuntime:
             raise RuntimeError(
                 f"sandbox '{sandbox_name}' is missing tool(s) {', '.join(missing)} required by "
                 f"agent '{agent_name}'. Add them to the sandbox image (e.g. `apt:`/`run:` "
-                "layers), use a snapshot/base image that bundles them, or — for `--sandbox local` "
-                "— install them on the host and ensure PATH reaches them."
+                "layers), use a snapshot/base image that bundles them, or — for a `local` provider "
+                "sandbox — install them on the host and ensure PATH reaches them."
             )
 
     def _build_emitted(self, event_name: str, payload: Mapping[str, object]) -> Event:

@@ -9,10 +9,11 @@ defaults:
     sandbox: Dev
     harness: { runtime: claude-code, model: claude-sonnet-4-6 }
 
-# Sandbox — compute + egress. `docker` is the hermetic default: the toolchain (git, the
-# `claude` CLI on PATH, HOME) comes from the image, so a local run needs no host-env leak —
-# the gap #6 fixed. `--sandbox local` (bare subprocess) still works for a no-Docker box, but
-# then PATH/HOME/the model key must be supplied in the env_file (see README).
+# Sandbox — compute + egress. `provider:` selects the backend (this is the source of truth;
+# there is no `--sandbox` flag). `docker` is hermetic: the toolchain (git, the `claude` CLI on
+# PATH, HOME) comes from the image, so a local run needs no host-env leak — the gap #6 fixed.
+# Switch `provider:` to `local` (bare subprocess) for a no-Docker box, but then PATH/HOME/the
+# model key must be supplied in the env_file (see README); or `daytona` for a cloud sandbox.
 sandboxes:
   Dev:
     provider: docker

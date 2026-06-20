@@ -167,9 +167,18 @@ def _load_sandboxes(
     out: dict[str, Sandbox] = {}
     for name, body in sb_map.items():
         body = body or {}
+        provider = body.get("provider")
+        # `provider:` is required on every sandbox — where an agent runs is an explicit
+        # property of the project, never inferred. (`loopy init` scaffolds `daytona`.)
+        if not isinstance(provider, str) or not provider.strip():
+            diags.error(
+                codes.E214,
+                f"sandbox '{name}' must declare a provider: (local | docker | daytona)",
+                span=span_at(file, _line_of(sb_map, name)),
+            )
         out[name] = Sandbox(
             name=name,
-            provider=body.get("provider"),
+            provider=provider,
             image=dict(body.get("image") or {}),
             network=list(body.get("network") or []),
             env_file=_as_str_list(body.get("env_file")),  # path reference only; not read here

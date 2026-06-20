@@ -50,13 +50,14 @@ defaults:
     sandbox: Dev
     harness: { runtime: claude-code, model: claude-sonnet-4-6 }
 
-# Sandbox — compute + egress. `docker` is hermetic: git, the `claude` CLI on PATH, and HOME
-# all come from the image, so a local run needs nothing from your shell.
+# Sandbox — compute + egress. `daytona` runs each agent in an isolated cloud sandbox built
+# from the `image:` spec below (set DAYTONA_API_KEY in loopy.env). Swap `provider:` to `docker`
+# for a fully local, hermetic run — both build from the same `image:` spec.
 #   • point `repos:` at a repo you can push to (fork something, or change it to you/your-repo)
 #   • `env_file:` is the gitignored dotenv injected as the sandbox's environment
 sandboxes:
   Dev:
-    provider: docker
+    provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
     network: [github.com, api.anthropic.com]   # git over https + the model API
     env_file: secrets/dev.env                  # gitignored; resolved at run time
@@ -138,7 +139,7 @@ _DEV_ENV = """\
 # never commit this file. Lines are KEY=VALUE; values are literal (no ${VAR} interpolation).
 
 # --- model auth (claude-code) ---
-# Required for --sandbox docker (the image carries no creds).
+# Required for the daytona/docker providers (the built image carries no creds).
 ANTHROPIC_API_KEY=sk-ant-...
 
 # --- git auth ---
@@ -146,8 +147,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 # automatically; otherwise put a PAT with contents:write + pull_requests:write here.
 # GITHUB_TOKEN=ghp_...
 
-# --- only for --sandbox local (a bare subprocess inherits nothing from your shell) ---
-# With --sandbox docker these come from the image; leave them out.
+# --- only for the `local` provider (a bare subprocess inherits nothing from your shell) ---
+# With the daytona/docker providers these come from the built image; leave them out.
 # PATH=/usr/local/bin:/usr/bin:/bin
 # HOME=/home/you
 """
@@ -164,7 +165,7 @@ _LOOPY_ENV = """\
 # GITHUB_APP_ID=
 # GITHUB_APP_PRIVATE_KEY=
 
-# --- Daytona (only for --sandbox daytona) ---
+# --- Daytona (the default sandbox; required when a sandbox uses provider: daytona) ---
 # DAYTONA_API_KEY=
 # DAYTONA_API_URL=
 
@@ -211,12 +212,11 @@ loopy auth status            # then visit the printed install URL to pick repos
 # 4. check the above is actually done — a green compile is not a runnable project
 loopy doctor
 
-# 5. compile + fire one task
-loopy compile . --out manifest.json
+# 5. compile + fire one task (the sandbox runs on whatever registry.yml's `provider:` names)
+loopy compile .              # writes manifest.json
 loopy trigger manifest.json \\
   --event CodeTask \\
-  --fields '{"task": "add a CONTRIBUTING.md", "branch": "codefix/contributing"}' \\
-  --sandbox docker
+  --fields '{"task": "add a CONTRIBUTING.md", "branch": "codefix/contributing"}'
 ```
 
 Run every command from this directory so `loopy.env` and `--root` stay in sync.

@@ -103,7 +103,7 @@ outside world it integrates with on the edges. Solid arrows are the live request
 | **EventBus** | Routes registered events to every workflow whose entry step subscribes via `on:`. Handles fan-out (one event → many workflows) and loop-backs (a step's `emits:` re-enters the bus). | `InProcessEventBus` (single process). |
 | **Runtime** | The engine. Instantiates a run at the `on:` step, walks the `after:` DAG in topo order, renders templates against real run data, records outputs + an event-sourced history, and publishes `emits:`. | `InMemoryRuntime` — covers B1–B6; single-process, non-durable. Durable timers/cron/resume are stubbed (B7/B10). |
 | **AgentHarness** | Runs a step's prose body against its bound agent (model + tools + skills) and validates the result against the step's typed `output:`/`emits:`. | `HarnessRouter` dispatches each step to the harness for its agent's `runtime`, enforcing per-harness model eligibility (a `claude-code` agent may only name a `claude-*` model, a `codex` agent only an OpenAI model). `ClaudeCodeHarness` runs `claude -p … --output-format json` and feeds `total_cost_usd` to the budget enforcer; `CodexHarness` runs `codex exec … --json` (token usage only — no USD cost). Both run *inside the sandbox*. |
-| **SandboxProvider** | Provisions the compute + egress an agent runs in, from the sandbox spec (image build + `network:` allowlist). The trust boundary. | `local` (bare subprocess, for dev), `docker` (hermetic local container from the spec's `image:`), or `daytona` (isolated cloud container). Selected with `--sandbox`. |
+| **SandboxProvider** | Provisions the compute + egress an agent runs in, from the sandbox spec (image build + `network:` allowlist). The trust boundary. | `local` (bare subprocess, for dev), `docker` (hermetic local container from the spec's `image:`), or `daytona` (isolated cloud container). Selected per-sandbox via `provider:` in `registry.yml` (required on every sandbox — a missing one is compile error E214); the runtime routes each step to the backend its sandbox names. No launch-time flag. `loopy init` scaffolds `daytona`. |
 | **Secrets** | Resolves a sandbox's `env_file`(s) at run time and injects them into the sandbox as env vars. Never written to the manifest, never logged. | `EnvFileSecretsResolver` — reads dotenv files relative to the project root (and refuses paths that escape it). |
 | **Sensor secrets** | Supplies credentials to in-process `@sensor` functions (poll + webhook). | A single runner-wide **`sensors/.env`** (`load_sensor_env`) merged into the process env at `loopy run`, so sensors read them via `os.environ`. Optional, gitignored, never in the manifest. |
 | **StateStore** | Holds run history (event-sourced), step outputs, and cron/poll watermarks. | `InMemoryStateStore` — process-lifetime only. |
@@ -315,7 +315,7 @@ step is touched.**
 ### A. Laptop / CI smoke test — what ships today
 
 ```
-   loopy trigger manifest.json --event Incident --fields '{...}' --sandbox local
+   loopy trigger manifest.json --event Incident --fields '{...}'   # sandboxes with provider: local
    └─ InMemoryRuntime + InProcessEventBus + InMemoryStateStore + LocalSandboxProvider
       one process, fires one event, runs the cascade to completion, prints the step order
 ```
@@ -325,8 +325,8 @@ tests and CI. `loopy run` is the same composition but long-lived, hosting the we
 
 Heads-up on creds on this path: agent secrets are **not** ambient. A GitHub token is injected
 only when a GitHub App is configured (`loopy auth github` — then `trigger` mints one too), and
-the bare `--sandbox local` subprocess inherits *nothing* from your shell (no `PATH`/`HOME`/model
-key), so its `env_file` must supply them — prefer `--sandbox docker`, which gets the toolchain
+a bare `provider: local` subprocess inherits *nothing* from your shell (no `PATH`/`HOME`/model
+key), so its `env_file` must supply them — prefer `provider: docker`, which gets the toolchain
 from the image. The [`codefix` example](../examples/codefix/) is a runnable, single-step
 walkthrough of exactly this (its README has the per-provider `env_file` matrix and a
 one-command smoke test).
@@ -334,7 +334,7 @@ one-command smoke test).
 ### B. Single-node server, in-process — the dev inner loop
 
 ```
-   loopy run manifest.json --in-process --host 0.0.0.0 --port 8000 --sandbox daytona
+   loopy run manifest.json --in-process --host 0.0.0.0 --port 8000   # sandboxes with provider: daytona
    └─ InMemoryRuntime + InProcessEventBus + InMemoryStateStore
       + ClaudeCodeHarness + DaytonaSandboxProvider
 ```
@@ -389,8 +389,9 @@ state:                # where run history is recorded (B12 observability)
 Precedence is **explicit flag > loopy.yaml > built-in default**, so `--bus inproc` still wins
 over a file that says `redis`. Connection strings stay in the environment, never the file:
 `bus: redis` reads its URL from the `REDIS_URL` env var (or the `--redis-url` flag), defaulting
-to `redis://localhost:6379`. `sandbox` is *not* a config key — it's declared per-agent in
-`registry.yml`; the `--sandbox` flag selects only the provider backend (`local`/`daytona`).
+to `redis://localhost:6379`. `sandbox` is *not* a config key and *not* a launch flag — each
+sandbox's `provider:` (`local`/`docker`/`daytona`) is declared in `registry.yml`, and the runtime
+routes each step to the backend its sandbox names.
 `state:` selects the run-history `StateStore`: it defaults to a durable **SQLite** file
 (`.loopy/state.db`, gitignored), so run history survives restarts and the `loopy admin` dashboard
 can read it (see below); `--state inproc` / `backend: inproc` opts back into the old ephemeral
@@ -513,8 +514,8 @@ cd <project> && loopy run                                  # 2. bring up redis +
 
 Everything compose needs is derived from flags `loopy run` already takes — `--root` (the project,
 bind-mounted **read-only** at `/project`), the manifest (relative to `--root`, default
-`manifest.json`), `--port`, `--sandbox` (defaults to `daytona` here) — plus the project's
-`loopy.env` for the Daytona creds. There is no compose file or `.env` to write. Agent secrets stay
+`manifest.json`), `--port` — plus the project's `loopy.env` for the Daytona creds. Which backend
+each agent runs in rides the manifest (the sandbox's `provider:`), not the launch command. There is no compose file or `.env` to write. Agent secrets stay
 in the sandbox `env_file`s under the project, and `loopy.env` (read from the project root) still
 carries the GitHub App creds for token minting. (The container stack builds the image from a
 source checkout today.)
@@ -544,7 +545,8 @@ Postgres" or "run a Temporal cluster." Whoever deploys sees that difference.
 
 What you actually need in place for a successful run, in order:
 
-1. **A green compile.** `loopy compile . --out manifest.json` exits 0. This is the gate —
+1. **A green compile.** `loopy compile .` (writes `manifest.json`; use `--check` to validate
+   without writing) exits 0. This is the gate —
    every `on:`/`emits:` names a registered event, every `{{ }}` ref resolves, the DAG is
    acyclic, every sensor declares a registered `emits`. Run it in CI.
 2. **The manifest, shipped.** `manifest.json` is the deploy artifact. Carry the project root
@@ -562,13 +564,13 @@ What you actually need in place for a successful run, in order:
    infra creds (`DAYTONA_API_KEY`, `REDIS_URL`) *out* of it — those are the server's own env
    (item 5), and sensors share the engine's process env today.
 5. **Control-plane / infra creds.** The creds the engine itself needs go in its **process env**:
-   for `--sandbox daytona`, `DAYTONA_API_KEY` / `DAYTONA_API_URL` (and `loopy-core[daytona]`
+   for the `daytona` provider, `DAYTONA_API_KEY` / `DAYTONA_API_URL` (and `loopy-core[daytona]`
    installed); for `--bus redis`, a reachable `REDIS_URL` (or `--redis-url`). In production these
    come from the platform (container env, systemd, CI secret store). For **local dev**, drop them
    in **`loopy.env`** at the project root — the secret companion to `loopy.yaml`, merged into the
    process env at `loopy run` with non-override (a value set in the real environment always wins).
    Keep this file to infra creds only; agent secrets live in sandbox `env_file`s (item 3) and
-   sensor secrets in `sensors/.env` (item 4). For `--sandbox local`: nothing — but agents run as
+   sensor secrets in `sensors/.env` (item 4). For the `local` provider: nothing — but agents run as
    subprocesses on the host, so it's dev-only.
 6. **Egress allowlist.** Each sandbox's `network:` list is the egress contract — it must include
    every host an agent's tools reach (e.g. `github.com` for `open_pr`/`merge_pr`). The model
