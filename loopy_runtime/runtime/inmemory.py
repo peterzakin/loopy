@@ -16,6 +16,7 @@ import logging
 from collections import deque
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from loopy_runtime.budget import BudgetExceeded
 from loopy_runtime.contract import (
@@ -91,7 +92,6 @@ class InMemoryRuntime:
         # runaway from spinning forever. Set high — legitimate loops run for many turns.
         self.max_iterations = max_iterations
 
-        self._run_seq = 0
         self._event_seq = 0
         self._runs: dict[RunId, RunStatus] = {}
         self._queue: deque[tuple[str, Event]] = deque()  # pending (workflow, event) work
@@ -297,8 +297,11 @@ class InMemoryRuntime:
 
     async def _execute(self, wf_name: str, event: Event) -> RunId:
         wf = self.manifest.workflows[wf_name]
-        self._run_seq += 1
-        run_id = f"{wf_name}-{self._run_seq}"
+        # A short random token, not a per-process counter: each `loopy trigger` is a fresh
+        # process, so a counter would restart at 1 and two unrelated runs would collide on the
+        # same id (and any side effects an author namespaces by it). uuid keeps runs unique
+        # across processes.
+        run_id = f"{wf_name}-{uuid4().hex[:8]}"
         await self.state.create_run(run_id, self.manifest.schema_version, event)
         await self.state.append(
             run_id, RunEvent("run_started", None, {"event": event.name}, _now())
