@@ -1,6 +1,7 @@
 """Loopy CLI — one binary over both halves.
 
     loopy compile   produce the manifest (frontend)
+    loopy doctor    preflight a project for its first run (placeholders, repo, git auth)
     loopy run       start the server: host sensor webhooks; events drive workflow runs
     loopy trigger   fire one event at the manifest and run it to completion (for testing)
     loopy admin     serve the read-only dashboard over the run-state DB `loopy run` writes
@@ -115,12 +116,34 @@ def init(
     for rel in created:
         typer.echo("      " + typer.style(f"{name}/{rel.as_posix()}", fg=typer.colors.GREEN))
     typer.echo()
-    typer.echo("  Next:")
+    # A clean compile is *not* a runnable project: the scaffold ships placeholders on purpose
+    # (a fake API key, an unpushable repo, no git auth). Spell out the gap so "it compiled"
+    # isn't mistaken for "it'll run", and point at `loopy doctor` to check it mechanically.
+    typer.echo("  Before your first run:")
     typer.echo(typer.style(f"    cd {name}", fg=typer.colors.BRIGHT_WHITE))
-    typer.echo("    # edit secrets/dev.env (set ANTHROPIC_API_KEY) and registry.yml (repos:)")
     typer.echo(
-        typer.style("    loopy auth github", fg=typer.colors.BRIGHT_WHITE)
+        "      1. set a real ANTHROPIC_API_KEY in "
+        + typer.style("secrets/dev.env", fg=typer.colors.YELLOW)
+        + " (replaces the sk-ant-... placeholder)"
+    )
+    typer.echo(
+        "      2. point "
+        + typer.style("registry.yml", fg=typer.colors.YELLOW)
+        + " repos: at a repo you can push to (the starter is read-only)"
+    )
+    typer.echo(
+        "      3. "
+        + typer.style("loopy auth github", fg=typer.colors.BRIGHT_WHITE)
         + typer.style("   # wire git auth (writes loopy.env here)", fg=typer.colors.BRIGHT_BLACK)
+    )
+    typer.echo()
+    typer.echo("  Then:")
+    typer.echo(
+        typer.style("    loopy doctor", fg=typer.colors.BRIGHT_WHITE)
+        + typer.style(
+            "   # check those are done — compiling green isn't enough",
+            fg=typer.colors.BRIGHT_BLACK,
+        )
     )
     typer.echo(typer.style("    loopy compile . --out manifest.json", fg=typer.colors.BRIGHT_WHITE))
     typer.echo()
@@ -155,6 +178,70 @@ def compile(
             out.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
     raise typer.Exit(code=result.diagnostics.exit_code())
+
+
+@app.command()
+def doctor(
+    path: Path = typer.Argument(Path("."), help="Project directory to check."),
+) -> None:
+    """Preflight a project for its first real run.
+
+    `loopy compile` proves the manifest is *valid*; `doctor` proves it's *runnable* — it catches
+    the scaffold defaults that pass a naive presence check but still fail a real run: a
+    placeholder API key, the unpushable starter repo, and missing git auth. The live token-mint
+    check (is the GitHub App installed on the repo?) still happens at `run`/`trigger` preflight.
+    """
+    from loopy_cli.doctor import diagnose
+    from loopy_core.compile.pipeline import compile_project
+    from loopy_runtime.secrets import _parse_dotenv, load_control_plane_env
+
+    # A project that doesn't compile can't be reasoned about — send the user to fix that first.
+    result = compile_project(path)
+    if result.diagnostics.has_errors() or result.project is None:
+        for diagnostic in result.diagnostics.items:
+            typer.echo(diagnostic.render(), err=True)
+        typer.echo(
+            typer.style("  ✗  fix compile errors first (loopy compile .)", fg=typer.colors.RED),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    root = Path(path)
+
+    def read_env(rel: str) -> dict[str, str] | None:
+        env_path = root / rel
+        return _parse_dotenv(env_path.read_text()) if env_path.is_file() else None
+
+    merged = dict(os.environ)
+    for key, value in load_control_plane_env(root).items():
+        merged.setdefault(key, value)  # real/platform env wins over loopy.env
+
+    findings = diagnose(result.project.registry, read_env=read_env, control_plane_env=merged)
+
+    typer.echo()
+    if not findings:
+        typer.echo(
+            typer.style("  ✓  ready to run", fg=typer.colors.GREEN, bold=True)
+            + typer.style(
+                "   — no placeholders, repo is pushable, git auth is wired",
+                fg=typer.colors.BRIGHT_BLACK,
+            )
+        )
+        typer.echo()
+        return
+
+    errors = [f for f in findings if f.level == "error"]
+    for finding in findings:
+        if finding.level == "error":
+            mark, color = "✗", typer.colors.RED
+        else:
+            mark, color = "!", typer.colors.YELLOW
+        typer.echo("  " + typer.style(f"{mark}  {finding.message}", fg=color))
+        if finding.hint:
+            typer.echo("      " + typer.style(f"→ {finding.hint}", fg=typer.colors.BRIGHT_BLACK))
+    typer.echo()
+    # Warnings alone don't fail the run, so they don't fail doctor; errors do.
+    raise typer.Exit(code=1 if errors else 0)
 
 
 def _make_token_provider(root: Path, *, enabled: bool, announce: bool):
@@ -435,6 +522,7 @@ def trigger(
         id="trigger",
         emitted_at=datetime.now(UTC),
     )
+
     async def _execute(runtime):
         """Fire the event, collect outputs, then tear the provider down — all in one event
         loop so a provider's HTTP client (e.g. Daytona's) is closed in the loop that created

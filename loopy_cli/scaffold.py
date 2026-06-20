@@ -208,7 +208,10 @@ agent that edits a checkout and opens a pull request.
 loopy auth github
 loopy auth status            # then visit the printed install URL to pick repos
 
-# 4. compile + fire one task
+# 4. check the above is actually done — a green compile is not a runnable project
+loopy doctor
+
+# 5. compile + fire one task
 loopy compile . --out manifest.json
 loopy trigger manifest.json \\
   --event CodeTask \\
