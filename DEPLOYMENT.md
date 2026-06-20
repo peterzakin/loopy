@@ -471,6 +471,45 @@ no App configured, nothing is injected (unchanged behavior). The token is scoped
 installation — i.e. the repos you selected at install time — which is the least-privilege boundary
 until a per-sandbox `repos:` field narrows it further (a sibling milestone).
 
+### B′. Single-node via Docker Compose — the packaged self-host
+
+Topology B, packaged as two containers plus a managed sandbox. The repo ships a `Dockerfile`,
+`docker-compose.yml`, and `.env.example` at the root.
+
+```
+  docker compose up --build
+  ├─ loopy   one process: sensor webhooks + scheduler + event-bus consumer + runtime
+  │          (loopy run … --bus redis --sandbox daytona --state sqlite)
+  ├─ redis   the EventBus — decouples ingress from execution; buffers the backlog
+  └─ Daytona the agent sandbox (external; reached via DAYTONA_API_KEY / DAYTONA_API_URL)
+```
+
+The five tiers collapse into the single `loopy` process: the `EventReceiver` (webhook ingress)
+runs in the same process as the `Runtime`, both publishing to and consuming from **redis** as the
+bus. The one tier that stays separate is the **Sandbox** — agents run in Daytona, never in the
+engine container.
+
+Two persistence facts make the deploy durable:
+
+- **`loopy-state` volume.** SQLite is a file; a container's filesystem is ephemeral, so the
+  run-history DB lives on a named volume (mounted at `/state`) to survive container recreation.
+  It's scoped to the `loopy` service — the single SQLite writer — which must stay at one replica.
+- **`redis-data` volume + AOF.** Redis runs with `--appendonly yes` so accepted-but-not-yet-
+  processed events survive a redis restart.
+
+Steps:
+
+```bash
+loopy compile <project> --out <project>/manifest.json   # 1. produce the manifest
+cp .env.example .env                                     # 2. set LOOPY_PROJECT + DAYTONA_API_KEY
+docker compose up --build                                # 3. bring up redis + loopy
+```
+
+The project directory is bind-mounted **read-only** at `/project` (it supplies the manifest,
+sensor source, and `env_file`s). Infra creds (`REDIS_URL`, `DAYTONA_API_KEY`/`URL`) are the
+engine's process env; agent secrets stay in the sandbox `env_file`s under the project, and
+`loopy.env` (read from the project root) still carries the GitHub App creds for token minting.
+
 ### C. Durable / distributed — the production target (design-complete, behind the same interfaces)
 
 ```
