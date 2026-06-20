@@ -98,7 +98,8 @@ Make the change described by the task: {{ event.task }}.
 Then:
 1. Create a new branch named `{{ event.branch }}`.
 2. Commit your edit with a clear message.
-3. Push the branch and open a pull request against the default branch.
+3. Push the branch and open a pull request against the default branch. Include the loopy run
+   id (the `$LOOPY_RUN_ID` environment variable) in the PR body so it can be traced to this run.
 
 Return the pull request URL and a one-line summary of the change.
 """
