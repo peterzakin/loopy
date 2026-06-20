@@ -48,7 +48,18 @@ def test_acquire_routes_to_provider_named_by_spec(monkeypatch):
     assert set(built) == {"daytona"}  # only the used backend was built
 
 
-def test_omitted_provider_falls_back_to_default(monkeypatch):
+def test_omitted_provider_defaults_to_remote_daytona(monkeypatch):
+    # Remote is the absolute default: a sandbox that declares no provider runs in the cloud.
+    # Anything host-bound (local/docker) is an explicit opt-in in the registry.
+    built = _patched(monkeypatch)
+    router = RoutingSandboxProvider()
+
+    asyncio.run(router.acquire(SandboxSpec(), {}))
+
+    assert set(built) == {"daytona"}
+
+
+def test_default_is_overridable(monkeypatch):
     built = _patched(monkeypatch)
     router = RoutingSandboxProvider(default="docker")
 

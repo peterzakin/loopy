@@ -67,11 +67,12 @@ class RoutingSandboxProvider:
     (e.g. a `daytona` cloud sandbox alongside a `local` one).
 
     Concrete providers are built lazily and cached, so a project that only uses `daytona`
-    never imports `docker` (keeping those deps optional). A sandbox that omits `provider:`
-    falls back to `default` (a bare `local` subprocess — the no-dependencies dev backend).
+    never imports `docker` (keeping those deps optional). The default is the remote
+    `daytona` sandbox: a sandbox that declares no `provider:` runs in an isolated cloud
+    container — running on the host (`local`/`docker`) is an explicit opt-in in the registry.
     """
 
-    def __init__(self, *, default: str = "local"):
+    def __init__(self, *, default: str = "daytona"):
         self._default = default
         self._providers: dict[str, _RepoCloningProvider] = {}
 

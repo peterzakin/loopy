@@ -241,10 +241,12 @@ A few things worth knowing before the first run:
   proves the manifest is well-formed; the scaffold still ships placeholders that break a real run (a
   fake `ANTHROPIC_API_KEY`, an unpushable starter repo, no git auth). `loopy doctor` names exactly
   which of those are still outstanding — run it before your first `trigger`.
-- **Where an agent runs is authored in `registry.yml`, not on the command line.** Each sandbox
-  declares its `provider:` (`local | docker | daytona`); the runtime dispatches each step to the
-  backend its sandbox names. There is no `--sandbox` flag — sandbox selection is a property of the
-  project, so two sandboxes in one manifest can target different backends.
+- **Where an agent runs is authored in `registry.yml`, not on the command line.** Each sandbox's
+  `provider:` selects its backend; the runtime dispatches each step to the backend its sandbox
+  names. There is no `--sandbox` flag — sandbox selection is a property of the project, so two
+  sandboxes in one manifest can target different backends. **The default is remote:** a sandbox
+  that declares no `provider:` runs in an isolated `daytona` cloud container — running on the host
+  (`local`/`docker`) is an explicit opt-in.
 - **The sandbox inherits nothing from your shell.** Everything an agent needs — the model key,
   any git token — must be in the sandbox's `env_file`; exporting `ANTHROPIC_API_KEY` in your shell
   is not enough. (The bare `local` provider also needs `PATH`/`HOME` there; `docker`/`daytona` get
