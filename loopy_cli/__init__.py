@@ -300,7 +300,6 @@ def build_runtime(
     manifest,
     *,
     root: Path,
-    sandbox: str,
     bus,
     state=None,
     tokens=None,
@@ -311,15 +310,16 @@ def build_runtime(
     one-shot paths can't drift in how the harness, sandboxes, secrets, bus, durable state,
     and SCM token provider are wired (that drift is exactly what let `trigger` ship without
     token injection). `state` is passed through when given (so a networked bus can share the
-    runtime's StateStore); omitted otherwise so the runtime uses its own default. The cascade
-    spend cap is a project-level control read from the manifest's `registry.limits.cascade_spend`
-    (authored in registry.yml) — not a launch-time flag — so it's enforced identically however
-    the engine is started; it requires every reachable agent to use a cost-reporting harness
-    (enforced at preflight).
+    runtime's StateStore); omitted otherwise so the runtime uses its own default.
+
+    Sandbox selection is a project property, not a launch flag: the `RoutingSandboxProvider`
+    dispatches each step to the backend named by its sandbox's `provider:` in registry.yml.
+    Likewise the cascade spend cap is read from the manifest's `registry.limits.cascade_spend`
+    — so both are enforced identically however the engine is started.
     """
     from loopy_runtime.harness.router import HarnessRouter
     from loopy_runtime.runtime.inmemory import InMemoryRuntime
-    from loopy_runtime.sandbox.factory import make_sandbox_provider
+    from loopy_runtime.sandbox.factory import RoutingSandboxProvider
     from loopy_runtime.secrets import CONTROL_PLANE_ENV_FILE, EnvFileSecretsResolver
 
     limits = manifest.registry.limits
@@ -330,7 +330,7 @@ def build_runtime(
     return InMemoryRuntime(
         manifest,
         harness=HarnessRouter(manifest.registry.agents, manifest.registry.events),
-        sandboxes=make_sandbox_provider(sandbox),
+        sandboxes=RoutingSandboxProvider(),
         secrets=EnvFileSecretsResolver(root),
         bus=bus,
         tokens=tokens,
@@ -366,14 +366,15 @@ def _source_root() -> Path | None:
 
 
 def _run_in_docker(
-    *, root: Path, manifest: Path, port: int | None, sandbox: str, detach: bool, build: bool
+    *, root: Path, manifest: Path, port: int | None, detach: bool, build: bool
 ) -> None:
     """Bring up the single-node stack (engine + redis) via the bundled compose file.
 
     The Docker plumbing is an implementation detail: everything compose needs is derived from
-    the same flags `loopy run` already takes (`--root`, the manifest, `--port`, `--sandbox`) plus
-    the project's `loopy.env` (Daytona creds), and passed through the child's environment — there
-    is no user-authored compose file or `.env`.
+    the same flags `loopy run` already takes (`--root`, the manifest, `--port`) plus the
+    project's `loopy.env` (Daytona creds), and passed through the child's environment — there
+    is no user-authored compose file or `.env`. Sandbox selection rides the manifest
+    (each sandbox's `provider:`), not the launch command.
     """
     import shutil
     import subprocess
@@ -422,8 +423,6 @@ def _run_in_docker(
             "LOOPY_DOCKERFILE": dockerfile_rel,
             "LOOPY_PROJECT": str(root_abs),
             "LOOPY_MANIFEST": Path(manifest_rel).as_posix(),
-            # `local` is the in-process default; in a container daytona is the sensible default.
-            "LOOPY_SANDBOX": "daytona" if sandbox == "local" else sandbox,
             "LOOPY_PORT": str(port or 8000),
         }
     )
@@ -434,7 +433,7 @@ def _run_in_docker(
         cmd.append("--detach")
     typer.echo(
         f"loopy: bringing up engine + redis via docker (project {root_abs}, "
-        f"sandbox {env['LOOPY_SANDBOX']}, port {env['LOOPY_PORT']})"
+        f"port {env['LOOPY_PORT']})"
     )
     raise typer.Exit(code=subprocess.call(cmd, env=env))
 
@@ -450,9 +449,6 @@ def run(
     ),
     host: str | None = typer.Option(None, "--host", help="Override sensor_server.host."),
     port: int | None = typer.Option(None, "--port", help="Override sensor_server.port."),
-    sandbox: str = typer.Option(
-        "local", "--sandbox", help="Sandbox provider: local | docker | daytona."
-    ),
     bus: str | None = typer.Option(
         None, "--bus", help="EventBus: inproc | redis. Overrides config."
     ),
@@ -487,9 +483,7 @@ def run(
     # stack doesn't recurse into launching Docker again). Short-circuit to docker before the
     # in-process wiring below.
     if not in_process:
-        _run_in_docker(
-            root=root, manifest=manifest, port=port, sandbox=sandbox, detach=detach, build=build
-        )
+        _run_in_docker(root=root, manifest=manifest, port=port, detach=detach, build=build)
         return
 
     from loopy_runtime.bus.factory import make_event_bus
@@ -555,7 +549,6 @@ def run(
         runtime = build_runtime(
             m,
             root=root,
-            sandbox=sandbox,
             bus=event_bus,
             state=state,
             tokens=tokens,
@@ -653,9 +646,6 @@ def trigger(
     event: str = typer.Option(..., "--event", help="Triggering event name."),
     fields: str | None = typer.Option(None, "--fields", help="Event fields as a JSON object."),
     root: Path = typer.Option(Path("."), "--root", help="Project root (for env_file resolution)."),
-    sandbox: str = typer.Option(
-        "local", "--sandbox", help="Sandbox provider: local | docker | daytona."
-    ),
     no_tokens: bool = typer.Option(
         False, "--no-tokens", help="Skip GitHub App token injection (for fully offline tests)."
     ),
@@ -701,7 +691,6 @@ def trigger(
         runtime = build_runtime(
             m,
             root=root,
-            sandbox=sandbox,
             bus=InProcessEventBus(),
             tokens=tokens,
         )

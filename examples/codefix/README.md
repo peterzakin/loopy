@@ -61,20 +61,20 @@ cp examples/codefix/dev.env.example examples/codefix/secrets/dev.env
 # then edit secrets/dev.env
 ```
 
-What the `env_file` must supply, by `--sandbox`:
+What the `env_file` must supply, by the sandbox's `provider:` (set in `registry.yml`):
 
-| Var | `--sandbox docker` (default) | `--sandbox local` (no Docker) |
+| Var | `provider: docker` (default) | `provider: local` (no Docker) |
 |-----|------------------------------|-------------------------------|
 | `ANTHROPIC_API_KEY` | **required** (the image has no creds) | required, unless Claude OAuth creds are reachable via `HOME` — see below |
 | `GITHUB_TOKEN` | required *unless* a GitHub App is configured (see below) | same |
 | `PATH` | not needed — comes from the image | **required** — else `claude`/`git` aren't found |
 | `HOME` | not needed — comes from the image | **required** — for `~/.gitconfig` and `~/.claude/.credentials.json` |
 
-> **Why `PATH`/`HOME` for `local`?** The `local` sandbox runs the agent as a bare subprocess
+> **Why `PATH`/`HOME` for `local`?** The `local` provider runs the agent as a bare subprocess
 > with *only* the `env_file` as its environment — your shell's `PATH`/`HOME` are not inherited
-> (this was the #1 papercut for the first real run). The `docker` sandbox avoids it entirely:
+> (this was the #1 papercut for the first real run). The `docker` provider avoids it entirely:
 > the toolchain, `PATH`, and `HOME` come from the image, so isolation matches Daytona while
-> needing only a local Docker daemon. **Prefer `--sandbox docker`.**
+> needing only a local Docker daemon. **Prefer `provider: docker`.**
 
 > **OAuth instead of an API key (`local`):** if you use Claude Code via a subscription, point
 > `HOME` at a directory containing `~/.claude/.credentials.json` and you can omit
@@ -102,9 +102,10 @@ fully offline test.
 loopy trigger manifest.json \
   --event CodeTask \
   --fields '{"task": "add a CONTRIBUTING.md with a one-line build command", "branch": "codefix/contributing"}' \
-  --root examples/codefix \
-  --sandbox docker
+  --root examples/codefix
 ```
+
+The sandbox runs on whatever `registry.yml`'s `provider:` names (here, `docker`).
 
 It fires the event, runs the single step to completion, and prints the step order, the emitted
 `PROpened` event, and the step's outputs — including the `pr_url`. Add `--json` for the full

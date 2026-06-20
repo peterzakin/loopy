@@ -210,7 +210,7 @@ effects originate from the <code>Sandbox</code> and are governed by its <code>ne
   <tr><td><strong>EventBus</strong></td><td>Routes registered events to every workflow subscribing via <code>on:</code>. Handles fan-out (one event → many workflows) and loop-backs (<code>emits:</code> re-enters the <code>EventBus</code>).</td><td><code>InProcessEventBus</code> (single process), or <code>RedisEventBus</code> (Redis Streams + consumer group — durable, at-least-once) with <code>--bus redis</code>.</td></tr>
   <tr><td><strong>Runtime</strong></td><td>The engine. Instantiates a run at the <code>on:</code> step, walks the <code>after:</code> DAG, renders templates, records outputs + event-sourced history, publishes <code>emits:</code>.</td><td><code>InMemoryRuntime</code> — covers B1–B6; single-process, non-durable. Durable timers / cron / resume stubbed (B7/B10).</td></tr>
   <tr><td><strong>AgentHarness</strong></td><td>Runs a step's prose against its agent (model + tools + skills); validates against the typed <code>output:</code>/<code>emits:</code>.</td><td><code>ClaudeCodeHarness</code> — runs headless <code>claude -p … --output-format json</code> <em>inside the sandbox</em>, parses the envelope, feeds <code>total_cost_usd</code> to the budget enforcer.</td></tr>
-  <tr><td><strong>SandboxProvider</strong></td><td>Provisions compute + egress from the sandbox spec (image build + <code>network:</code> allowlist). The trust boundary.</td><td><code>local</code> (subprocess, dev) or <code>daytona</code> (isolated cloud container). Selected with <code>--sandbox</code>.</td></tr>
+  <tr><td><strong>SandboxProvider</strong></td><td>Provisions compute + egress from the sandbox spec (image build + <code>network:</code> allowlist). The trust boundary.</td><td><code>local</code> (subprocess, dev) or <code>daytona</code> (isolated cloud container). Selected per-sandbox via <code>provider:</code> in <code>registry.yml</code> — the runtime routes each step to the backend its sandbox names; no launch-time flag.</td></tr>
   <tr><td><strong>Secrets</strong></td><td>Resolves a sandbox's <code>env_file</code>(s) at run time and injects them into the sandbox. Never in the manifest, never logged.</td><td><code>EnvFileSecretsResolver</code> — reads dotenv relative to the project root; refuses paths that escape it.</td></tr>
   <tr><td><strong>Sensor secrets</strong></td><td>Supplies credentials to in-process <code>@sensor</code> functions (poll + webhook).</td><td>A single runner-wide <code>sensors/.env</code> (<code>load_sensor_env</code>) merged into the process env at <code>loopy run</code>, so sensors read them via <code>os.environ</code>. Optional, gitignored, never in the manifest.</td></tr>
   <tr><td><strong>StateStore</strong></td><td>Run history (event-sourced), step outputs, poll watermarks (<code>last_run</code>), event-id dedupe.</td><td><code>InMemoryStateStore</code> — process-lifetime only. Now actively used: poll watermarks and the Redis bus's at-least-once dedupe.</td></tr>
@@ -407,7 +407,7 @@ step is touched.</strong></p>
 <div class="cmp three">
   <div>
     <h3>A. Laptop / CI <span class="tag ship">ships today</span></h3>
-    <p><code>loopy trigger … --sandbox local</code></p>
+    <p><code>loopy trigger …</code> <span class="sub">(sandboxes with <code>provider: local</code>)</span></p>
     <p class="sub"><code>InMemoryRuntime</code> · in-process <code>EventBus</code> · in-memory <code>StateStore</code> · <code>local</code> <code>Sandbox</code>.</p>
     <ul>
       <li>One process, fires one event, runs the cascade to completion, prints the step order.</li>
@@ -416,7 +416,7 @@ step is touched.</strong></p>
   </div>
   <div>
     <h3>B. Single-node server <span class="tag ship">ships today</span></h3>
-    <p><code>loopy run … --sandbox daytona</code></p>
+    <p><code>loopy run …</code> <span class="sub">(sandboxes with <code>provider: daytona</code>)</span></p>
     <p class="sub">Same composition, long-lived, hosting the webhooks; agents in isolated Daytona sandboxes.</p>
     <ul>
       <li class="good">A genuine deployment for short-lived cascades.</li>
@@ -445,9 +445,9 @@ bus: redis            # inproc (single-process) | redis (networked broker)</pre>
 so <code>--bus inproc</code> still wins over a file that says <code>redis</code>. Connection
 strings stay in the environment, never the file: <code>bus: redis</code> reads its URL from the
 <code>REDIS_URL</code> env var (or the <code>--redis-url</code> flag), defaulting to
-<code>redis://localhost:6379</code>. <code>sandbox</code> is <em>not</em> a config key — it's
-declared per-agent in <code>registry.yml</code>; the <code>--sandbox</code> flag selects only the
-provider backend. <code>state:</code> (durable StateStore) and <code>limits:</code> (spend caps)
+<code>redis://localhost:6379</code>. <code>sandbox</code> is <em>not</em> a config key and not a
+launch flag — each sandbox's <code>provider:</code> is declared in <code>registry.yml</code>, and
+the runtime routes each step to the backend its sandbox names. <code>state:</code> (durable StateStore) and <code>limits:</code> (spend caps)
 are reserved for B10/B-cost and not yet read.</p>
 <h3 style="margin-top:18px"><code>loopy.env</code> — the secret companion to <code>loopy.yaml</code></h3>
 <p>Because connection strings and provider keys can't live in the YAML, a local-dev convenience
@@ -489,11 +489,11 @@ DAYTONA_API_URL=https://...</pre>
     <code>os.environ</code>. Optional and gitignored. Keep infra creds (<code>DAYTONA_API_KEY</code>, <code>REDIS_URL</code>)
     out of it — those are the server's own env.</li>
   <li><strong>Control-plane / infra creds.</strong> The creds the engine itself needs go in its <strong>process env</strong>:
-    <code>DAYTONA_API_KEY</code> / <code>DAYTONA_API_URL</code> (for <code>--sandbox daytona</code>, plus <code>loopy-core[daytona]</code>),
+    <code>DAYTONA_API_KEY</code> / <code>DAYTONA_API_URL</code> (for the <code>daytona</code> provider, plus <code>loopy-core[daytona]</code>),
     and <code>REDIS_URL</code> / <code>--redis-url</code> (for <code>--bus redis</code>). In production these come from the platform;
     for local dev drop them in <code>loopy.env</code> at the project root (the secret companion to <code>loopy.yaml</code>, merged
     with non-override). Infra creds only — agent secrets stay in sandbox <code>env_file</code>s, sensor secrets in <code>sensors/.env</code>.
-    For <code>--sandbox local</code>: nothing — but agents run as host subprocesses, so it's dev-only.</li>
+    For the <code>local</code> provider: nothing — but agents run as host subprocesses, so it's dev-only.</li>
   <li><strong>Egress allowlist.</strong> Each sandbox's <code>network:</code> list is the egress contract — it
     must include every host an agent's tools reach (e.g. <code>github.com</code> for <code>open_pr</code>),
     and the model API endpoint must be reachable from inside the sandbox.</li>

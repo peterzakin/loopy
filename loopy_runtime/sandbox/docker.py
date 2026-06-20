@@ -153,7 +153,7 @@ async def _subprocess_run(argv: list[str]) -> ExecResult:
         )
     except FileNotFoundError as exc:  # docker not installed / not on PATH
         raise RuntimeError(
-            "the docker CLI was not found; install Docker or use `--sandbox local`"
+            "the docker CLI was not found; install Docker or set the sandbox's provider to `local`"
         ) from exc
     out, err = await proc.communicate()
     return ExecResult(

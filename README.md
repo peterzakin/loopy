@@ -229,7 +229,7 @@ See `sensors/sensors.py` for the full example.
   describes (triage → resolve → confirm, plus an `upkeep` cron scan).
 - [`examples/codefix/`](examples/codefix/) — the smallest *runnable* loop: one `CodeTask` event →
   an agent that edits a checkout and opens a PR. Start here to actually run something. Its README
-  is a **"Run locally" quickstart** — what each `--sandbox` needs in its `env_file`
+  is a **"Run locally" quickstart** — what each sandbox `provider:` needs in its `env_file`
   (`ANTHROPIC_API_KEY`/`GITHUB_TOKEN`, plus `PATH`/`HOME` for bare `local`), how to wire git auth
   with `loopy auth github`, and a one-command end-to-end smoke test. Tokens are injected only when
   a GitHub App is configured (on both `run` and `trigger`); they are **not** ambient on the
@@ -241,10 +241,10 @@ A few things worth knowing before the first run:
   proves the manifest is well-formed; the scaffold still ships placeholders that break a real run (a
   fake `ANTHROPIC_API_KEY`, an unpushable starter repo, no git auth). `loopy doctor` names exactly
   which of those are still outstanding — run it before your first `trigger`.
-- **`--sandbox` is a provider, not a sandbox name.** It takes `local | docker | daytona` and
-  selects the *provider* for the run; it is **not** the name of a sandbox in `registry.yml`. (Per-
-  sandbox provider selection from the registry isn't wired yet — the flag picks one provider for
-  the whole run.)
+- **Where an agent runs is authored in `registry.yml`, not on the command line.** Each sandbox
+  declares its `provider:` (`local | docker | daytona`); the runtime dispatches each step to the
+  backend its sandbox names. There is no `--sandbox` flag — sandbox selection is a property of the
+  project, so two sandboxes in one manifest can target different backends.
 - **The sandbox inherits nothing from your shell.** Everything an agent needs — the model key,
   any git token — must be in the sandbox's `env_file`; exporting `ANTHROPIC_API_KEY` in your shell
   is not enough. (The bare `local` provider also needs `PATH`/`HOME` there; `docker`/`daytona` get

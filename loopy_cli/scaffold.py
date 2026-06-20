@@ -139,7 +139,7 @@ _DEV_ENV = """\
 # never commit this file. Lines are KEY=VALUE; values are literal (no ${VAR} interpolation).
 
 # --- model auth (claude-code) ---
-# Required for --sandbox daytona/docker (the built image carries no creds).
+# Required for the daytona/docker providers (the built image carries no creds).
 ANTHROPIC_API_KEY=sk-ant-...
 
 # --- git auth ---
@@ -147,8 +147,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 # automatically; otherwise put a PAT with contents:write + pull_requests:write here.
 # GITHUB_TOKEN=ghp_...
 
-# --- only for --sandbox local (a bare subprocess inherits nothing from your shell) ---
-# With --sandbox daytona/docker these come from the built image; leave them out.
+# --- only for the `local` provider (a bare subprocess inherits nothing from your shell) ---
+# With the daytona/docker providers these come from the built image; leave them out.
 # PATH=/usr/local/bin:/usr/bin:/bin
 # HOME=/home/you
 """
@@ -165,7 +165,7 @@ _LOOPY_ENV = """\
 # GITHUB_APP_ID=
 # GITHUB_APP_PRIVATE_KEY=
 
-# --- Daytona (the default sandbox; required for --sandbox daytona) ---
+# --- Daytona (the default sandbox; required when a sandbox uses provider: daytona) ---
 # DAYTONA_API_KEY=
 # DAYTONA_API_URL=
 
@@ -212,12 +212,11 @@ loopy auth status            # then visit the printed install URL to pick repos
 # 4. check the above is actually done — a green compile is not a runnable project
 loopy doctor
 
-# 5. compile + fire one task
+# 5. compile + fire one task (the sandbox runs on whatever registry.yml's `provider:` names)
 loopy compile .              # writes manifest.json
 loopy trigger manifest.json \\
   --event CodeTask \\
-  --fields '{"task": "add a CONTRIBUTING.md", "branch": "codefix/contributing"}' \\
-  --sandbox daytona
+  --fields '{"task": "add a CONTRIBUTING.md", "branch": "codefix/contributing"}'
 ```
 
 Run every command from this directory so `loopy.env` and `--root` stay in sync.

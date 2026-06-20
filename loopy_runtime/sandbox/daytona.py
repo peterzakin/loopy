@@ -52,7 +52,7 @@ class DaytonaSandboxProvider:
                 raise RuntimeError(
                     "DAYTONA_API_KEY is not set; the Daytona provider needs it to "
                     "authenticate. Put it in loopy.env (control-plane creds) or export it "
-                    "before `loopy trigger/run --sandbox daytona`."
+                    "before running a sandbox with `provider: daytona`."
                 )
             try:
                 from daytona import AsyncDaytona
