@@ -1,4 +1,4 @@
-"""Select a SandboxProvider by name (lazy imports so optional providers stay optional).
+"""Select a SandboxProvider by name (lazy imports so a project only loads the provider it uses).
 
 Every provider is wrapped so a sandbox's declared `repos:` are cloned into the workspace
 right after the compute is acquired — one place, behind the `SandboxProvider` seam, so the
@@ -67,7 +67,7 @@ class RoutingSandboxProvider:
     (e.g. a `daytona` cloud sandbox alongside a `local` one).
 
     Concrete providers are built lazily and cached, so a project that only uses `daytona`
-    never imports `docker` (keeping those deps optional). Every *defined* sandbox must
+    never imports `docker` (and vice versa). Every *defined* sandbox must
     declare its `provider:` (enforced at compile, E214); the `default` here only covers the
     degenerate case of an agent that declares no sandbox at all — which still runs remotely
     on `daytona`, never silently on the host.

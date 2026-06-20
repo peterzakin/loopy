@@ -564,8 +564,8 @@ What you actually need in place for a successful run, in order:
    infra creds (`DAYTONA_API_KEY`, `REDIS_URL`) *out* of it — those are the server's own env
    (item 5), and sensors share the engine's process env today.
 5. **Control-plane / infra creds.** The creds the engine itself needs go in its **process env**:
-   for the `daytona` provider, `DAYTONA_API_KEY` / `DAYTONA_API_URL` (and `loopy-core[daytona]`
-   installed); for `--bus redis`, a reachable `REDIS_URL` (or `--redis-url`). In production these
+   for the `daytona` provider (loopy's default sandbox), `DAYTONA_API_KEY` / `DAYTONA_API_URL`
+   (the SDK ships in the core deps); for `--bus redis`, a reachable `REDIS_URL` (or `--redis-url`). In production these
    come from the platform (container env, systemd, CI secret store). For **local dev**, drop them
    in **`loopy.env`** at the project root — the secret companion to `loopy.yaml`, merged into the
    process env at `loopy run` with non-override (a value set in the real environment always wins).

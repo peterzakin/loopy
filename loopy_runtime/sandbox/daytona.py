@@ -1,8 +1,9 @@
 """Daytona sandbox provider — run agents in Daytona cloud sandboxes (isolated
 containers) behind the `SandboxProvider`/`Sandbox` Protocols.
 
-The `daytona` SDK is an optional dependency: it's imported lazily, and a client can be
-injected (so tests never hit the real service). Secrets inject as the sandbox's
+The `daytona` SDK is a core dependency (Daytona is loopy's default sandbox), but it's
+imported lazily so the rest of the runtime loads without touching the SDK, and a client
+can be injected (so tests never hit the real service). Secrets inject as the sandbox's
 `env_vars` (the sandbox is the trust boundary); `exec` maps an argv list to a shell
 command and returns an `ExecResult`; `release` deletes the sandbox.
 """
@@ -56,9 +57,10 @@ class DaytonaSandboxProvider:
                 )
             try:
                 from daytona import AsyncDaytona
-            except ImportError as exc:  # pragma: no cover - exercised via the missing-SDK test path
+            except ImportError as exc:  # pragma: no cover - core dep; only a broken install hits
                 raise RuntimeError(
-                    "the Daytona SDK is not installed; `pip install loopy-core[daytona]`"
+                    "the Daytona SDK failed to import; it ships as a core dependency of "
+                    "loopy-core — reinstall with `pip install loopy-core`"
                 ) from exc
             self._client = AsyncDaytona()  # reads DAYTONA_API_KEY / DAYTONA_API_URL
         return self._client

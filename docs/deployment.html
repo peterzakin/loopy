@@ -489,7 +489,7 @@ DAYTONA_API_URL=https://...</pre>
     <code>os.environ</code>. Optional and gitignored. Keep infra creds (<code>DAYTONA_API_KEY</code>, <code>REDIS_URL</code>)
     out of it — those are the server's own env.</li>
   <li><strong>Control-plane / infra creds.</strong> The creds the engine itself needs go in its <strong>process env</strong>:
-    <code>DAYTONA_API_KEY</code> / <code>DAYTONA_API_URL</code> (for the <code>daytona</code> provider, plus <code>loopy-core[daytona]</code>),
+    <code>DAYTONA_API_KEY</code> / <code>DAYTONA_API_URL</code> (for the <code>daytona</code> provider, loopy's default sandbox — the SDK ships in the core deps),
     and <code>REDIS_URL</code> / <code>--redis-url</code> (for <code>--bus redis</code>). In production these come from the platform;
     for local dev drop them in <code>loopy.env</code> at the project root (the secret companion to <code>loopy.yaml</code>, merged
     with non-override). Infra creds only — agent secrets stay in sandbox <code>env_file</code>s, sensor secrets in <code>sensors/.env</code>.

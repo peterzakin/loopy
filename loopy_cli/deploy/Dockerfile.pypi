@@ -13,8 +13,8 @@ FROM python:3.11-slim
 ARG LOOPY_VERSION
 RUN test -n "$LOOPY_VERSION" || (echo "LOOPY_VERSION build arg is required" >&2; exit 1)
 
-# [redis] for `--bus redis`, [daytona] for `--sandbox daytona` (the container stack uses both).
-RUN pip install --no-cache-dir "loopy-core[redis,daytona]==${LOOPY_VERSION}"
+# [redis] for `--bus redis`; Daytona (the default sandbox) ships in the core deps.
+RUN pip install --no-cache-dir "loopy-core[redis]==${LOOPY_VERSION}"
 
 # Commands run against the bind-mounted project (manifest + sensors + env files).
 WORKDIR /project
