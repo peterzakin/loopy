@@ -12,6 +12,7 @@ from loopy_core.compile import codes
 from loopy_core.compile.diagnostics import DiagnosticCollector
 from loopy_core.compile.model import EventLineage, Lineage, Project
 from loopy_core.discovery import Inventory
+from loopy_core.span import span_at
 
 
 def cross_check(project: Project, inv: Inventory, diags: DiagnosticCollector) -> None:
@@ -56,6 +57,17 @@ def cross_check(project: Project, inv: Inventory, diags: DiagnosticCollector) ->
                     codes.E503,
                     f"agent '{agent.name}' references skill '{skill}', which is not in skills/",
                     span=agent.span,
+                )
+
+    # X2 — every workflow a per-workflow spend limit names must exist (workflows weren't loaded
+    # when the registry parsed `limits`, so this resolves here, like the agent/sandbox checks).
+    if registry.limits is not None:
+        for wf_name in registry.limits.workflows:
+            if wf_name not in project.workflows:
+                diags.error(
+                    codes.E505,
+                    f"registry limits.workflows names '{wf_name}', which is not a workflow",
+                    span=span_at("registry.yml"),
                 )
 
     # X5 — lineage + dead-trigger warnings.

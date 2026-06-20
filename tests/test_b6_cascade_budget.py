@@ -65,11 +65,14 @@ def _loop_step(emits: list[str]) -> dict:
     }
 
 
-def _loop_manifest(emits: list[str]) -> Manifest:
+def _loop_manifest(emits: list[str], *, limits: dict | None = None) -> Manifest:
+    registry = {"sandboxes": {}, "agents": {}, "events": {"Tick": {"fields": {}}}}
+    if limits is not None:
+        registry["limits"] = limits
     return Manifest.model_validate(
         {
             "schema_version": "1",
-            "registry": {"sandboxes": {}, "agents": {}, "events": {"Tick": {"fields": {}}}},
+            "registry": registry,
             "workflows": {"loop": {"entry": "tick", "steps": {"tick": _loop_step(emits)}}},
             "sensors": [],
             "lineage": {"events": {}},
@@ -92,7 +95,7 @@ def _runtime(manifest: Manifest, harness, **kw) -> InMemoryRuntime:
     )
 
 
-# --- dollar cap (--max-spend) -------------------------------------------------
+# --- dollar cap (registry limits.cascade_spend) -------------------------------
 
 
 def test_looping_cascade_trips_dollar_cap_not_iteration_cap():
@@ -158,10 +161,36 @@ def test_none_cost_is_fine_without_a_cap():
     assert asyncio.run(rt.status(run_id)).state == "completed"
 
 
-# --- preflight gate: all reachable agents must report cost under --max-spend ---
+# --- per-workflow cap (registry limits.workflows) -----------------------------
 
 
-def _agent_manifest(runtime: str) -> Manifest:
+def test_per_workflow_cap_winds_down_its_workflow():
+    # The `loop` workflow has its own $0.25 cap and no project cascade cap. Same winding-down
+    # as the cascade cap, but scoped to and reported for the one workflow.
+    harness = CostHarness(cost_per_step=0.10)
+    manifest = _loop_manifest(["Tick"], limits={"workflows": {"loop": {"spend": {"usd": 0.25}}}})
+    rt = _runtime(manifest, harness, max_iterations=10_000)
+    asyncio.run(rt.trigger(_tick()))
+    assert harness.calls == 3  # 4th ($0.30 ≥ $0.25) short-circuited
+    failed = rt.failed_runs
+    assert failed and "workflow 'loop'" in (failed[-1].error or "")
+    assert "reaching its cap of $0.25" in (failed[-1].error or "")
+
+
+def test_per_workflow_cap_resets_between_drains():
+    harness = CostHarness(cost_per_step=0.10)
+    manifest = _loop_manifest([], limits={"workflows": {"loop": {"spend": {"usd": 0.15}}}})
+    rt = _runtime(manifest, harness)
+    asyncio.run(rt.trigger(_tick()))
+    asyncio.run(rt.trigger(_tick()))
+    assert harness.calls == 2  # each drain gets the full per-workflow budget again
+    assert rt.failed_runs == []
+
+
+# --- preflight gate: all reachable agents must report cost under the cap -------
+
+
+def _agent_manifest(runtime: str, *, limits: dict | None = None) -> Manifest:
     step = {
         "id": "loop/tick",
         "trigger": {"kind": "event", "event": "Tick"},
@@ -173,14 +202,17 @@ def _agent_manifest(runtime: str) -> Manifest:
         "body": "go",
         "refs": [],
     }
+    registry = {
+        "sandboxes": {},
+        "agents": {"Coder": {"harness": {"runtime": runtime}}},
+        "events": {"Tick": {"fields": {}}},
+    }
+    if limits is not None:
+        registry["limits"] = limits
     return Manifest.model_validate(
         {
             "schema_version": "1",
-            "registry": {
-                "sandboxes": {},
-                "agents": {"Coder": {"harness": {"runtime": runtime}}},
-                "events": {"Tick": {"fields": {}}},
-            },
+            "registry": registry,
             "workflows": {"loop": {"entry": "tick", "steps": {"tick": step}}},
             "sensors": [],
             "lineage": {"events": {}},
@@ -200,7 +232,7 @@ def test_preflight_rejects_dollar_cap_with_cost_blind_agent():
     rt = _preflight_runtime(_agent_manifest("codex"), cascade_budget_usd=5.0)
     with pytest.raises(PreflightError) as exc:
         rt.preflight()
-    assert "--max-spend" in str(exc.value)
+    assert "limits.cascade_spend" in str(exc.value)
     assert "Coder" in str(exc.value)
 
 
@@ -208,6 +240,16 @@ def test_preflight_allows_dollar_cap_with_cost_reporting_agent():
     # claude-code reports cost → the gate is satisfied, preflight is a no-op.
     rt = _preflight_runtime(_agent_manifest("claude-code"), cascade_budget_usd=5.0)
     rt.preflight()
+
+
+def test_preflight_rejects_per_workflow_cap_with_cost_blind_agent():
+    # A per-workflow cap also gates: the cost-blind agent inside the capped `loop` workflow is
+    # refused up front, even with no project cascade cap set.
+    manifest = _agent_manifest("codex", limits={"workflows": {"loop": {"spend": {"usd": 5.0}}}})
+    rt = _preflight_runtime(manifest)
+    with pytest.raises(PreflightError) as exc:
+        rt.preflight()
+    assert "Coder" in str(exc.value)
 
 
 def test_preflight_ignores_cost_capability_without_a_cap():

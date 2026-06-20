@@ -18,7 +18,11 @@ from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from loopy_runtime.budget import BudgetExceeded, CascadeBudgetExceeded
+from loopy_runtime.budget import (
+    BudgetExceeded,
+    CascadeBudgetExceeded,
+    WorkflowBudgetExceeded,
+)
 from loopy_runtime.contract import (
     Event,
     RunEvent,
@@ -112,6 +116,16 @@ class InMemoryRuntime:
         # None disables it. See the cost-budget plan.
         self.cascade_budget_usd = cascade_budget_usd
         self._cascade_cost = 0.0
+        # Per-named-workflow USD caps from registry `limits.workflows` (read straight off the
+        # manifest the runtime already holds). Each caps the cumulative spend of one workflow's
+        # steps within a drain; `_workflow_cost` accumulates per drain alongside `_cascade_cost`.
+        limits = manifest.registry.limits
+        self._workflow_caps: dict[str, float] = {}
+        if limits is not None:
+            for wf_name, wl in limits.workflows.items():
+                if wl.spend and wl.spend.get("usd") is not None:
+                    self._workflow_caps[wf_name] = wl.spend["usd"]
+        self._workflow_cost: dict[str, float] = {}
 
         self._event_seq = 0
         self._runs: dict[RunId, RunStatus] = {}
@@ -140,14 +154,22 @@ class InMemoryRuntime:
         step that needs the key. The per-step check in `_run_step` remains as a backstop
         for paths that don't run preflight (direct `drain`/`tick`, tests).
 
-        When a dollar cap (`--max-spend` / `cascade_budget_usd`) is active, also enforce the
-        all-or-nothing cost-capability gate here: every agent reachable in the project must use a
-        harness that reports USD cost (`reports_cost`), because one cost-blind step in a cascade
-        makes its spend invisible and lets a runaway slip the cap. Rejected up front with the
-        offending agents named, before anything runs."""
+        When a dollar cap is active (registry `limits.cascade_spend`, or a per-workflow
+        `limits.workflows.<name>.spend`), also enforce the all-or-nothing cost-capability gate
+        here: every agent reachable under a cap must use a harness that reports USD cost
+        (`reports_cost`), because one cost-blind step makes its spend invisible and lets a runaway
+        slip the cap. Rejected up front with the offending agents named, before anything runs."""
+        # Agents that run under some spend cap: all of them when the cascade cap is set, plus any
+        # agent reachable inside a capped workflow. Precomputed across all workflows so an agent
+        # shared between a capped and an uncapped workflow is still caught.
+        agents_under_cap: set[str] = set()
+        for wf_name, wf in self.manifest.workflows.items():
+            if self.cascade_budget_usd is not None or wf_name in self._workflow_caps:
+                agents_under_cap.update(s.agent for s in wf.steps.values() if s.agent)
+
         problems: list[str] = []
         github_sandboxes: set[str] = set()
-        cost_blind: list[str] = []  # agents on a harness that reports no USD cost
+        cost_blind: list[str] = []  # capped agents on a harness that reports no USD cost
         seen: set[str] = set()
         for wf in self.manifest.workflows.values():
             for step in wf.steps.values():
@@ -169,17 +191,17 @@ class InMemoryRuntime:
                     )
                 if _sandbox_needs_github(spec):
                     github_sandboxes.add(sandbox_name)
-                if self.cascade_budget_usd is not None and not _agent_reports_cost(agent):
+                if name in agents_under_cap and not _agent_reports_cost(agent):
                     cost_blind.append(name)
 
         sections: list[str] = []
         if cost_blind:
             sections.append(
-                f"--max-spend (${self.cascade_budget_usd}) is set but agent(s) "
-                f"{', '.join(sorted(cost_blind))} use a harness that reports no USD cost, so a "
-                "cascade-wide spend cap can't be enforced (one cost-blind step makes its spend "
-                "invisible).\n  → move those agents to a cost-reporting harness (e.g. "
-                "claude-code), or drop --max-spend."
+                f"a spend cap (registry limits.cascade_spend / limits.workflows) is set but "
+                f"agent(s) {', '.join(sorted(cost_blind))} use a harness that reports no USD cost, "
+                "so the cap can't be enforced (one cost-blind step makes its spend invisible).\n  "
+                "→ move those agents to a cost-reporting harness (e.g. claude-code), or remove the "
+                "cap from registry.yml."
             )
         if problems:
             sections.append(
@@ -321,6 +343,7 @@ class InMemoryRuntime:
         # serve(), two unrelated events that share a drain share the counter — that only trips
         # the cap *earlier* (safe); precise per-cascade-id scoping is a follow-up.
         self._cascade_cost = 0.0
+        self._workflow_cost = {}
         first_run_id: RunId | None = None
         iterations = 0
         try:
@@ -338,32 +361,42 @@ class InMemoryRuntime:
             self._draining = False
         return first_run_id
 
-    def _check_cascade_budget(self, step_id: str) -> None:
-        """Raise CascadeBudgetExceeded if the cascade has already reached its cumulative USD
-        cap. Checked before each step so an over-budget run never starts the agent → it emits
-        nothing → the loop-back winds down on its own."""
+    def _check_cascade_budget(self, wf_name: str, step_id: str) -> None:
+        """Raise if a dollar cap — the project-wide cascade cap or this workflow's own cap — has
+        already been reached. Checked before each step so an over-budget run never starts the
+        agent → it emits nothing → the loop-back winds down on its own."""
         cap = self.cascade_budget_usd
         if cap is not None and self._cascade_cost >= cap:
             raise CascadeBudgetExceeded(
                 f"cascade spent ${self._cascade_cost:.4f}, reaching the cap of ${cap} "
                 f"before step '{step_id}'"
             )
+        wf_cap = self._workflow_caps.get(wf_name)
+        if wf_cap is not None and self._workflow_cost.get(wf_name, 0.0) >= wf_cap:
+            raise WorkflowBudgetExceeded(
+                f"workflow '{wf_name}' spent ${self._workflow_cost.get(wf_name, 0.0):.4f}, "
+                f"reaching its cap of ${wf_cap} before step '{step_id}'"
+            )
 
-    def _accumulate_cost(self, step_id: str, usage) -> None:  # noqa: ANN001 - Usage
-        """Add a step's USD cost to the cascade total when a dollar cap is active. A
-        `cost_usd is None` under an active cap is a hard error (recorded as a failed run),
-        never counted as $0 — the gate ('never silently no-op') the preflight check enforces
-        statically, backstopped here for a harness that reports cost in general but returns
-        None for a specific call. No-op when no dollar cap is set."""
-        if self.cascade_budget_usd is None:
+    def _accumulate_cost(self, wf_name: str, step_id: str, usage) -> None:  # noqa: ANN001 - Usage
+        """Add a step's USD cost to the cascade total and its workflow's total when a dollar cap
+        touches it. A `cost_usd is None` under an active cap is a hard error (recorded as a failed
+        run), never counted as $0 — the gate the preflight check enforces statically, backstopped
+        here for a harness that reports cost in general but returns None for a specific call.
+        No-op when no cap (cascade or per-workflow) applies to this step."""
+        capped = self.cascade_budget_usd is not None or wf_name in self._workflow_caps
+        if not capped:
             return
         if usage.cost_usd is None:
             raise RuntimeError(
-                f"step '{step_id}' ran under an active --max-spend cap but its harness reported "
+                f"step '{step_id}' ran under an active spend cap but its harness reported "
                 "no USD cost for this call, so the cap can't be enforced (never counted as $0) — "
                 "use a harness/provider that reports cost."
             )
-        self._cascade_cost += usage.cost_usd
+        if self.cascade_budget_usd is not None:
+            self._cascade_cost += usage.cost_usd
+        if wf_name in self._workflow_caps:
+            self._workflow_cost[wf_name] = self._workflow_cost.get(wf_name, 0.0) + usage.cost_usd
 
     async def _execute(self, wf_name: str, event: Event) -> RunId:
         wf = self.manifest.workflows[wf_name]
@@ -391,7 +424,7 @@ class InMemoryRuntime:
                 # Check before running: an over-budget cascade short-circuits here → emits
                 # nothing → the loop-back winds down on its own. Raised, then caught below and
                 # recorded as a failed run (composes with the run-failure path, no new plumbing).
-                self._check_cascade_budget(step.id)
+                self._check_cascade_budget(wf_name, step.id)
                 ctx = StepContext(
                     run_id=run_id,
                     step_id=step.id,
@@ -400,7 +433,7 @@ class InMemoryRuntime:
                     idempotency_key=f"{run_id}:{step.id}",
                 )
                 result = await self._run_step(step, ctx)
-                self._accumulate_cost(step.id, result.usage)
+                self._accumulate_cost(wf_name, step.id, result.usage)
                 outputs[local_name] = result.output
                 step_states[local_name] = "completed"
                 self.execution_log.append(step.id)

@@ -18,6 +18,12 @@ class CascadeBudgetExceeded(BudgetExceeded):
     (not an engine crash) so the cascade winds down on its own. See the cost-budget plan."""
 
 
+class WorkflowBudgetExceeded(BudgetExceeded):
+    """A single named workflow's cumulative spend (across a cascade/drain) reached the USD cap
+    set in registry `limits.workflows.<name>.spend`. Like CascadeBudgetExceeded but scoped to one
+    workflow's steps; raised before a step runs and recorded as a failed run."""
+
+
 class BudgetEnforcer:
     @staticmethod
     def wall_clock_seconds(budget: BudgetSpec | None) -> float | None:

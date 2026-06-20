@@ -25,6 +25,7 @@ E201 = "LOOPY-E201"  # unknown type shorthand in event fields: or step output:
 E210 = "LOOPY-E210"  # entity name not Capitalized / reserved `default` misused (X1)
 E211 = "LOOPY-E211"  # duplicate entity name in registry.yml (X1)
 E212 = "LOOPY-E212"  # malformed sandbox repos: entry (not owner/name string nor {url,...})
+E213 = "LOOPY-E213"  # malformed registry limits: (e.g. cascade_spend without a numeric usd)
 
 # E3xx — templates
 E301 = "LOOPY-E301"  # illegal template: control flow / filters / dotted path
@@ -43,6 +44,7 @@ E501 = "LOOPY-E501"  # step agent: doesn't resolve to a registered Agent (X2)
 E502 = "LOOPY-E502"  # an agent's sandbox doesn't resolve (X2)
 E503 = "LOOPY-E503"  # an agent.skills[] entry doesn't resolve in skills/ (X2)
 E504 = "LOOPY-E504"  # on:/emits: names an unregistered event (X3)
+E505 = "LOOPY-E505"  # registry limits.workflows names a workflow that doesn't exist (X2)
 
 # W5xx — lineage warnings
 W501 = "LOOPY-W501"  # dead trigger — registered on: event with no producer (X5)
@@ -64,6 +66,7 @@ ALL_CODES: frozenset[str] = frozenset(
         E210,
         E211,
         E212,
+        E213,
         E301,
         E302,
         E303,
@@ -76,6 +79,7 @@ ALL_CODES: frozenset[str] = frozenset(
         E502,
         E503,
         E504,
+        E505,
         W501,
     }
 )

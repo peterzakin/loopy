@@ -90,13 +90,14 @@ def test_build_runtime_passes_state_through_when_given(tmp_path):
 
 def test_build_runtime_defaults_cascade_budget_to_none(tmp_path):
     rt = build_runtime(_manifest(), root=tmp_path, sandbox="local", bus=InProcessEventBus())
-    assert rt.cascade_budget_usd is None  # dollar cap disabled unless --max-spend is given
+    assert rt.cascade_budget_usd is None  # disabled unless registry limits.cascade_spend is set
 
 
-def test_build_runtime_wires_max_spend_into_dollar_cap(tmp_path):
-    rt = build_runtime(
-        _manifest(), root=tmp_path, sandbox="local", bus=InProcessEventBus(), max_spend=12.50
-    )
+def test_build_runtime_reads_cascade_budget_from_registry_limits(tmp_path):
+    # The cap is a project-level control authored in the registry and carried by the manifest —
+    # not a launch-time flag — so build_runtime derives it from registry.limits.cascade_spend.
+    manifest = _manifest(limits={"cascade_spend": {"usd": 12.50}})
+    rt = build_runtime(manifest, root=tmp_path, sandbox="local", bus=InProcessEventBus())
     assert rt.cascade_budget_usd == 12.50
 
 
@@ -113,13 +114,6 @@ def test_trigger_exposes_json_flag():
     result = runner.invoke(app, ["trigger", "--help"])
     assert result.exit_code == 0
     assert "--json" in result.stdout
-
-
-def test_trigger_and_run_expose_max_spend_flag():
-    for cmd in ("trigger", "run"):
-        result = runner.invoke(app, [cmd, "--help"])
-        assert result.exit_code == 0
-        assert "--max-spend" in result.stdout
 
 
 # --- run record (#9: surface step outputs) -----------------------------------
@@ -151,13 +145,16 @@ def test_run_record_includes_failures():
     assert _run_record("r1", rt, {})["failed"] == [{"run_id": "r1", "error": "boom"}]
 
 
-def _manifest():
+def _manifest(*, limits=None):
     from loopy_runtime.manifest_model import Manifest
 
+    registry = {"sandboxes": {}, "agents": {}, "events": {"Go": {"fields": {}}}}
+    if limits is not None:
+        registry["limits"] = limits
     return Manifest.model_validate(
         {
             "schema_version": "1",
-            "registry": {"sandboxes": {}, "agents": {}, "events": {"Go": {"fields": {}}}},
+            "registry": registry,
             "workflows": {"wf": {"entry": "run", "steps": {}}},
             "sensors": [],
             "lineage": {"events": {}},
