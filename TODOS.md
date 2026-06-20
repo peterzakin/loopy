@@ -25,6 +25,16 @@ plan/source. When an item ships, check its box (`- [x]`) and strike the heading
   cap is a recorded failure, never counted as $0). Cost-blind harnesses (Codex) are refused under
   an active cap and have no cumulative cap until a runtime pricing layer (tokens × rate) lands.
 
+  **`limits.cascade_spend` is experimental / not explicitly supported.** Because a cascade can
+  span workflows via event loop-backs, the all-or-nothing gate is project-wide: *every* agent
+  anywhere must report cost, so a cross-workflow cascade that spans an agent on a non-cost-reporting
+  harness (e.g. Codex) can't use the cascade cap at all (preflight rejects it project-wide). There's
+  also no per-cascade-id scoping under `serve()` yet (concurrent events sharing a drain share the
+  counter — trips early, never late). **Per-workflow caps (`limits.workflows`) are the supported
+  path** for cost-blind or mixed-harness deployments; the cross-workflow cascade cap needs the
+  pricing layer above (so cost-blind harnesses get a cost) plus per-cascade scoping before it's
+  first-class.
+
 - [ ] **2. Durability — DurableLite backend (B7 + B10), Phase 11**
   — `ARCHITECTURE.md` §5 (phase 11), §8, §9
   Largest capability gap. InMemory runtime loses all state on crash and has no durable timers, so

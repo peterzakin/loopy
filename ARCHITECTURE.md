@@ -94,7 +94,7 @@ triggering event, must satisfy these. Each requirement is also where a modular p
 | **B3** | **Template resolution at runtime.** Resolve `{{ event.* }}` (entry event) and `{{ step.* }}` (a direct `after:` predecessor's output) against real run data before invoking the agent. | Values only exist at run time. |
 | **B4** | **Agent invocation + typed output capture.** Run a step's prose against its bound agent (model + tools + skills + sandbox) and validate the result against the step's `output:` schema. | Steps are agent tasks. |
 | **B5** | **Event emission onto the bus.** When a step (or sensor) `emits:` a registered event, publish it so other workflows' `on:` subscriptions fire — including any event-driven loop-back to a workflow's entry. | Cross-workflow seams. |
-| **B6** | **Budget enforcement.** Enforce `budget.wall_clock` (minutes), per-step `budget.spend.usd`, a cumulative cascade USD cap (registry `limits.cascade_spend.usd`) and per-workflow USD caps (registry `limits.workflows.<name>.spend.usd`) — both gated on cost-reporting harnesses — that terminate runaway loop-backs; honor `window`/`latency` (days). | Runs span days; must be bounded. |
+| **B6** | **Budget enforcement.** Enforce `budget.wall_clock` (minutes), per-step `budget.spend.usd`, per-workflow USD caps (registry `limits.workflows.<name>.spend.usd`), and an *experimental* cumulative cascade USD cap (registry `limits.cascade_spend.usd`) — all gated on cost-reporting harnesses — that terminate runaway loop-backs; honor `window`/`latency` (days). | Runs span days; must be bounded. |
 | **B7** | **Durable timers.** `cron(expr)` ticks and budget/wait windows must survive process restarts (no language `sleep`). | Day-long waits can't live in memory. |
 | **B8** | **Cron watermarks.** Persist `last_run` per cron/poll trigger and supply `{{ event.scheduled_at }}` / `{{ event.last_run }}` so steps scan only what changed. | README's incremental-scan contract. |
 | **B9** | **Idempotent side effects + retries.** Retry failed agent/sensor/tool calls with backoff; side effects (emit, `open_pr`, `merge_pr`) carry an idempotency key (`run_id + step_id`) so retries/replays don't double-fire. | Long runs *will* hit transient failures. |
@@ -105,6 +105,17 @@ triggering event, must satisfy these. Each requirement is also where a modular p
 B1–B6 are required by *every* backend, even the in-memory dev one. B7–B12 scale with the
 durability target — an InMemory backend may stub B7/B10 (process-lifetime only); a production
 backend must implement them fully.
+
+> **Cascade spend cap (`limits.cascade_spend`) is experimental, not explicitly supported.** Two
+> rough edges: (1) **Cross-workflow + cost-blind harnesses.** A cascade can span workflows via
+> event loop-backs, and the cost-reporting gate is all-or-nothing across the *whole* project —
+> *every* agent reachable anywhere must use a harness that reports USD cost. So a cascade that
+> legitimately spans a workflow whose agent runs on a harness without spend reporting (e.g. Codex)
+> cannot use the cascade cap at all: preflight rejects it project-wide rather than leaving the
+> cap silently unenforceable. (2) **No per-cascade scoping under `serve()`** yet — concurrent
+> events that share a drain share the counter (which only trips the cap *earlier*, never later).
+> For mixed-harness or cost-blind deployments, prefer **per-workflow caps**
+> (`limits.workflows.<name>.spend.usd`), which scope the gate to the one capped workflow.
 
 ### 3.2 The swappable modules
 
