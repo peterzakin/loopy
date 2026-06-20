@@ -128,14 +128,15 @@
 </div>
 
 <div class="callout warn">
-  <strong>⚠️ Ingress direction — read first.</strong> The intended sensor model is
-  <strong>polling</strong> (Loopy calls out to each source on a schedule). <strong>Webhook ingress is
-  a future improvement:</strong> supporting arbitrary third-party webhooks requires per-source
-  authentication, which is deferred. The webhook examples below illustrate that future path — they
-  are <strong>not</strong> a production ingress. (Honest status: an in-process poll scheduler now
-  runs <code>@sensor(poll=…)</code> sensors; <em>durable</em> poll scheduling — survives restarts,
-  fires once across workers — is still ahead (ARCHITECTURE B7/B8). Webhook routes run but are
-  unauthenticated. Polling is the production direction; durability is the remaining gap.)
+  <strong>⚠️ Ingress status — read first.</strong> Both sensor models run today. <code>loopy run</code>
+  schedules <strong>poll</strong> and <strong>cron</strong> triggers on an in-process scheduler (one
+  watermark-gated task per sensor) and hosts <strong>webhook</strong> sensors as HTTP routes, fanning
+  one URL out to every sensor on it. Webhook ingress can be <strong>signed</strong>: for
+  <code>/hooks/github</code> paths, <code>loopy run</code> verifies GitHub's <code>X-Hub-Signature-256</code>
+  HMAC at the edge when <code>GITHUB_WEBHOOK_SECRET</code> is set (a path left without a secret runs
+  unverified — dev only — and says so loudly). The remaining gap is <strong>durability</strong>, not the
+  trigger type: the scheduler is in-process, so restart-survival and single-firing across workers are
+  still ahead (ARCHITECTURE B7/B8).
 </div>
 
 <h2>1. The two lifecycles</h2>
@@ -508,13 +509,15 @@ DAYTONA_API_URL=https://...</pre>
     <li><strong>Sensor module won't load</strong> → the server logs a warning and falls back to
       <em>synthesizing</em> events from the contract, so the path still exercises end-to-end. Real
       payloads need the module to import cleanly.</li>
-    <li><strong>Poll sensors</strong> → now fired by the in-process <code>PollScheduler</code> (one task per
-      sensor, watermark-gated). <strong>Durable</strong> scheduling (survives restart, single-firing across
-      workers) is still ahead (B7/B8), and workflow <code>cron(…)</code> triggers / <code>Runtime.tick</code>
-      remain unscheduled — both wait on durable timers.</li>
-    <li><strong>Webhook ingress</strong> → a <strong>future improvement</strong>, not production-ready: the
-      routes run but are unauthenticated (authenticating arbitrary third-party webhooks is deferred). Don't
-      expose them to untrusted networks.</li>
+    <li><strong>Poll &amp; cron triggers</strong> → scheduled today by the in-process <code>PollScheduler</code>:
+      poll sensors fire watermark-gated (one task per sensor), and workflow <code>on: cron(…)</code> entries
+      fire <code>Runtime.tick</code> on each occurrence. <strong>Durable</strong> scheduling (survives restart,
+      single-firing across workers) is the B7/B8 work still ahead, behind the same <code>Scheduler</code> seam.</li>
+    <li><strong>Webhook ingress</strong> → hosted by <code>loopy run</code> as HTTP routes, with <strong>signed
+      ingress</strong> for GitHub (<code>X-Hub-Signature-256</code> verified at the edge when
+      <code>GITHUB_WEBHOOK_SECRET</code> is set). A <code>/hooks/github</code> route left without a secret runs
+      unverified — <strong>dev only</strong>; set the secret before exposing it. A general per-source auth
+      framework for arbitrary providers is still ahead.</li>
     <li><strong>Process restart</strong> → in-flight runs are lost under the InMemory runtime (A/B). The
       biggest reason to move to topology C for anything long-running.</li>
     <li><strong>Budget trip</strong> → terminal, not retried. A step over <code>wall_clock</code> or

@@ -2,7 +2,7 @@
 
 ## 0. Architecture principle
 
-> **loopy-core compiles workflows into a declarative, validated plan (the manifest) with
+> **loopy-computer compiles workflows into a declarative, validated plan (the manifest) with
 > runtime-resolved holes; each runtime adapter is a *host* that interprets that plan against its
 > own durable-execution primitives — and a conformance suite over a reference plan keeps every
 > adapter honest.**
@@ -37,7 +37,7 @@ manifest   : compiled artifact ::  loopy manifest : compiled artifact
 
 The system splits into two halves joined by one serialized artifact, the **manifest**:
 
-- **Frontend** (`loopy-core`) — parses `registry.yml`, `workflows/*.md`, `skills/`, and
+- **Frontend** (`loopy-computer`) — parses `registry.yml`, `workflows/*.md`, `skills/`, and
   `sensors/*.py`; resolves the DAG; statically checks every `{{ event.* }}` / `{{ step.* }}`
   reference; and emits the manifest. Pure, dependency-free, runs at build/CI time, executes
   nothing.
@@ -45,7 +45,7 @@ The system splits into two halves joined by one serialized artifact, the **manif
   Never reads `.md` files; the manifest is the complete IR.
 
 ```
-AUTHORING / FRONTEND (loopy-core)        │  BOUNDARY       │  RUNTIME / BACKEND (pluggable)
+AUTHORING / FRONTEND (loopy-computer)    │  BOUNDARY       │  RUNTIME / BACKEND (pluggable)
 ─────────────────────────────────────── │ ─────────────── │ ──────────────────────────────
 registry.yml ─┐                          │                 │
 workflows/*.md ┼─ parse ─ resolve DAG ───┼─► manifest ─────┼─► Runtime  (the modular engine)
@@ -134,10 +134,12 @@ modular" = swap the `Runtime`; the rest give modularity along orthogonal axes.
 | **`Scheduler`** | Fire poll sensors on a timer: hand each `@sensor(poll=…)` a `Tick` (`scheduled_at`, `last_run`) every interval, deliver the normalized event(s) through the `EventReceiver`, and advance the per-sensor watermark only on success. The **timer** seam (distinct from the `EventBus` delivery seam). | B1 (poll) · B7 (durable timing) | in-process asyncio · (future) Redis zset+lock · Postgres · Temporal/DBOS native timers |
 | **`RetryPolicy`** (cross-cutting) | Backoff + idempotency-key strategy wrapping all side-effecting calls. | B9 | exponential-backoff default |
 
-> **Trigger direction:** `poll` is the intended near-term sensor trigger. **Webhook ingress is a
-> future improvement** — hosting webhooks for arbitrary third-party services requires per-source
-> authentication (deferred); the `webhook` references in this doc describe that future path. Durable
-> poll scheduling itself is the deferred B7/B8 work, so neither is production-ready yet.
+> **Trigger status:** both `poll` and `webhook` triggers run today. The in-process `Scheduler`
+> (`sensors/scheduler.py`) drives poll and `cron` ticks, and `loopy run` hosts `webhook` sensors as
+> HTTP routes with signed ingress for GitHub (`X-Hub-Signature-256` verified at the edge when
+> `GITHUB_WEBHOOK_SECRET` is set). What's still deferred is **durable** scheduling — restart-survival
+> and single-firing across workers (the B7/B8 timer work) — which drops in behind the same
+> `Scheduler` seam.
 
 **The ingress boundary (and why it's split):** the durable `Runtime` is always a single Python
 implementation; the **sensor surface is the one language-pluggable layer**. A `SensorRunner`
@@ -398,7 +400,7 @@ suite.
 
 ---
 
-## 4. Frontend components (`loopy-core`)
+## 4. Frontend components (`loopy-computer`)
 
 ### 4.1 Registry + type DSL
 Parse `registry.yml` into typed models (`Defaults`, `Sandbox`, `Agent`, `Event`); apply
@@ -589,7 +591,7 @@ possible — the dbt community-adapter ecosystem.
 | **Temporal** | start a Workflow (manifest+event as input) | **Activities** (agent run, emit, tools) | auto replay from event history | a cluster |
 | **Restate** | a Restate handler invocation | journaled invocations | journal replay | a Restate runtime |
 
-**The constraint this imposes on loopy-core (non-negotiable):** orchestration must be
+**The constraint this imposes on loopy-computer (non-negotiable):** orchestration must be
 **deterministic and effect-free**. All nondeterminism — agent output, time, randomness, event
 payloads — is captured as recorded results ("activities"), never executed inline in the DAG-walk.
 Effects live only in `AgentHarness` / `emit` / `SandboxProvider`. Pay this and any replay engine

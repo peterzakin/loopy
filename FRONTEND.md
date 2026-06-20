@@ -1,4 +1,4 @@
-# Loopy Frontend (`loopy-core`) — Technical Plan
+# Loopy Frontend (`loopy-computer`) — Technical Plan
 
 The compile layer. Input: a project directory. Output: `manifest.json` (the contract in
 `ARCHITECTURE.md` §2). Pure, dependency-free of any runtime, executes no workflow logic. This is `dbt
