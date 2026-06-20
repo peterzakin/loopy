@@ -9,8 +9,8 @@ from loopy_core.span import Span
 
 
 def test_all_section14_codes_present_no_phantoms():
-    # 28 codes total; E108/E109 intentionally do not exist.
-    assert len(ALL_CODES) == 28
+    # 29 codes total; E108/E109 intentionally do not exist.
+    assert len(ALL_CODES) == 29
     assert "LOOPY-E108" not in ALL_CODES
     assert "LOOPY-E109" not in ALL_CODES
 

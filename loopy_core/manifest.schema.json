@@ -62,8 +62,20 @@
           "type": "object",
           "properties": {
             "cascade_spend": {
-              "type": "object",
+              "type": ["object", "null"],
               "properties": { "usd": { "type": "number" } }
+            },
+            "workflows": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "spend": {
+                    "type": "object",
+                    "properties": { "usd": { "type": "number" } }
+                  }
+                }
+              }
             }
           }
         }

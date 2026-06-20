@@ -54,11 +54,17 @@ class Event(BaseModel):
     span: Span
 
 
+class WorkflowLimit(BaseModel):
+    spend: dict | None = None  # e.g. {"usd": 10}
+
+
 class Limits(BaseModel):
     # Project-level controls (FRONTEND §2). `cascade_spend` caps the cumulative USD a single
     # cascade may spend across every reachable step — including event loop-backs, which can span
-    # workflows — so it's a project policy, not a per-workflow one.
+    # workflows — so it's a project policy. `workflows` adds per-named-workflow caps: the
+    # cumulative USD spent by a single workflow's steps (within a cascade/drain).
     cascade_spend: dict | None = None  # e.g. {"usd": 50}
+    workflows: dict[str, WorkflowLimit] = Field(default_factory=dict)
 
 
 class Registry(BaseModel):

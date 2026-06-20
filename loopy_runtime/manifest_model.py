@@ -47,8 +47,13 @@ class EventContract(_Model):
     fields: dict[str, dict] = Field(default_factory=dict)
 
 
+class WorkflowLimitSpec(_Model):
+    spend: dict | None = None  # e.g. {"usd": 10}
+
+
 class LimitsSpec(_Model):
     cascade_spend: dict | None = None  # e.g. {"usd": 50}
+    workflows: dict[str, WorkflowLimitSpec] = Field(default_factory=dict)
 
 
 class RegistrySpec(_Model):

@@ -44,6 +44,7 @@ E501 = "LOOPY-E501"  # step agent: doesn't resolve to a registered Agent (X2)
 E502 = "LOOPY-E502"  # an agent's sandbox doesn't resolve (X2)
 E503 = "LOOPY-E503"  # an agent.skills[] entry doesn't resolve in skills/ (X2)
 E504 = "LOOPY-E504"  # on:/emits: names an unregistered event (X3)
+E505 = "LOOPY-E505"  # registry limits.workflows names a workflow that doesn't exist (X2)
 
 # W5xx — lineage warnings
 W501 = "LOOPY-W501"  # dead trigger — registered on: event with no producer (X5)
@@ -78,6 +79,7 @@ ALL_CODES: frozenset[str] = frozenset(
         E502,
         E503,
         E504,
+        E505,
         W501,
     }
 )

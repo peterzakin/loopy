@@ -37,7 +37,12 @@ def _registry(registry: Registry) -> dict:
         "events": {name: _event(ev) for name, ev in registry.events.items()},
     }
     if registry.limits is not None:
-        out["limits"] = {"cascade_spend": registry.limits.cascade_spend}
+        out["limits"] = {
+            "cascade_spend": registry.limits.cascade_spend,
+            "workflows": {
+                name: {"spend": wl.spend} for name, wl in registry.limits.workflows.items()
+            },
+        }
     return out
 
 
