@@ -246,13 +246,22 @@ fixed: the docker→daytona missing-user crash is now auto-handled, and there is
   (`tests/test_doctor.py`); the live token-mint check stays at `run`/`trigger` preflight. (Pairs with #17 —
   once a token fallback exists, the auth step in both the checklist and doctor gets shorter.)
 
-- [ ] **19. PR success is reported unverified — `pr_url` is taken from agent output, never confirmed**
-  — `loopy_runtime/runtime/inmemory.py:328-333`, `loopy_cli/__init__.py:224-234` (`_run_record`)
-  A step's `output.pr_url` is the agent's own parsed JSON; the run reports it with `failed: []` and no
-  cross-check that the PR object actually exists on GitHub. A fabricated or malformed URL still reads as
-  green. Add an optional post-step verification for SCM outputs (e.g. `GET /repos/{owner}/{repo}/pulls/...`
-  using the already-minted token) that downgrades the run / annotates the record when the PR can't be
-  confirmed. High trust-per-effort; self-contained.
+- [x] ~~**19. PR success is reported unverified — `pr_url` is taken from agent output, never confirmed**~~
+  — `loopy_runtime/scm/verify.py`, `loopy_runtime/runtime/inmemory.py` (`_verify_scm_outputs`),
+  `loopy_cli/__init__.py` (`_run_record` + `trigger`)
+  A step's `output.pr_url` was the agent's own parsed JSON; the run reported it with `failed: []` and no
+  cross-check that the PR object actually exists on GitHub, so a fabricated or malformed URL read green.
+  **Shipped:** a post-step check (`_verify_scm_outputs`) parses any claimed `pr_url` and confirms it with
+  `GET /repos/{owner}/{repo}/pulls/{n}` using the **already-minted installation token** (reused from the
+  `TokenProvider`, so no new creds cross the boundary). Each outcome is an `SCMVerification`
+  (`confirmed` / `not_found` / `malformed` / `unverifiable`) recorded on `runtime.verifications` **and** as
+  a `scm_verified`/`scm_unverified` run-history entry (so the `loopy admin` timeline shows it). It's an
+  **annotation, not enforcement** — the run's state and emits are untouched, keeping the engine
+  deterministic; the trust signal surfaces at the report layer. `loopy trigger`'s `_run_record` carries an
+  `unverified` list and the CLI **exits non-zero on a fabricated/malformed URL** (deterministic,
+  agent-attributable) while a transient `unverifiable` (network/API hiccup) only warns — so a flaky GitHub
+  call never turns a real run red. Verification is skipped entirely when no token provider is set (e.g.
+  `loopy trigger --no-tokens`) — there's nothing to verify against, which is the natural offline opt-out.
 
 - [ ] **20. Sandbox onboarding docs — `user:` semantics and the dual-key messaging**
   — `README.md:125-131`, `loopy_runtime/sandbox/docker.py:45-94`, `loopy_runtime/sandbox/daytona_image.py:116-140`,

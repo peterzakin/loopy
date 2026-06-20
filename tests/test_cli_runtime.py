@@ -120,10 +120,12 @@ def test_trigger_exposes_json_flag():
 class _FakeRun:
     """The bits of InMemoryRuntime that `_run_record` reads."""
 
-    def __init__(self, execution_log, emitted_log, failed_runs):
+    def __init__(self, execution_log, emitted_log, failed_runs, verifications=None):
         self.execution_log = execution_log
         self.emitted_log = emitted_log
         self.failed_runs = failed_runs
+        if verifications is not None:
+            self.verifications = verifications
 
 
 def test_run_record_collects_steps_outputs_and_emits():
@@ -141,6 +143,36 @@ def test_run_record_collects_steps_outputs_and_emits():
 def test_run_record_includes_failures():
     rt = _FakeRun(["fix"], [], [RunStatus(run_id="r1", state="failed", error="boom")])
     assert _run_record("r1", rt, {})["failed"] == [{"run_id": "r1", "error": "boom"}]
+
+
+def test_run_record_omits_unverified_when_all_confirmed():
+    from loopy_runtime.scm.verify import SCMVerification
+
+    rt = _FakeRun(["fix"], [], [], verifications=[SCMVerification("pr_url", "u", "confirmed")])
+    assert "unverified" not in _run_record("r1", rt, {})
+
+
+def test_run_record_surfaces_unconfirmed_scm_outputs():
+    from loopy_runtime.scm.verify import SCMVerification
+
+    rt = _FakeRun(
+        ["fix"],
+        [],
+        [],
+        verifications=[
+            SCMVerification("pr_url", "https://github.com/o/r/pull/9", "confirmed"),
+            SCMVerification("pr_url", "https://github.com/o/r/pull/99", "not_found", "no PR"),
+        ],
+    )
+    record = _run_record("r1", rt, {})
+    assert record["unverified"] == [
+        {
+            "field": "pr_url",
+            "url": "https://github.com/o/r/pull/99",
+            "status": "not_found",
+            "detail": "no PR",
+        }
+    ]
 
 
 def _manifest(*, limits=None):

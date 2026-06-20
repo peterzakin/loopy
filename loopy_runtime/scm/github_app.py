@@ -203,3 +203,20 @@ def list_installation_repositories(token: str, *, base_url: str = GITHUB_API) ->
     return _request_json(
         "GET", f"{base_url}/installation/repositories", headers={"Authorization": f"token {token}"}
     )
+
+
+def get_pull_request(
+    token: str, owner: str, repo: str, number: int, *, base_url: str = GITHUB_API
+) -> dict:
+    """Fetch a pull request with an installation token (`GET /repos/{o}/{r}/pulls/{n}`).
+
+    The read half of the SCM trust check (#19): an agent reports a `pr_url` in its own
+    output, and confirming that PR object actually exists on GitHub turns a fabricated or
+    malformed URL from a silent green into a flagged run. Raises `GitHubAPIError` (status
+    404 when the PR doesn't exist) on a non-2xx response.
+    """
+    return _request_json(
+        "GET",
+        f"{base_url}/repos/{owner}/{repo}/pulls/{number}",
+        headers={"Authorization": f"token {token}"},
+    )

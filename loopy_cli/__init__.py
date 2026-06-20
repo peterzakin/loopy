@@ -567,14 +567,24 @@ def build_runtime(
 def _run_record(run_id, runtime, outputs) -> dict:
     """A JSON-serializable record of a finished `trigger` run: the step order, emitted events,
     each completed step's output fields, and any recorded run failures. Pure (no I/O) so the
-    CLI's two render paths (human + `--json`) share one shape and it's unit-testable."""
-    return {
+    CLI's two render paths (human + `--json`) share one shape and it's unit-testable.
+
+    `unverified` (#19) lists any claimed SCM output (e.g. a `pr_url`) the post-step check could
+    not confirm on GitHub, so a fabricated or malformed URL no longer reads as a clean green run.
+    Only present when there's something to report; absent on the common all-clear/offline path."""
+    record = {
         "run": run_id,
         "steps": list(runtime.execution_log),
         "emitted": list(runtime.emitted_log),
         "outputs": {name: dict(out.fields) for name, out in outputs.items()},
         "failed": [{"run_id": s.run_id, "error": s.error} for s in runtime.failed_runs],
     }
+    unverified = [
+        v.as_dict() for v in getattr(runtime, "verifications", []) if not v.confirmed
+    ]
+    if unverified:
+        record["unverified"] = unverified
+    return record
 
 
 def _source_root() -> Path | None:
@@ -973,10 +983,22 @@ def trigger(
         for name, fields in record["outputs"].items():
             if fields:
                 typer.echo(f"output[{name}]: {json.dumps(fields, default=str)}")
+        for u in record.get("unverified", []):  # #19: a claimed SCM URL we couldn't confirm
+            typer.echo(
+                f"UNVERIFIED {u['field']}={u['url']}: {u['status']}"
+                + (f" ({u['detail']})" if u["detail"] else ""),
+                err=True,
+            )
         for status in record["failed"]:  # a recorded run failure → report on stderr
             typer.echo(f"FAILED {status['run_id']}: {status['error']}", err=True)
 
-    if record["failed"]:
+    # A fabricated/malformed PR URL (deterministic, agent-attributable) fails the run; a
+    # transient `unverifiable` (network/API hiccup) only warns above, so a flaky GitHub call
+    # never turns a real run red.
+    fabricated = [
+        u for u in record.get("unverified", []) if u["status"] in ("malformed", "not_found")
+    ]
+    if record["failed"] or fabricated:
         raise typer.Exit(code=1)
 
 

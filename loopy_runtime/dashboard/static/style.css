@@ -161,10 +161,10 @@ body {
   padding: 8px 0; position: relative;
 }
 .tl-dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; background: var(--text-faint); }
-.tl-dot.completed, .tl-dot.run_completed, .tl-dot.step_completed { background: var(--green); }
+.tl-dot.completed, .tl-dot.run_completed, .tl-dot.step_completed, .tl-dot.scm_verified { background: var(--green); }
 .tl-dot.failed, .tl-dot.run_failed { background: var(--red); }
 .tl-dot.event_emitted { background: var(--accent); }
-.tl-dot.run_started { background: var(--amber); }
+.tl-dot.run_started, .tl-dot.scm_unverified { background: var(--amber); }
 .tl-kind { font-size: 13px; }
 .tl-kind b { font-family: var(--mono); color: var(--text); font-weight: 600; }
 .tl-step { color: var(--text-dim); font-family: var(--mono); font-size: 12px; }

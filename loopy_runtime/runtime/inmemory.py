@@ -37,6 +37,7 @@ from loopy_runtime.manifest_model import Manifest, SandboxSpec, StepSpec, Workfl
 from loopy_runtime.providers import provider
 from loopy_runtime.retry import ExponentialBackoffRetry
 from loopy_runtime.sandbox.toolchain import compose_image
+from loopy_runtime.scm.verify import SCMVerification, pr_url_targets, verify_pr_url
 from loopy_runtime.sensors.scheduler import cron_prev
 from loopy_runtime.state.inmemory import InMemoryStateStore
 
@@ -136,6 +137,12 @@ class InMemoryRuntime:
         self.execution_log: list[str] = []
         self.emitted_log: list[str] = []
         self.drain_errors: list[Exception] = []  # runs that failed under serve()
+        # SCM outputs (a claimed `pr_url`) the post-step check could not confirm exist on
+        # GitHub (#19) — annotation, not enforcement: a step still completes, but a fabricated
+        # or malformed URL is recorded here (and in run history) instead of reading as a clean
+        # green. Empty when no token provider is set (nothing to verify against) or every claim
+        # checked out. Global across the cascade, mirroring execution_log/emitted_log.
+        self.verifications: list[SCMVerification] = []
 
         # Subscribe a handler PER workflow so an event with multiple `on:` consumers
         # fans out to all of them (not just the first).
@@ -438,6 +445,7 @@ class InMemoryRuntime:
                 step_states[local_name] = "completed"
                 self.execution_log.append(step.id)
                 await self.state.record_output(run_id, local_name, result.output)
+                await self._verify_scm_outputs(run_id, step, result.output)
                 await self.state.append(run_id, RunEvent("step_completed", step.id, {}, _now()))
 
                 for event_name in step.emits:
@@ -480,6 +488,58 @@ class InMemoryRuntime:
             emitted=tuple(emitted),
         )
         return run_id
+
+    async def _verify_scm_outputs(self, run_id: RunId, step: StepSpec, output: StepOutput) -> None:
+        """Cross-check a step's claimed SCM outputs against the provider (#19).
+
+        A step's `pr_url` is the agent's own parsed JSON, so a fabricated or malformed URL
+        otherwise reads as a clean green run. When a token provider is configured and the step
+        output names a PR, confirm it exists on GitHub with the already-minted installation
+        token and record the outcome — in `self.verifications` (for the CLI) and as a
+        `scm_verified`/`scm_unverified` history entry (for the dashboard).
+
+        Annotation, not enforcement: this never changes the run's state or its emits. It's a
+        read-only trust check, so a flaky API call (`unverifiable`) can't fail a real run; the
+        CLI decides what an *unconfirmed* claim means for its exit code. Skipped entirely when
+        no token provider is set (e.g. `--no-tokens`) — there's nothing to verify against."""
+        if self.tokens is None:
+            return
+        targets = pr_url_targets(output.fields)
+        if not targets:
+            return
+        agent = self.manifest.registry.agents.get(step.agent) if step.agent else None
+        sandbox_name = (agent.sandbox if agent and agent.sandbox else "default") or "default"
+        spec = self.manifest.registry.sandboxes.get(sandbox_name) or SandboxSpec()
+        try:
+            env = await self.tokens.token_env(spec)
+        except Exception as exc:  # noqa: BLE001 - a mint failure here isn't the step's failure
+            logger.warning("SCM verification skipped for %s: token unavailable: %s", step.id, exc)
+            return
+        token = env.get("GITHUB_TOKEN")
+        if not token:
+            return
+        for field, url in targets:
+            # Sync urllib GET off the event loop, like the token mint.
+            result = await asyncio.to_thread(verify_pr_url, field, url, token)
+            self.verifications.append(result)
+            await self.state.append(
+                run_id,
+                RunEvent(
+                    "scm_verified" if result.confirmed else "scm_unverified",
+                    step.id,
+                    result.as_dict(),
+                    _now(),
+                ),
+            )
+            if not result.confirmed:
+                logger.warning(
+                    "step %s reported %s=%s but it could not be confirmed (%s): %s",
+                    step.id,
+                    field,
+                    url,
+                    result.status,
+                    result.detail,
+                )
 
     async def _run_step(self, step: StepSpec, ctx: StepContext) -> StepResult:
         agent = self.manifest.registry.agents.get(step.agent) if step.agent else None
