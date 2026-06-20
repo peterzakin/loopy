@@ -272,8 +272,10 @@ def _report_remaining_setup(target: Path, name: str) -> None:
         + typer.style("   # re-check the above any time", fg=typer.colors.BRIGHT_BLACK)
     )
     typer.echo(
-        typer.style("    loopy compile .", fg=typer.colors.BRIGHT_WHITE)
-        + typer.style("   # writes manifest.json", fg=typer.colors.BRIGHT_BLACK)
+        typer.style(
+            "    loopy trigger . --event CodeTask --fields '{...}'", fg=typer.colors.BRIGHT_WHITE
+        )
+        + typer.style("   # compiles + fires one task", fg=typer.colors.BRIGHT_BLACK)
     )
     typer.echo()
 
@@ -296,10 +298,6 @@ def compile(
     default — so the common case is just `loopy compile .`. Pass `--check` to validate without
     writing (a pure CI gate), or `--out` to write elsewhere.
     """
-    import datetime
-
-    from loopy_core import __version__
-    from loopy_core.compile.manifest import to_manifest
     from loopy_core.compile.pipeline import compile_project
     from loopy_core.events.codegen import write_events
 
@@ -313,12 +311,100 @@ def compile(
     if not result.diagnostics.has_errors() and result.project is not None:
         write_events(result.project.registry, path)
         if not check:
-            manifest = to_manifest(result.project)
-            manifest["compiled_at"] = datetime.datetime.now(datetime.UTC).isoformat()
-            manifest["loopy_version"] = __version__
-            out.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+            _write_manifest(result.project, out)
 
     raise typer.Exit(code=result.diagnostics.exit_code())
+
+
+def _write_manifest(project, out: Path) -> None:  # noqa: ANN001 - compile.model.Project
+    """Serialize a compiled project to `out` as the manifest JSON (with version + timestamp)."""
+    import datetime
+
+    from loopy_core import __version__
+    from loopy_core.compile.manifest import to_manifest
+
+    manifest = to_manifest(project)
+    manifest["compiled_at"] = datetime.datetime.now(datetime.UTC).isoformat()
+    manifest["loopy_version"] = __version__
+    out.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+
+# Source globs that affect a compiled manifest — used for the staleness check below. `loopy.yaml`
+# is deliberately excluded: it's deploy config consumed at `run`, not compiled into the manifest.
+_MANIFEST_SOURCE_DIRS = ("workflows", "skills", "sensors")
+
+
+def _manifest_is_stale(manifest_path: Path, project_dir: Path) -> bool:
+    """True if any compiled source under `project_dir` is newer than the manifest on disk."""
+    cutoff = manifest_path.stat().st_mtime
+    sources = [project_dir / "registry.yml"]
+    for sub in _MANIFEST_SOURCE_DIRS:
+        sources.extend((project_dir / sub).rglob("*"))
+    return any(p.is_file() and p.stat().st_mtime > cutoff for p in sources)
+
+
+def _compile_or_exit(project_dir: Path):  # noqa: ANN201 - compile.pipeline.CompileResult
+    """Compile `project_dir`, printing diagnostics; exit non-zero if it doesn't compile clean."""
+    from loopy_core.compile.pipeline import compile_project
+
+    result = compile_project(project_dir)
+    for diagnostic in result.diagnostics.items:
+        typer.echo(diagnostic.render(), err=True)
+    if result.diagnostics.has_errors() or result.project is None:
+        typer.echo(
+            typer.style(f"  ✗  compile failed for {project_dir}", fg=typer.colors.RED), err=True
+        )
+        raise typer.Exit(code=1)
+    return result
+
+
+def _resolve_manifest(target: Path, root: Path) -> tuple[Path, Path]:
+    """Resolve a `run`/`trigger` target to a manifest path, compiling from source when apt.
+
+    The manifest stays the artifact `run`/`trigger` consume — but you shouldn't have to compile
+    by hand first in the dev loop (dbt doesn't make you `dbt compile` before `dbt run`). So:
+
+      • a **directory** target is a project — always (re)compiled into `<dir>/manifest.json`, and
+        that directory becomes the effective `--root`;
+      • a **manifest file** with project source alongside `--root` is recompiled only when it's
+        missing or stale (some source file is newer);
+      • a **manifest file** with no source next to it (the deploy unit — just `manifest.json`)
+        is loaded verbatim, never recompiled.
+
+    Returns `(manifest_path, effective_root)`, both absolute.
+    """
+    from loopy_core.events.codegen import write_events
+
+    target = Path(target)
+    root = Path(root)
+
+    if target.is_dir():
+        manifest_path = target / "manifest.json"
+        result = _compile_or_exit(target)
+        write_events(result.project.registry, target)
+        _write_manifest(result.project, manifest_path)
+        typer.echo(f"loopy: compiled {target} → {manifest_path.name}")
+        return manifest_path.resolve(), target.resolve()  # a project dir is its own root
+
+    # A manifest file path. Recompile from --root only when source is actually present there;
+    # otherwise this is a prebuilt artifact (the deploy case) and must be loaded as-is.
+    if (root / "registry.yml").is_file():
+        missing = not target.exists()
+        if missing or _manifest_is_stale(target, root):
+            result = _compile_or_exit(root)
+            write_events(result.project.registry, root)
+            _write_manifest(result.project, target)
+            verb = "compiled" if missing else "recompiled (source changed)"
+            typer.echo(f"loopy: {verb} {root} → {target}")
+    elif not target.exists():
+        typer.echo(
+            f"error: {target} not found, and no project (registry.yml) at {root} to compile "
+            f"from. Pass a project directory, or run from the project root.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    return target.resolve(), root.resolve()
 
 
 @app.command()
@@ -581,7 +667,8 @@ def _run_in_docker(
 @app.command()
 def run(
     manifest: Path = typer.Argument(
-        Path("manifest.json"), help="Path to the manifest (default: manifest.json)."
+        Path("manifest.json"),
+        help="A manifest.json, or a project directory to compile (default: manifest.json).",
     ),
     root: Path = typer.Option(Path("."), "--root", help="Project root (for env_file + sensors)."),
     config: Path = typer.Option(
@@ -619,6 +706,12 @@ def run(
     import asyncio
 
     _enable_progress_logging()  # surface sandbox build/boot breadcrumbs (otherwise swallowed)
+
+    # Compile-on-demand: accept a project dir (or a stale/missing manifest next to source) and
+    # produce a fresh manifest before either path runs — so the dev loop is one command, while a
+    # prebuilt manifest with no source (the deploy unit) is still loaded verbatim. A project-dir
+    # target also becomes the effective --root (env_file + sensors live there).
+    manifest, root = _resolve_manifest(manifest, root)
 
     # The default is the containerized single-node stack. `--in-process` opts into running the
     # engine in *this* process (and is also what the container itself runs internally, so the
@@ -784,7 +877,9 @@ def run(
 
 @app.command()
 def trigger(
-    manifest: Path = typer.Argument(..., help="Path to manifest.json."),
+    manifest: Path = typer.Argument(
+        ..., help="A manifest.json, or a project directory to compile."
+    ),
     event: str = typer.Option(..., "--event", help="Triggering event name."),
     fields: str | None = typer.Option(None, "--fields", help="Event fields as a JSON object."),
     root: Path = typer.Option(Path("."), "--root", help="Project root (for env_file resolution)."),
@@ -807,6 +902,9 @@ def trigger(
     from loopy_runtime.contract import Event
     from loopy_runtime.manifest_model import load_manifest
 
+    # Compile-on-demand, same as `run`: a project-dir target (or stale manifest beside source)
+    # is compiled fresh; a prebuilt manifest is loaded as-is. A dir target also sets --root.
+    manifest, root = _resolve_manifest(manifest, root)
     m = load_manifest(manifest)
     triggering = Event(
         name=event,
