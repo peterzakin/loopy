@@ -6,6 +6,9 @@ signs/decodes JWTs with a throwaway RSA key, so nothing here touches GitHub.
 
 from __future__ import annotations
 
+import http.client
+import urllib.error
+
 import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -226,7 +229,10 @@ def test_list_installation_repositories_paginates(monkeypatch):
     # Otherwise the doctor preflight flags reachable repos as "not selected".
     pages = {
         1: {"total_count": 150, "repositories": [{"full_name": f"me/r{i}"} for i in range(100)]},
-        2: {"total_count": 150, "repositories": [{"full_name": f"me/r{i}"} for i in range(100, 150)]},
+        2: {
+            "total_count": 150,
+            "repositories": [{"full_name": f"me/r{i}"} for i in range(100, 150)],
+        },
     }
     calls = []
 
@@ -258,6 +264,116 @@ def test_list_installation_repositories_single_page_stops(monkeypatch):
 
     assert len(result["repositories"]) == 2
     assert len(calls) == 1
+
+
+# --- transport: error normalization, timeout, retry ------------------------
+
+
+class _FakeResponse:
+    """A minimal context-manager stand-in for a urlopen response."""
+
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self._body
+
+
+def _no_sleep(monkeypatch):
+    """Strip the retry backoff so resilience tests don't actually wait."""
+    monkeypatch.setattr(github_app.time, "sleep", lambda _s: None)
+
+
+def test_request_json_passes_a_timeout(monkeypatch):
+    # A stalled connection must not hang doctor/run forever — every request carries a timeout.
+    seen = {}
+
+    def fake_urlopen(request, timeout=None):
+        seen["timeout"] = timeout
+        return _FakeResponse(b'{"ok": true}')
+
+    monkeypatch.setattr(github_app.urllib.request, "urlopen", fake_urlopen)
+    assert github_app._request_json("GET", "https://api.github.com/x") == {"ok": True}
+    assert seen["timeout"] == github_app._REQUEST_TIMEOUT_SECONDS
+
+
+def test_request_json_normalizes_incomplete_read(monkeypatch):
+    # A truncated body raises http.client.IncompleteRead — an HTTPException, not OSError, so it
+    # would otherwise escape every caller's guard. It must surface as a GitHubAppError instead.
+    _no_sleep(monkeypatch)
+
+    def fake_urlopen(request, timeout=None):
+        raise http.client.IncompleteRead(partial=b"{")
+
+    monkeypatch.setattr(github_app.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(github_app.GitHubAppError):
+        github_app._request_json("GET", "https://api.github.com/x")
+
+
+def test_request_json_normalizes_url_error(monkeypatch):
+    # A refused/timed-out connection (URLError) is likewise re-raised through the App hierarchy.
+    _no_sleep(monkeypatch)
+
+    def fake_urlopen(request, timeout=None):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(github_app.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(github_app.GitHubAppError):
+        github_app._request_json("GET", "https://api.github.com/x")
+
+
+def test_request_json_retries_then_succeeds(monkeypatch):
+    # A single transient truncation mid-stream shouldn't kill the request — retry recovers.
+    _no_sleep(monkeypatch)
+    attempts = {"n": 0}
+
+    def fake_urlopen(request, timeout=None):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise http.client.IncompleteRead(partial=b"")
+        return _FakeResponse(b'{"recovered": true}')
+
+    monkeypatch.setattr(github_app.urllib.request, "urlopen", fake_urlopen)
+    assert github_app._request_json("GET", "https://api.github.com/x") == {"recovered": True}
+    assert attempts["n"] == 2
+
+
+def test_request_json_retries_5xx_then_gives_up(monkeypatch):
+    # 5xx is a transient server fault: retry up to the cap, then surface the API error.
+    _no_sleep(monkeypatch)
+    attempts = {"n": 0}
+
+    def fake_urlopen(request, timeout=None):
+        attempts["n"] += 1
+        raise urllib.error.HTTPError("u", 503, "Service Unavailable", {}, None)
+
+    monkeypatch.setattr(github_app.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(github_app.GitHubAPIError) as exc:
+        github_app._request_json("GET", "https://api.github.com/x")
+    assert exc.value.status == 503
+    assert attempts["n"] == github_app._MAX_ATTEMPTS  # exhausted retries
+
+
+def test_request_json_does_not_retry_4xx(monkeypatch):
+    # A 4xx is a client error that won't fix itself — surface it on the first attempt.
+    _no_sleep(monkeypatch)
+    attempts = {"n": 0}
+
+    def fake_urlopen(request, timeout=None):
+        attempts["n"] += 1
+        raise urllib.error.HTTPError("u", 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(github_app.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(github_app.GitHubAPIError) as exc:
+        github_app._request_json("GET", "https://api.github.com/x")
+    assert exc.value.status == 404
+    assert attempts["n"] == 1  # no retry on a client error
 
 
 # --- block-until-installed wait ---------------------------------------------

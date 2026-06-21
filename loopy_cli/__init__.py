@@ -631,7 +631,7 @@ def _diagnose_runnability(root: Path, project):  # noqa: ANN001 - compile.model.
     makes the one live call `diagnose` can't — confirming the repos in registry.yml are in the
     App's selected repositories — so an installed-but-wrong-repos App is caught here, not at run.
     """
-    from loopy_cli.doctor import check_repo_access, diagnose
+    from loopy_cli.doctor import Finding, check_repo_access, diagnose
     from loopy_runtime.scm.github_app import AppCredentials, GitHubAppError
     from loopy_runtime.secrets import _parse_dotenv, load_control_plane_env
 
@@ -654,7 +654,18 @@ def _diagnose_runnability(root: Path, project):  # noqa: ANN001 - compile.model.
         except GitHubAppError:
             creds = None
         if creds is not None:
-            findings.extend(check_repo_access(project.registry, creds))
+            # Backstop: check_repo_access already degrades known GitHub/network errors to a
+            # warn, but a diagnostic command must never surface a raw traceback. Anything it
+            # doesn't anticipate becomes the same warn its docstring promises, so a flaky API
+            # response can't make a perfectly good scaffold look corrupted.
+            try:
+                findings.extend(check_repo_access(project.registry, creds))
+            except Exception as exc:  # noqa: BLE001 - a preflight must never crash the user
+                findings.append(
+                    Finding(
+                        "warn", f"couldn't verify repo access: {exc}", "run `loopy auth status`"
+                    )
+                )
 
     return findings
 

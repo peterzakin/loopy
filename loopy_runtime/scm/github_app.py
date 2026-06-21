@@ -17,7 +17,9 @@ imported lazily so importing this module stays cheap.
 
 from __future__ import annotations
 
+import http.client
 import json
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Mapping, Sequence
@@ -31,6 +33,14 @@ GITHUB_API = "https://api.github.com"
 # `iat` by 60s so minor control-plane/GitHub clock skew can't reject the token.
 _JWT_TTL_SECONDS = 540
 _JWT_BACKDATE_SECONDS = 60
+
+# Network resilience. A stalled connection must not hang `doctor`/`run` forever, and a
+# single truncated body or transient 5xx — likely mid-pagination on a large installation —
+# must not kill a whole preflight. Cap the wait, then retry transient failures a few times
+# with exponential backoff. Applies to every request, so pagination is covered page-by-page.
+_REQUEST_TIMEOUT_SECONDS = 30
+_MAX_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = 0.5
 
 
 class GitHubAppError(Exception):
@@ -134,13 +144,31 @@ def _request_json(
         data = json.dumps(payload).encode()
         request_headers["Content-Type"] = "application/json"
     request = urllib.request.Request(url, data=data, method=method, headers=request_headers)
-    try:
-        with urllib.request.urlopen(request) as response:  # noqa: S310 - https GitHub API only
-            body = response.read().decode()
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace") if exc.fp else exc.reason
-        raise GitHubAPIError(exc.code, detail) from exc
-    return json.loads(body) if body else {}
+    for attempt in range(_MAX_ATTEMPTS):
+        last = attempt == _MAX_ATTEMPTS - 1
+        try:
+            with urllib.request.urlopen(  # noqa: S310 - https GitHub API only
+                request, timeout=_REQUEST_TIMEOUT_SECONDS
+            ) as response:
+                body = response.read().decode()
+            return json.loads(body) if body else {}
+        except urllib.error.HTTPError as exc:
+            # A real HTTP response. 5xx is a transient server-side fault worth retrying;
+            # a 4xx is a client error that won't fix itself, so surface it immediately.
+            detail = exc.read().decode(errors="replace") if exc.fp else exc.reason
+            if exc.code < 500 or last:
+                raise GitHubAPIError(exc.code, detail) from exc
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError) as exc:
+            # Transport-level failure with no usable HTTP status: a refused/stalled/timed-out
+            # connection (URLError, and the socket timeout urlopen raises), or a truncated body
+            # (http.client.IncompleteRead and friends are HTTPException — crucially *not*
+            # OSError, so a caller's `except OSError` would miss them). Normalize to
+            # GitHubAppError so every caller catches it through the App error hierarchy.
+            if last:
+                raise GitHubAppError(f"GitHub request {method} {url} failed: {exc}") from exc
+        time.sleep(_RETRY_BACKOFF_SECONDS * (2**attempt))
+    # The loop always returns or raises on its final attempt; this is unreachable.
+    raise GitHubAppError("GitHub request failed after retries")  # pragma: no cover
 
 
 def _bearer(creds: AppCredentials) -> dict[str, str]:

@@ -194,3 +194,32 @@ def test_check_repo_access_degrades_to_warn_on_error(tmp_path, monkeypatch):
     monkeypatch.setattr(github_app, "list_installations", boom)
     findings = check_repo_access(registry, object())
     assert len(findings) == 1 and findings[0].level == "warn"
+
+
+def test_diagnose_runnability_backstops_unexpected_live_check_crash(tmp_path, monkeypatch):
+    # A diagnostic command must never surface a raw traceback. Even if the live check throws
+    # something it doesn't anticipate, _diagnose_runnability degrades it to a warn so a flaky
+    # API response can't make a fine scaffold read as corrupted.
+    import loopy_cli
+    from loopy_cli import doctor
+
+    monkeypatch.delenv("GITHUB_APP_ID", raising=False)  # don't inherit a real App from the host
+    root = tmp_path / "demo"
+    scaffold_project(root, "demo", repos=["me/app"])
+    _fix_key(root)
+    # Configure an App so the live check runs (and so its creds load cleanly).
+    (root / "loopy.env").write_text(
+        "GITHUB_APP_ID=123456\nGITHUB_APP_PRIVATE_KEY=-----BEGIN KEY-----\\nabc\\n-----END\\n\n"
+    )
+
+    def boom(registry, creds):
+        raise RuntimeError("unexpected mid-stream truncation")
+
+    monkeypatch.setattr(doctor, "check_repo_access", boom)
+    result = compile_project(root)
+    assert result.project is not None
+    findings = loopy_cli._diagnose_runnability(root, result.project)
+
+    warns = [f for f in findings if f.level == "warn"]
+    assert any("couldn't verify repo access" in f.message for f in warns)
+    assert not any(f.level == "error" for f in findings)  # the scaffold itself is fine
