@@ -54,8 +54,127 @@ def _enable_progress_logging() -> None:
     logger.propagate = False
 
 
+def _dim(text: str) -> str:
+    return typer.style(text, fg=typer.colors.BRIGHT_BLACK)
+
+
+def _workflow_generations(wf) -> list[list[str]]:  # noqa: ANN001
+    """Group a workflow's steps into dependency layers (topological generations).
+
+    Steps in the same generation have no ordering between them — they run in parallel —
+    so the diagram renders them as a fork. `after` holds local step names; the entry step
+    has none, so it leads the first generation.
+    """
+    steps = wf.steps
+    deps = {name: set(step.after) for name, step in steps.items()}
+    placed: set[str] = set()
+    remaining = set(steps)
+    generations: list[list[str]] = []
+    while remaining:
+        ready = [n for n in steps if n in remaining and deps[n] <= placed]
+        if not ready:  # a cycle (caught upstream) or a dangling ref — don't loop forever
+            ready = [n for n in steps if n in remaining]
+        generations.append(ready)
+        placed |= set(ready)
+        remaining -= set(ready)
+    return generations
+
+
+def _print_workflow_diagram(name: str, wf) -> None:  # noqa: ANN001
+    """Render one workflow as a top-to-bottom flow diagram: trigger → steps → emitted events."""
+    entry = wf.steps.get(wf.entry) if wf.entry else None
+    trigger = entry.trigger if entry else None
+    if trigger and trigger.kind == "event":
+        icon, source = "⚡", f"on event {trigger.event}"
+    elif trigger and trigger.kind == "cron":
+        icon, source = "⏰", f"on cron({trigger.expr})"
+    else:
+        icon, source = "❓", "no trigger"
+
+    typer.echo()
+    typer.echo(f"  {icon}  " + typer.style(name, fg=typer.colors.BRIGHT_WHITE, bold=True))
+
+    indent = "      "
+    generations = _workflow_generations(wf)
+    forked = any(len(gen) > 1 for gen in generations)
+    glyph_w = 3 if forked else 1  # "├─●" / "└─●" / "  ●"  vs  "●"
+    name_w = max((len(n) for gen in generations for n in gen), default=0)
+    label_w = glyph_w + 1 + name_w  # glyph + space + name
+
+    sep = typer.style("  ·  ", fg=typer.colors.BRIGHT_BLACK)
+
+    # The trigger is the source node the flow descends from.
+    typer.echo(indent + _dim("◇ ") + typer.style(source, fg=typer.colors.YELLOW))
+    if generations:
+        typer.echo(indent + _dim("│"))
+        typer.echo(indent + _dim("▼"))
+
+    for gi, gen in enumerate(generations):
+        multi = len(gen) > 1
+        for ni, step_name in enumerate(gen):
+            step = wf.steps[step_name]
+            if multi:
+                glyph = ("└─●" if ni == len(gen) - 1 else "├─●")
+            else:
+                glyph = "  ●" if forked else "●"
+            raw = f"{glyph} {step_name}"
+            pad = " " * max(2, label_w + 2 - len(raw))
+            line = indent + _dim(glyph) + " " + typer.style(step_name, fg=typer.colors.GREEN) + pad
+            meta = []
+            if step.agent:
+                meta.append("🤖 " + typer.style(step.agent, fg=typer.colors.BLUE))
+            if step.emits:
+                meta.append("📡 " + typer.style(", ".join(step.emits), fg=typer.colors.MAGENTA))
+            # `after` is implied by the arrows for a simple chain; only call it out for joins.
+            if len(step.after) > 1:
+                meta.append(
+                    _dim("after ") + typer.style(", ".join(step.after), fg=typer.colors.CYAN)
+                )
+            if meta:
+                line += sep.join(meta)
+            typer.echo(line)
+        if gi != len(generations) - 1:
+            typer.echo(indent + _dim("│"))
+            typer.echo(indent + _dim("▼"))
+
+
+def _print_wiring(project) -> None:  # noqa: ANN001
+    """Show how workflows chain together: which producer emits each event, and who consumes it."""
+
+    def names(ids: list[str]) -> str:
+        # Consumers are "<workflow>/<step>"; producers may be bare sensor names. Collapse to
+        # the originating workflow/sensor and de-dup while preserving order.
+        out: list[str] = []
+        for i in ids:
+            head = i.split("/")[0]
+            if head not in out:
+                out.append(head)
+        return ", ".join(out) if out else "—"
+
+    events = project.lineage.events
+    if not events:
+        return
+    rows = [(names(lin.producers), ev, names(lin.consumers)) for ev, lin in sorted(events.items())]
+
+    typer.echo()
+    typer.echo(typer.style("  🔗  Event wiring", fg=typer.colors.CYAN, bold=True))
+    typer.echo(typer.style("  " + "─" * 40, fg=typer.colors.BRIGHT_BLACK))
+    prod_w = max(len(r[0]) for r in rows)
+    ev_w = max(len(r[1]) for r in rows)
+    arrow = _dim("  ─▶  ")
+    for prod, ev, cons in rows:
+        typer.echo(
+            "      "
+            + typer.style(prod.ljust(prod_w), fg=typer.colors.BLUE)
+            + arrow
+            + typer.style(ev.ljust(ev_w), fg=typer.colors.MAGENTA)
+            + arrow
+            + typer.style(cons, fg=typer.colors.GREEN)
+        )
+
+
 def _print_workflows(project) -> None:  # noqa: ANN001 - loopy_core.compile.model.Project
-    """Print every compiled workflow (its trigger and steps) to stdout, with flair."""
+    """Print a flow diagram of every compiled workflow, then the event wiring between them."""
     workflows = project.workflows
     count = len(workflows)
     plural = "workflow" if count == 1 else "workflows"
@@ -65,41 +184,9 @@ def _print_workflows(project) -> None:  # noqa: ANN001 - loopy_core.compile.mode
     typer.echo(typer.style("  " + "─" * 40, fg=typer.colors.BRIGHT_BLACK))
 
     for name, wf in sorted(workflows.items()):
-        entry = wf.steps.get(wf.entry) if wf.entry else None
-        trigger = entry.trigger if entry else None
-        if trigger and trigger.kind == "event":
-            icon, trig = "⚡", f"on event {trigger.event}"
-        elif trigger and trigger.kind == "cron":
-            icon, trig = "⏰", f"on cron({trigger.expr})"
-        else:
-            icon, trig = "❓", "no trigger"
+        _print_workflow_diagram(name, wf)
 
-        typer.echo()
-        typer.echo(
-            f"  {icon}  "
-            + typer.style(name, fg=typer.colors.BRIGHT_WHITE, bold=True)
-            + "  "
-            + typer.style(trig, fg=typer.colors.YELLOW)
-        )
-
-        steps = list(wf.steps.values())
-        for i, step in enumerate(steps):
-            connector = "└─" if i == len(steps) - 1 else "├─"
-            line = "      " + typer.style(connector, fg=typer.colors.BRIGHT_BLACK)
-            line += " " + typer.style(step.name, fg=typer.colors.GREEN)
-            meta = []
-            if step.agent:
-                meta.append("🤖 " + typer.style(step.agent, fg=typer.colors.BLUE))
-            if step.after:
-                meta.append(
-                    typer.style("after ", fg=typer.colors.BRIGHT_BLACK)
-                    + typer.style(", ".join(step.after), fg=typer.colors.CYAN)
-                )
-            if step.emits:
-                meta.append("📡 " + typer.style(", ".join(step.emits), fg=typer.colors.MAGENTA))
-            if meta:
-                line += typer.style("  ·  ", fg=typer.colors.BRIGHT_BLACK).join([""] + meta)
-            typer.echo(line)
+    _print_wiring(project)
     typer.echo()
 
 
