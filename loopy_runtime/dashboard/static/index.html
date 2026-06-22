@@ -4,44 +4,108 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Loopy · control plane</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/loopy-ui.css" />
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
+    <!-- top bar — mirrors the loopy-landing site header -->
     <header class="topbar">
-      <div class="brand">
-        <span class="logo">🔁</span>
-        <div>
-          <h1>Loopy</h1>
-          <p class="subtitle">control plane · runs</p>
-        </div>
-      </div>
-      <div class="controls">
-        <div class="filters" id="filters" role="tablist">
-          <button class="filter is-active" data-state="">All</button>
-          <button class="filter" data-state="running">Running</button>
-          <button class="filter" data-state="completed">Completed</button>
-          <button class="filter" data-state="failed">Failed</button>
-        </div>
-        <span class="pulse" id="pulse" title="Auto-refreshing"></span>
+      <div class="lui-wrap nav">
+        <a class="brand" href="#runs">
+          <svg class="loop" viewBox="0 0 24 24" aria-hidden="true">
+            <path class="arc loop-a" pathLength="1" d="M5.94 8.5 A7 7 0 0 1 18.06 8.5" />
+            <path class="arc loop-b" pathLength="1" d="M18.06 15.5 A7 7 0 0 1 5.94 15.5" />
+          </svg>
+          loopy
+          <span class="brand-sub">control plane</span>
+        </a>
+        <span class="spacer"></span>
+        <nav class="views" id="views" role="tablist">
+          <a class="view-link" data-view="runs" href="#runs">Runs</a>
+          <a class="view-link" data-view="schedules" href="#schedules">Schedules</a>
+          <a class="view-link" data-view="workflows" href="#workflows">Workflows</a>
+          <a class="view-link" data-view="registry" href="#registry">Registry</a>
+        </nav>
+        <span class="health" id="health" title="Live"><span class="lui-dot is-accent"></span></span>
       </div>
     </header>
 
-    <main class="layout">
-      <section class="panel runs" aria-label="Runs">
-        <div class="panel-head">
-          <h2>Runs</h2>
-          <span class="count" id="run-count"></span>
+    <main class="lui-wrap page">
+      <!-- ── Runs ──────────────────────────────────────────────────────── -->
+      <section class="view" id="view-runs">
+        <div class="view-head">
+          <div>
+            <span class="lui-eyebrow">run history</span>
+            <h1>Runs</h1>
+          </div>
+          <div class="filters" id="filters" role="tablist">
+            <button class="lui-btn is-active filter" data-state="">All</button>
+            <button class="lui-btn filter" data-state="running">Running</button>
+            <button class="lui-btn filter" data-state="completed">Completed</button>
+            <button class="lui-btn filter" data-state="failed">Failed</button>
+          </div>
         </div>
-        <div class="run-list" id="run-list"></div>
-        <div class="empty" id="runs-empty" hidden>
-          No runs yet — fire an event with <code>loopy trigger</code> or wait for a sensor.
+        <div class="runs-grid">
+          <section class="lui-card panel runs" aria-label="Runs">
+            <div class="panel-head">
+              <h2>Runs</h2>
+              <span class="count lui-faint" id="run-count"></span>
+            </div>
+            <div class="run-list" id="run-list"></div>
+            <div class="empty" id="runs-empty" hidden>
+              No runs yet — fire an event with <code>loopy trigger</code> or wait for a sensor.
+            </div>
+          </section>
+          <section class="lui-card panel detail" id="detail" aria-label="Run detail">
+            <div class="empty" id="detail-empty">Select a run to see what happened.</div>
+            <div id="detail-body" hidden></div>
+          </section>
         </div>
       </section>
 
-      <section class="panel detail" id="detail" aria-label="Run detail">
-        <div class="empty" id="detail-empty">Select a run to see what happened.</div>
-        <div id="detail-body" hidden></div>
+      <!-- ── Schedules ─────────────────────────────────────────────────── -->
+      <section class="view" id="view-schedules" hidden>
+        <div class="view-head">
+          <div>
+            <span class="lui-eyebrow">time-driven entry points</span>
+            <h1>Schedules</h1>
+          </div>
+        </div>
+        <div id="schedules-body"></div>
       </section>
+
+      <!-- ── Workflows ─────────────────────────────────────────────────── -->
+      <section class="view" id="view-workflows" hidden>
+        <div class="view-head">
+          <div>
+            <span class="lui-eyebrow">workflow templates</span>
+            <h1>Workflows</h1>
+          </div>
+        </div>
+        <div id="workflows-body"></div>
+      </section>
+
+      <!-- ── Registry ──────────────────────────────────────────────────── -->
+      <section class="view" id="view-registry" hidden>
+        <div class="view-head">
+          <div>
+            <span class="lui-eyebrow">registered entities</span>
+            <h1>Registry</h1>
+          </div>
+        </div>
+        <div id="registry-body"></div>
+      </section>
+
+      <div class="no-manifest" id="no-manifest" hidden>
+        No <code>manifest.json</code> loaded. Run <code>loopy compile .</code>, then
+        <code>loopy admin</code>, to see workflow templates, the registry, and schedules.
+      </div>
     </main>
 
     <script src="/static/app.js"></script>
