@@ -14,7 +14,15 @@ from fastapi import HTTPException
 
 from loopy_runtime.contract import Event, RunEvent, StepOutput
 from loopy_runtime.dashboard.app import create_app
-from loopy_runtime.dashboard.views import build_run_detail, summary_to_dict
+from loopy_runtime.dashboard.views import (
+    build_meta,
+    build_registry,
+    build_run_detail,
+    build_schedules,
+    build_workflows,
+    summary_to_dict,
+)
+from loopy_runtime.manifest_model import Manifest
 from loopy_runtime.state.inmemory import InMemoryStateStore
 
 
@@ -48,7 +56,10 @@ def test_build_run_detail_derives_status_steps_and_emits():
     assert detail["emitted"] == ["WorkItem"]
     assert detail["outputs"] == {"wf/a": {"url": "https://x"}}
     assert [e["kind"] for e in detail["history"]] == [
-        "run_started", "step_completed", "event_emitted", "run_completed"
+        "run_started",
+        "step_completed",
+        "event_emitted",
+        "run_completed",
     ]
 
 
@@ -132,7 +143,7 @@ def test_index_serves_the_static_html():
 def test_static_assets_present():
     from loopy_runtime.dashboard.app import _STATIC
 
-    for name in ("index.html", "app.js", "style.css"):
+    for name in ("index.html", "app.js", "style.css", "loopy-ui.css"):
         assert (_STATIC / name).is_file()
 
 
@@ -158,10 +169,195 @@ def test_admin_errors_clearly_when_db_missing(tmp_path):
     assert "no state DB" in result.output
 
 
+# ── manifest views (templates / registry / schedules) ───────────────────────────────
+def _manifest() -> Manifest:
+    """A small but representative manifest: one event-triggered workflow with a 2-step DAG, one
+    cron workflow, an agent, a sandbox with a secret env_file, a poll sensor and a webhook."""
+    return Manifest.model_validate(
+        {
+            "schema_version": "1",
+            "compiled_at": "2026-06-19T00:00:00Z",
+            "loopy_version": "0.1.0",
+            "registry": {
+                "agents": {
+                    "Fixer": {
+                        "harness": {"runtime": "claude-code", "model": "claude-opus-4-8"},
+                        "sandbox": "default",
+                        "skills": ["testing"],
+                    }
+                },
+                "sandboxes": {
+                    "default": {
+                        "provider": "daytona",
+                        "image": {"debian_slim": "3.12"},
+                        "network": ["github.com"],
+                        "env_file": ["secrets/default.env", "secrets/extra.env"],
+                        "repos": [{"url": "acme/runbooks", "depth": 1}],
+                    }
+                },
+                "events": {
+                    "WorkItem": {"fields": {"link": {"type": "string", "format": "uri"}}},
+                    "GoalShipped": {"fields": {}},
+                },
+            },
+            "workflows": {
+                "resolve": {
+                    "entry": "arbitrate",
+                    "steps": {
+                        "arbitrate": {
+                            "id": "resolve/arbitrate",
+                            "agent": "Investigator",
+                            "after": [],
+                            "trigger": {"kind": "event", "event": "WorkItem"},
+                            "output": {"goal": {"type": "string"}},
+                        },
+                        "fix": {
+                            "id": "resolve/fix",
+                            "agent": "Fixer",
+                            "after": ["arbitrate"],
+                            "emits": ["GoalShipped"],
+                            "refs": [{"producer": "arbitrate", "field": "goal", "raw": "x"}],
+                        },
+                    },
+                },
+                "upkeep": {
+                    "entry": "scan",
+                    "steps": {
+                        "scan": {
+                            "id": "upkeep/scan",
+                            "agent": "Investigator",
+                            "trigger": {"kind": "cron", "expr": "0 3 * * *"},
+                            "emits": ["WorkItem"],
+                        }
+                    },
+                },
+            },
+            "sensors": [
+                {
+                    "name": "metric_watch",
+                    "trigger": {"kind": "poll", "interval": "5m"},
+                    "emits": "WorkItem",
+                    "module": "sensors.s",
+                    "fn": "metric_watch",
+                },
+                {
+                    "name": "sentry",
+                    "trigger": {"kind": "webhook", "path": "/hooks/sentry"},
+                    "emits": "WorkItem",
+                    "module": "sensors.s",
+                    "fn": "sentry",
+                },
+            ],
+            "lineage": {
+                "events": {
+                    "WorkItem": {"producers": ["upkeep", "metric_watch"], "consumers": ["resolve"]}
+                }
+            },
+        }
+    )
+
+
+def test_build_meta_reports_presence_and_counts():
+    assert build_meta(None) == {"manifest_present": False}
+    meta = build_meta(_manifest())
+    assert meta["manifest_present"] is True
+    assert meta["schema_version"] == "1"
+    assert meta["counts"]["workflows"] == 2
+    assert meta["counts"]["agents"] == 1
+    assert meta["counts"]["events"] == 2
+    # one cron workflow + one poll sensor (the webhook sensor is not a schedule)
+    assert meta["counts"]["schedules"] == 2
+
+
+def test_build_registry_redacts_secrets():
+    reg = build_registry(_manifest())
+    sb = reg["sandboxes"][0]
+    assert sb["name"] == "default"
+    # the secret env_file paths/values must never appear — only a count.
+    assert sb["secrets"] == {"redacted": True, "count": 2}
+    assert "env_file" not in sb
+    blob = repr(reg)
+    assert "secrets/default.env" not in blob and "extra.env" not in blob
+    # non-secret fields still surface
+    assert sb["network"] == ["github.com"]
+    assert sb["repos"][0]["url"] == "acme/runbooks"
+
+
+def test_build_registry_shapes_agents_and_events():
+    reg = build_registry(_manifest())
+    agent = reg["agents"][0]
+    assert agent == {
+        "name": "Fixer",
+        "runtime": "claude-code",
+        "model": "claude-opus-4-8",
+        "sandbox": "default",
+        "skills": ["testing"],
+    }
+    work_item = next(e for e in reg["events"] if e["name"] == "WorkItem")
+    assert work_item["fields"] == [
+        {"name": "link", "type": "string", "format": "uri", "enum": None}
+    ]
+
+
+def test_build_workflows_dag_layers_edges_and_lineage():
+    wfs = build_workflows(_manifest())
+    resolve = next(w for w in wfs["workflows"] if w["name"] == "resolve")
+    assert resolve["entry"] == "arbitrate"
+    assert resolve["trigger"] == {"kind": "event", "event": "WorkItem", "expr": None, "tz": None}
+    # arbitrate has no deps (layer 0); fix depends on it (layer 1)
+    assert resolve["generations"] == [["arbitrate"], ["fix"]]
+    assert resolve["edges"] == [["arbitrate", "fix"]]
+    assert wfs["lineage"]["WorkItem"]["consumers"] == ["resolve"]
+
+
+def test_build_schedules_cron_and_poll_with_next_run():
+    async def go():
+        store = InMemoryStateStore()
+        # a recorded last fire for the cron workflow
+        await store.set_watermark("upkeep/scan", _at(0))
+        return await build_schedules(_manifest(), store)
+
+    sched = asyncio.run(go())
+    cron = next(s for s in sched["schedules"] if s["type"] == "cron")
+    assert cron["workflow"] == "upkeep" and cron["expr"] == "0 3 * * *"
+    assert cron["last_run"] == _at(0).isoformat()
+    assert cron["next_run"] is not None  # computed from the expr
+    poll = next(s for s in sched["schedules"] if s["type"] == "poll")
+    assert poll["sensor"] == "metric_watch" and poll["interval"] == "5m"
+    # webhook sensors are listed separately, not as schedules
+    assert [w["sensor"] for w in sched["webhooks"]] == ["sentry"]
+    assert all(s["type"] != "webhook" for s in sched["schedules"])
+
+
+def test_build_schedules_without_manifest():
+    out = asyncio.run(build_schedules(None, InMemoryStateStore()))
+    assert out == {"manifest_present": False}
+
+
+def test_manifest_endpoints_registered_and_served():
+    app = create_app(InMemoryStateStore(), _manifest())
+    paths = {getattr(r, "path", None) for r in app.routes}
+    assert {"/api/meta", "/api/workflows", "/api/registry", "/api/schedules"} <= paths
+    meta = asyncio.run(_endpoint(app, "/api/meta")())
+    assert meta["manifest_present"] is True
+
+
+def test_manifest_endpoints_empty_without_manifest():
+    app = create_app(InMemoryStateStore())  # no manifest — back-compat with the old signature
+    assert asyncio.run(_endpoint(app, "/api/meta")()) == {"manifest_present": False}
+    assert asyncio.run(_endpoint(app, "/api/registry")()) == {"manifest_present": False}
+
+
 def test_summary_to_dict_shape():
     store = _seed()
     rows = asyncio.run(store.list_runs())
     d = summary_to_dict(rows[0])
     assert set(d) == {
-        "run_id", "workflow", "state", "entry_event", "created_at", "ended_at", "error"
+        "run_id",
+        "workflow",
+        "state",
+        "entry_event",
+        "created_at",
+        "ended_at",
+        "error",
     }

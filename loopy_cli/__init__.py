@@ -1194,17 +1194,25 @@ def admin(
     ),
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address."),
     port: int = typer.Option(9000, "--port", help="Port to serve the dashboard on."),
+    manifest: Path = typer.Option(
+        Path("manifest.json"),
+        "--manifest",
+        help="Compiled manifest for the templates/registry/schedules views (default manifest.json; "
+        "skipped if absent).",
+    ),
 ) -> None:
     """Serve the read-only control-plane dashboard over the run-state DB.
 
     Pairs with `loopy run` (which defaults to that same DB): no flags needed in the common case —
-    `loopy run` in one terminal, `loopy admin` in another.
+    `loopy run` in one terminal, `loopy admin` in another. When `manifest.json` is present it also
+    powers the workflow-template, registry, and schedule views; the run views work without it.
     """
     import asyncio
 
     import uvicorn
 
     from loopy_runtime.dashboard.app import create_app
+    from loopy_runtime.manifest_model import load_manifest
     from loopy_runtime.state.sqlite import SqliteStateStore
 
     try:
@@ -1213,8 +1221,18 @@ def admin(
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
-    typer.echo(f"loopy dashboard → http://{host}:{port}  (reading {db})")
-    config = uvicorn.Config(create_app(store), host=host, port=port, log_level="warning")
+    loaded = None
+    if manifest.is_file():
+        try:
+            loaded = load_manifest(manifest)
+        except Exception as exc:  # noqa: BLE001 — a bad manifest shouldn't block the run views
+            typer.echo(f"warning: ignoring {manifest} ({exc})", err=True)
+    else:
+        typer.echo(f"note: no {manifest} — templates/registry/schedules views will be empty")
+
+    extra = "" if loaded is None else f"  (manifest {manifest})"
+    typer.echo(f"loopy dashboard → http://{host}:{port}  (reading {db}){extra}")
+    config = uvicorn.Config(create_app(store, loaded), host=host, port=port, log_level="warning")
     asyncio.run(uvicorn.Server(config).serve())  # pragma: no cover - long-lived server
 
 
