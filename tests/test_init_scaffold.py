@@ -36,8 +36,9 @@ def test_coding_scaffold_compiles_green(tmp_path):
 
     result = compile_project(target)
     assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
-    # With a repo, the starter is the coding loop: a single CodeTask-triggered workflow.
-    assert "codefix" in result.project.workflows
+    # With a repo, the starter ships the BaseAgent agent plus the three default loops.
+    assert "BaseAgent" in result.project.registry.agents
+    assert {"codefix", "secscan", "codehealth"} <= set(result.project.workflows)
 
 
 def test_orchestrator_scaffold_compiles_green(tmp_path):
@@ -76,12 +77,19 @@ def test_coding_scaffold_writes_canonical_layout(tmp_path):
     assert {
         "registry.yml",
         "workflows/codefix/open-pr.md",
-        "skills/codefix/SKILL.md",
+        "workflows/secscan/secscan.md",
+        "workflows/codehealth/codehealth.md",
+        "skills/open-pr/SKILL.md",
         "sensors/sensors.py",
         "secrets/dev.env",
         "loopy.env",
         ".gitignore",
     } <= rels
+    # The default loops all run on BaseAgent via the shared open-pr skill.
+    registry = (target / "registry.yml").read_text()
+    assert "BaseAgent" in registry
+    assert 'cron("0 3 * * *")' in (target / "workflows/secscan/secscan.md").read_text()
+    assert 'cron("0 4 * * *")' in (target / "workflows/codehealth/codehealth.md").read_text()
     # Secrets and control-plane creds are gitignored from the start.
     gitignore = (target / ".gitignore").read_text()
     assert "loopy.env" in gitignore

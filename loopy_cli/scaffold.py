@@ -1,10 +1,11 @@
 """`loopy init` scaffolding — the file templates for a fresh project.
 
 Kept out of the CLI module so the (multi-line, brace-heavy) templates don't clutter the
-command wiring, and so the scaffold is unit-testable as plain data. The canonical layout
-mirrors `examples/codefix` (the smallest runnable loop): one `CodeTask` event → a
-`claude-code` agent that edits a checkout and opens a PR. A freshly scaffolded project
-compiles green out of the box — `tests/test_init_scaffold.py` guards that.
+command wiring, and so the scaffold is unit-testable as plain data. The repo-backed layout
+ships the `BaseAgent` agent (a Claude Code harness) and three loops over a checkout: a
+hand-fired `CodeTask` edit, plus daily `secscan` and `codehealth` cron scans — each opens a
+PR via the shared `open-pr` skill. A freshly scaffolded project compiles green out of the
+box — `tests/test_init_scaffold.py` guards that.
 """
 
 from __future__ import annotations
@@ -45,8 +46,10 @@ def validate_project_name(name: str) -> str:
 
 
 _REGISTRY_YML = """\
-# __PROJECT_NAME__ — a starter Loopy project. One CodeTask event drives a claude-code agent
-# that edits a checkout and opens a PR. Edit freely; `loopy compile .` validates the result.
+# __PROJECT_NAME__ — a starter Loopy project. The BaseAgent agent (a Claude Code harness)
+# drives three loops over a checkout: a CodeTask you fire by hand, plus daily `secscan` and
+# `codehealth` scans — each edits the code and opens a PR. Edit freely; `loopy compile .`
+# validates the result.
 
 # Defaults — every agent inherits these; override a field only when needed.
 defaults:
@@ -68,8 +71,10 @@ sandboxes:
     __REPOS_LINE__
 
 # Agents — capability comes from the sandbox, skills, injected git creds, and budget.
+# BaseAgent is the default agent every workflow below runs on; the open-pr skill is what
+# lets it push a branch and open a pull request.
 agents:
-  Coder: { skills: [codefix] }
+  BaseAgent: { skills: [open-pr] }
 
 # Events — the bus contract. A step's `on:` may only name an event registered here.
 events:
@@ -78,7 +83,8 @@ events:
     fields:
       task: str     # what to change, in prose
       branch: str   # the branch to push the edit on
-  # emitted once the PR is open — a downstream workflow could subscribe with `on: PROpened`
+  # emitted once a PR is open — the daily scans and the CodeTask loop all announce on this, so a
+  # downstream workflow could subscribe with `on: PROpened`
   PROpened:
     fields:
       pr_url: url
@@ -88,7 +94,7 @@ events:
 _OPEN_PR_MD = """\
 ---
 on: CodeTask
-agent: Coder
+agent: BaseAgent
 output:
   pr_url: url
   summary: str
@@ -109,15 +115,73 @@ Then:
 Return the pull request URL and a one-line summary of the change.
 """
 
+_SECSCAN_MD = """\
+---
+on: cron("0 3 * * *")
+agent: BaseAgent
+output:
+  pr_url: url
+  summary: str
+emits: PROpened
+budget: { wall_clock: 30, spend: { usd: 4 } }
+---
+A checkout of the target repository is already in your workspace — the sandbox cloned it at
+startup, and a GitHub token is wired into git, so `git push` and PR creation just work.
+
+Analyze the codebase to identify security vulnerabilities. Look for real, exploitable issues —
+injection (SQL/command/template), unsafe deserialization, missing authentication or
+authorization checks, hardcoded secrets, path traversal, SSRF, and unsafe handling of
+untrusted input. Prefer a few high-confidence findings over a long list of speculative ones.
+
+Then:
+1. Create a new branch named `secscan/$LOOPY_RUN_ID`.
+2. Fix the vulnerabilities you found, keeping each change focused and clearly explained.
+3. Commit, push the branch, and open a pull request against the default branch. Describe each
+   vulnerability and its fix, and include the loopy run id (the `$LOOPY_RUN_ID` environment
+   variable) in the PR body so it can be traced to this run.
+
+Return the pull request URL and a one-line summary of what you fixed.
+"""
+
+_CODEHEALTH_MD = """\
+---
+on: cron("0 4 * * *")
+agent: BaseAgent
+output:
+  pr_url: url
+  summary: str
+emits: PROpened
+budget: { wall_clock: 30, spend: { usd: 4 } }
+---
+A checkout of the target repository is already in your workspace — the sandbox cloned it at
+startup, and a GitHub token is wired into git, so `git push` and PR creation just work.
+
+Analyze the codebase to identify bugs and code smells — logic errors, error-handling gaps,
+resource leaks, off-by-one mistakes, dead or duplicated code, confusing names, and overly
+complex functions. Prioritize correctness bugs over cosmetic cleanups.
+
+Then:
+1. Create a new branch named `codehealth/$LOOPY_RUN_ID`.
+2. Fix the issues you found, keeping each change focused and clearly explained.
+3. Commit, push the branch, and open a pull request against the default branch. Describe what
+   you changed and why, and include the loopy run id (the `$LOOPY_RUN_ID` environment variable)
+   in the PR body so it can be traced to this run.
+
+Return the pull request URL and a one-line summary of what you fixed.
+"""
+
 _SKILL_MD = """\
-# codefix
+# open-pr
 
-Make a focused code change in a checkout and open a pull request for it.
+Make a focused set of code changes in a checkout and open a pull request for them. Shared by
+every workflow in this project — the CodeTask loop and the daily secscan / codehealth scans.
 
-- Keep the diff minimal — change only what the task asks for; don't reformat untouched code.
+- Keep the diff minimal — change only what the task or scan calls for; don't reformat untouched
+  code.
 - Match the surrounding style and conventions of the file you're editing.
 - Use a descriptive branch name and a commit message that states the change, not the process.
-- The PR body should say what changed and why, in a sentence or two.
+- The PR body should say what changed and why, and include the loopy run id ($LOOPY_RUN_ID) so
+  the PR traces back to this run.
 - Don't push directly to the default branch; always open a PR from your branch.
 """
 
@@ -198,8 +262,12 @@ sensors/.env
 _README_MD = """\
 # __PROJECT_NAME__
 
-A Loopy project, scaffolded by `loopy init`. One `CodeTask` event drives a `claude-code`
-agent that edits a checkout and opens a pull request.
+A Loopy project, scaffolded by `loopy init`. The `BaseAgent` agent (a `claude-code` harness)
+drives three loops over your repo, each opening a pull request via the shared `open-pr` skill:
+
+- **codefix** — a `CodeTask` you fire by hand (edit a checkout, open a PR).
+- **secscan** — a daily scan for security vulnerabilities, with fixes proposed as a PR.
+- **codehealth** — a daily scan for bugs and code smells, with fixes proposed as a PR.
 
 ## Run it
 
@@ -406,7 +474,9 @@ def _coding_files(repos: list[str]) -> dict[str, str]:
     return {
         "registry.yml": _REGISTRY_YML.replace(_REPOS_LINE, _render_repos_line(repos)),
         "workflows/codefix/open-pr.md": _OPEN_PR_MD,
-        "skills/codefix/SKILL.md": _SKILL_MD,
+        "workflows/secscan/secscan.md": _SECSCAN_MD,
+        "workflows/codehealth/codehealth.md": _CODEHEALTH_MD,
+        "skills/open-pr/SKILL.md": _SKILL_MD,
         "sensors/sensors.py": _SENSORS_PY,
         "secrets/dev.env": _DEV_ENV,
         "loopy.env": _LOOPY_ENV,
