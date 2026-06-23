@@ -28,8 +28,8 @@
         <span class="spacer"></span>
         <nav class="views" id="views" role="tablist">
           <a class="view-link" data-view="runs" href="#runs">Runs</a>
-          <a class="view-link" data-view="schedules" href="#schedules">Schedules</a>
           <a class="view-link" data-view="workflows" href="#workflows">Workflows</a>
+          <a class="view-link" data-view="sensors" href="#sensors">Sensors</a>
           <a class="view-link" data-view="registry" href="#registry">Registry</a>
         </nav>
         <span class="health" id="health" title="Live"><span class="lui-dot is-accent"></span></span>
@@ -40,10 +40,7 @@
       <!-- ── Runs ──────────────────────────────────────────────────────── -->
       <section class="view" id="view-runs">
         <div class="view-head">
-          <div>
-            <span class="lui-eyebrow">run history</span>
-            <h1>Runs</h1>
-          </div>
+          <h1>Runs</h1>
           <div class="filters" id="filters" role="tablist">
             <button class="lui-btn is-active filter" data-state="">All</button>
             <button class="lui-btn filter" data-state="running">Running</button>
@@ -51,60 +48,50 @@
             <button class="lui-btn filter" data-state="failed">Failed</button>
           </div>
         </div>
-        <div class="runs-grid">
-          <section class="lui-card panel runs" aria-label="Runs">
-            <div class="panel-head">
-              <h2>Runs</h2>
-              <span class="count lui-faint" id="run-count"></span>
-            </div>
-            <div class="run-list" id="run-list"></div>
-            <div class="empty" id="runs-empty" hidden>
-              No runs yet — fire an event with <code>loopy trigger</code> or wait for a sensor.
-            </div>
-          </section>
-          <section class="lui-card panel detail" id="detail" aria-label="Run detail">
-            <div class="empty" id="detail-empty">Select a run to see what happened.</div>
-            <div id="detail-body" hidden></div>
-          </section>
-        </div>
-      </section>
-
-      <!-- ── Schedules ─────────────────────────────────────────────────── -->
-      <section class="view" id="view-schedules" hidden>
-        <div class="view-head">
-          <div>
-            <span class="lui-eyebrow">time-driven entry points</span>
-            <h1>Schedules</h1>
+        <section class="lui-card" aria-label="Runs">
+          <table class="runs-table">
+            <thead>
+              <tr>
+                <th>State</th>
+                <th>Run</th>
+                <th>Workflow</th>
+                <th>Trigger</th>
+                <th>Started</th>
+                <th class="num">Duration</th>
+              </tr>
+            </thead>
+            <tbody id="run-rows"></tbody>
+          </table>
+          <div class="empty" id="runs-empty" hidden>
+            No runs yet — fire an event with <code>loopy trigger</code> or wait for a sensor.
           </div>
-        </div>
-        <div id="schedules-body"></div>
+        </section>
+        <section class="lui-card detail" id="detail" aria-label="Run detail" hidden>
+          <div id="detail-body"></div>
+        </section>
       </section>
 
       <!-- ── Workflows ─────────────────────────────────────────────────── -->
       <section class="view" id="view-workflows" hidden>
-        <div class="view-head">
-          <div>
-            <span class="lui-eyebrow">workflow templates</span>
-            <h1>Workflows</h1>
-          </div>
-        </div>
+        <div class="view-head"><h1>Workflows</h1></div>
         <div id="workflows-body"></div>
+      </section>
+
+      <!-- ── Sensors ───────────────────────────────────────────────────── -->
+      <section class="view" id="view-sensors" hidden>
+        <div class="view-head"><h1>Sensors</h1></div>
+        <div id="sensors-body"></div>
       </section>
 
       <!-- ── Registry ──────────────────────────────────────────────────── -->
       <section class="view" id="view-registry" hidden>
-        <div class="view-head">
-          <div>
-            <span class="lui-eyebrow">registered entities</span>
-            <h1>Registry</h1>
-          </div>
-        </div>
+        <div class="view-head"><h1>Registry</h1></div>
         <div id="registry-body"></div>
       </section>
 
       <div class="no-manifest" id="no-manifest" hidden>
         No <code>manifest.json</code> loaded. Run <code>loopy compile .</code>, then
-        <code>loopy admin</code>, to see workflow templates, the registry, and schedules.
+        <code>loopy admin</code>, to see workflow templates, sensors, and the registry.
       </div>
     </main>
 

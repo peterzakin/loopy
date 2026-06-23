@@ -18,7 +18,7 @@ from loopy_runtime.dashboard.views import (
     build_meta,
     build_registry,
     build_run_detail,
-    build_schedules,
+    build_sensors,
     build_workflows,
     summary_to_dict,
 )
@@ -265,8 +265,8 @@ def test_build_meta_reports_presence_and_counts():
     assert meta["counts"]["workflows"] == 2
     assert meta["counts"]["agents"] == 1
     assert meta["counts"]["events"] == 2
-    # one cron workflow + one poll sensor (the webhook sensor is not a schedule)
-    assert meta["counts"]["schedules"] == 2
+    assert meta["counts"]["sensors"] == 2  # one poll + one webhook
+    assert meta["counts"]["cron"] == 1  # the upkeep cron workflow
 
 
 def test_build_registry_redacts_secrets():
@@ -300,44 +300,56 @@ def test_build_registry_shapes_agents_and_events():
 
 
 def test_build_workflows_dag_layers_edges_and_lineage():
-    wfs = build_workflows(_manifest())
+    wfs = asyncio.run(build_workflows(_manifest(), InMemoryStateStore()))
     resolve = next(w for w in wfs["workflows"] if w["name"] == "resolve")
     assert resolve["entry"] == "arbitrate"
     assert resolve["trigger"] == {"kind": "event", "event": "WorkItem", "expr": None, "tz": None}
     # arbitrate has no deps (layer 0); fix depends on it (layer 1)
     assert resolve["generations"] == [["arbitrate"], ["fix"]]
     assert resolve["edges"] == [["arbitrate", "fix"]]
+    assert resolve["schedule"] is None  # event-triggered, not a cron workflow
     assert wfs["lineage"]["WorkItem"]["consumers"] == ["resolve"]
 
 
-def test_build_schedules_cron_and_poll_with_next_run():
+def test_build_workflows_attaches_cron_schedule():
     async def go():
         store = InMemoryStateStore()
-        # a recorded last fire for the cron workflow
-        await store.set_watermark("upkeep/scan", _at(0))
-        return await build_schedules(_manifest(), store)
+        await store.set_watermark("upkeep/scan", _at(0))  # a recorded last fire
+        return await build_workflows(_manifest(), store)
 
-    sched = asyncio.run(go())
-    cron = next(s for s in sched["schedules"] if s["type"] == "cron")
-    assert cron["workflow"] == "upkeep" and cron["expr"] == "0 3 * * *"
-    assert cron["last_run"] == _at(0).isoformat()
-    assert cron["next_run"] is not None  # computed from the expr
-    poll = next(s for s in sched["schedules"] if s["type"] == "poll")
-    assert poll["sensor"] == "metric_watch" and poll["interval"] == "5m"
-    # webhook sensors are listed separately, not as schedules
-    assert [w["sensor"] for w in sched["webhooks"]] == ["sentry"]
-    assert all(s["type"] != "webhook" for s in sched["schedules"])
+    wfs = asyncio.run(go())
+    upkeep = next(w for w in wfs["workflows"] if w["name"] == "upkeep")
+    assert upkeep["trigger"]["kind"] == "cron"
+    assert upkeep["schedule"]["last_run"] == _at(0).isoformat()
+    assert upkeep["schedule"]["next_run"] is not None  # computed from the cron expr
 
 
-def test_build_schedules_without_manifest():
-    out = asyncio.run(build_schedules(None, InMemoryStateStore()))
+def test_build_sensors_signature_and_emits():
+    async def go():
+        store = InMemoryStateStore()
+        await store.set_watermark("metric_watch", _at(0))
+        return await build_sensors(_manifest(), store)
+
+    out = asyncio.run(go())
+    poll = next(s for s in out["sensors"] if s["name"] == "metric_watch")
+    assert poll["kind"] == "poll"
+    assert poll["signature"] == "def metric_watch(req) -> WorkItem"
+    assert poll["emits"] == "WorkItem" and poll["interval"] == "5m"
+    assert poll["last_run"] == _at(0).isoformat() and poll["next_run"] is not None
+    webhook = next(s for s in out["sensors"] if s["name"] == "sentry")
+    assert webhook["kind"] == "webhook" and webhook["path"] == "/hooks/sentry"
+    assert webhook["signature"] == "def sentry(req) -> WorkItem"
+
+
+def test_build_sensors_without_manifest():
+    out = asyncio.run(build_sensors(None, InMemoryStateStore()))
     assert out == {"manifest_present": False}
 
 
 def test_manifest_endpoints_registered_and_served():
     app = create_app(InMemoryStateStore(), _manifest())
     paths = {getattr(r, "path", None) for r in app.routes}
-    assert {"/api/meta", "/api/workflows", "/api/registry", "/api/schedules"} <= paths
+    assert {"/api/meta", "/api/workflows", "/api/registry", "/api/sensors"} <= paths
     meta = asyncio.run(_endpoint(app, "/api/meta")())
     assert meta["manifest_present"] is True
 

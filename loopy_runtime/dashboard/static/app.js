@@ -8,8 +8,8 @@
 "use strict";
 
 const POLL_MS = 3000;
-const VIEWS = ["runs", "schedules", "workflows", "registry"];
-const MANIFEST_VIEWS = ["schedules", "workflows", "registry"];
+const VIEWS = ["runs", "workflows", "sensors", "registry"];
+const MANIFEST_VIEWS = ["workflows", "sensors", "registry"];
 
 const state = {
   view: "runs",
@@ -92,30 +92,28 @@ async function refreshRuns() {
 }
 
 function renderRunList(runs) {
-  const list = $("#run-list");
-  $("#run-count").textContent = runs.length ? `${runs.length}` : "";
+  const body = $("#run-rows");
   $("#runs-empty").hidden = runs.length > 0;
-  list.replaceChildren();
+  body.replaceChildren();
 
   for (const run of runs) {
-    const row = el("div", "run-row");
+    const row = el("tr", "run-row");
     row.dataset.runId = run.run_id;
     if (run.run_id === state.selected) row.classList.add("is-selected");
 
-    const left = el("div");
-    left.appendChild(badge(run.state));
-
-    const mid = el("div");
-    mid.appendChild(el("div", "run-id", run.run_id));
+    const stateCell = el("td");
+    stateCell.appendChild(badge(run.state));
     const dur = fmtDuration(run.created_at, run.ended_at);
-    mid.appendChild(
-      el("div", "run-meta", `${run.workflow} · ${run.entry_event}${dur ? ` · ${dur}` : ""}`)
-    );
 
-    const right = el("div", "run-time", fmtTime(run.created_at));
-    row.append(left, mid, right);
+    row.appendChild(stateCell);
+    row.appendChild(el("td", "mono run-id", run.run_id));
+    row.appendChild(el("td", null, run.workflow));
+    row.appendChild(el("td", "mono", run.entry_event || "—"));
+    row.appendChild(el("td", "run-time", fmtTime(run.created_at)));
+    row.appendChild(el("td", "num run-time", dur || "—"));
+
     row.addEventListener("click", () => selectRun(run.run_id));
-    list.appendChild(row);
+    body.appendChild(row);
   }
 }
 
@@ -139,9 +137,8 @@ async function refreshDetail() {
 }
 
 function renderDetail(d) {
-  $("#detail-empty").hidden = true;
+  $("#detail").hidden = false;
   const body = $("#detail-body");
-  body.hidden = false;
   body.replaceChildren();
 
   const head = el("div", "detail-head");
@@ -200,64 +197,48 @@ function section(heading) {
   return sec;
 }
 
-// ── schedules ────────────────────────────────────────────────────────────
-async function loadSchedules() {
-  const root = $("#schedules-body");
+// ── sensors ──────────────────────────────────────────────────────────────
+async function loadSensors() {
+  const root = $("#sensors-body");
   root.replaceChildren();
   let d;
   try {
-    d = await getJSON("/api/schedules");
+    d = await getJSON("/api/sensors");
   } catch (e) {
-    root.appendChild(el("div", "empty", "Could not load schedules."));
+    root.appendChild(el("div", "empty", "Could not load sensors."));
     return;
   }
   if (!d.manifest_present) return;
 
-  if (!d.schedules.length) {
-    root.appendChild(el("div", "empty", "No cron workflows or poll sensors defined."));
-  } else {
-    const grid = el("div", "grid");
-    for (const s of d.schedules) grid.appendChild(scheduleCard(s));
-    root.appendChild(grid);
+  if (!d.sensors.length) {
+    root.appendChild(el("div", "empty", "No sensors defined."));
+    return;
   }
-
-  if (d.webhooks && d.webhooks.length) {
-    root.appendChild(el("div", "subhead", "Inbound webhooks"));
-    const grid = el("div", "grid");
-    for (const w of d.webhooks) {
-      const card = el("div", "lui-card entity");
-      const t = el("div", "entity-title");
-      t.appendChild(el("span", "name", w.sensor));
-      t.appendChild(badge("webhook", "is-accent"));
-      card.appendChild(t);
-      const kv = el("dl", "kv");
-      addKV(kv, "path", el("code", null, w.path || "—"));
-      addKV(kv, "emits", chip(w.emits));
-      card.appendChild(kv);
-      grid.appendChild(card);
-    }
-    root.appendChild(grid);
-  }
+  const grid = el("div", "grid");
+  for (const s of d.sensors) grid.appendChild(sensorCard(s));
+  root.appendChild(grid);
 }
 
-function scheduleCard(s) {
+function sensorCard(s) {
   const card = el("div", "lui-card entity");
   const t = el("div", "entity-title");
-  t.appendChild(el("span", "name", s.type === "cron" ? s.workflow : s.sensor));
-  t.appendChild(badge(s.type, "is-accent"));
+  t.appendChild(el("span", "name", s.name));
+  t.appendChild(badge(s.kind, "is-accent"));
   card.appendChild(t);
 
+  // The function signature, with the emitted return type — the focus of this view.
+  card.appendChild(el("pre", "lui-code sig", s.signature));
+
   const kv = el("dl", "kv");
-  if (s.type === "cron") {
-    addKV(kv, "cron", el("code", null, `${s.expr}${s.tz ? ` (${s.tz})` : ""}`));
-    addKV(kv, "step", el("code", null, s.step));
-  } else {
+  addKV(kv, "emits", chip(s.emits));
+  addKV(kv, "source", el("code", null, s.qualname));
+  if (s.kind === "poll") {
     addKV(kv, "every", el("code", null, s.interval));
+    addKV(kv, "last run", el("span", null, fmtTime(s.last_run)));
+    addKV(kv, "next run", el("span", "next-run", `${fmtTime(s.next_run)} · ${fmtRel(s.next_run)}`));
+  } else if (s.kind === "webhook") {
+    addKV(kv, "path", el("code", null, s.path || "—"));
   }
-  if (s.emits && s.emits.length) addKV(kv, "emits", tags([].concat(s.emits)));
-  addKV(kv, "last run", el("span", null, fmtTime(s.last_run)));
-  const next = el("span", "next-run", `${fmtTime(s.next_run)} · ${fmtRel(s.next_run)}`);
-  addKV(kv, "next run", next);
   card.appendChild(kv);
   return card;
 }
@@ -282,27 +263,16 @@ async function loadWorkflows() {
   }
   if (!d.manifest_present) return;
 
-  for (const wf of d.workflows) root.appendChild(workflowCard(wf));
+  const cron = d.workflows.filter((w) => w.trigger && w.trigger.kind === "cron");
+  const evented = d.workflows.filter((w) => !w.trigger || w.trigger.kind !== "cron");
 
-  const lineage = Object.keys(d.lineage || {});
-  if (lineage.length) {
-    root.appendChild(el("div", "subhead", "Event lineage — how workflows compose"));
-    const card = el("div", "lui-card wf");
-    const wrap = el("div", "lineage");
-    for (const ev of lineage.sort()) {
-      const e = d.lineage[ev];
-      const row = el("div", "lineage-row");
-      const left = el("div", "lineage-side left");
-      (e.producers.length ? e.producers : ["—"]).forEach((p) => left.appendChild(chip(p)));
-      const mid = el("div", "lineage-evt");
-      mid.appendChild(badge(ev, "is-accent"));
-      const right = el("div", "lineage-side right");
-      (e.consumers.length ? e.consumers : ["—"]).forEach((c) => right.appendChild(chip(c)));
-      row.append(left, mid, right);
-      wrap.appendChild(row);
-    }
-    card.appendChild(wrap);
-    root.appendChild(card);
+  if (cron.length) {
+    root.appendChild(el("div", "subhead", "Scheduled (cron)"));
+    for (const wf of cron) root.appendChild(workflowCard(wf));
+  }
+  if (evented.length) {
+    if (cron.length) root.appendChild(el("div", "subhead", "Event-triggered"));
+    for (const wf of evented) root.appendChild(workflowCard(wf));
   }
 }
 
@@ -310,7 +280,13 @@ function workflowCard(wf) {
   const card = el("div", "lui-card wf");
   const head = el("div", "wf-head");
   head.appendChild(el("span", "wf-name", wf.name));
-  head.appendChild(el("span", "wf-trigger", triggerLabel(wf.trigger)));
+  const meta = el("div", "wf-meta");
+  meta.appendChild(el("span", "wf-trigger", triggerLabel(wf.trigger)));
+  if (wf.schedule) {
+    const next = wf.schedule.next_run;
+    meta.appendChild(el("span", "wf-next", next ? `next ${fmtTime(next)} · ${fmtRel(next)}` : ""));
+  }
+  head.appendChild(meta);
   card.appendChild(head);
 
   const byName = {};
@@ -457,8 +433,8 @@ async function route() {
   $("#no-manifest").hidden = !(needsManifest && state.manifest === false);
 
   if (state.view === "runs") await refreshRuns();
-  else if (state.view === "schedules") await loadSchedules();
   else if (state.view === "workflows") await loadWorkflows();
+  else if (state.view === "sensors") await loadSensors();
   else if (state.view === "registry") await loadRegistry();
 }
 

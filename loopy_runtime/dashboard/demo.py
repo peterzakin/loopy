@@ -13,7 +13,8 @@ from loopy_runtime.contract import Event, RunEvent, StepOutput
 from loopy_runtime.manifest_model import Manifest
 from loopy_runtime.state.inmemory import InMemoryStateStore
 
-_NOW = datetime(2026, 6, 23, 14, 30, 0, tzinfo=UTC)
+# Anchored to real wall-clock now so "started N ago" and "next run in N" read live.
+_NOW = datetime.now(UTC)
 
 
 def _ago(**kw) -> datetime:
@@ -279,4 +280,11 @@ async def seed_demo_store() -> InMemoryStateStore:
 
     # Cron last-fire watermark — yesterday 03:00 ET.
     await store.set_watermark("upkeep/scan-deps", _ago(hours=11, minutes=30))
+
+    # The store stamps each run's list-view `created_at` at wall-clock now; align it with the
+    # run's first event so the table's Started/Duration columns match the seeded timeline.
+    for run_id, hist in store._history.items():
+        if hist:
+            wf, entry, _ = store._meta[run_id]
+            store._meta[run_id] = (wf, entry, hist[0].at)
     return store

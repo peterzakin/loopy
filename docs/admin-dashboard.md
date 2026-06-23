@@ -4,7 +4,7 @@ The control-plane dashboard (`loopy admin`) is a **read-only** viewer over a Loo
 deployment. It answers two questions:
 
 - **What is defined?** — the static system, read from the compiled `manifest.json`
-  (workflow templates, the registry, schedules).
+  (workflow templates, sensors, the registry).
 - **What happened?** — run history, read from the run-state DB that `loopy run` writes
   (`.loopy/state.db` by default).
 
@@ -17,7 +17,7 @@ loopy admin                     # serves the dashboard on http://127.0.0.1:9000
 loopy admin --manifest path.json --port 9000 db.sqlite
 ```
 
-The run views work with just the DB; the template/registry/schedule views light up when a
+The run views work with just the DB; the template/sensor/registry views light up when a
 `manifest.json` is present (default: `./manifest.json`).
 
 ## Requirements
@@ -28,22 +28,19 @@ The run views work with just the DB; the template/registry/schedule views light 
   emitted events, the full event-sourced timeline, and each step's validated output.
 - The runs view auto-refreshes (3s poll); the manifest-backed views are static.
 
-### 2. Scheduled runs
-- **Cron workflows** — every workflow whose entry step has an `on: cron(...)` trigger,
-  showing its expression/timezone, what it emits, its last fire (the stored watermark), and
-  its computed next fire.
-- **Poll sensors** — every `@sensor(poll=...)`, showing its interval, what it emits, and
-  last/next fire.
-- **Inbound webhooks** — webhook sensors are listed separately; they are event-driven, not
-  scheduled.
-
-### 3. Workflow templates (the full DAG)
+### 2. Workflow templates (the full DAG)
 - Each workflow rendered as a DAG: steps grouped into topological layers (by their `after`
   dependencies) with the edges between them. The entry step is marked, and each node shows
   its agent, outputs, and emitted events.
-- The **cross-workflow event lineage** — for each event, which workflows/sensors produce it
-  and which workflows consume it — so the composition of the whole system is visible, not
-  just one workflow at a time.
+- Workflows are split into two sections: **Scheduled (cron)** — workflows whose entry step
+  has an `on: cron(...)` trigger, each showing its expression/timezone plus last fire (the
+  stored watermark) and computed next fire — and **Event-triggered**.
+
+### 3. Sensors
+- Every sensor with its **function signature** and **emitted event** —
+  `def metric_watch(req) -> MetricThreshold`.
+- **Poll sensors** also show their interval and last/next fire; **webhook sensors** show
+  their inbound path.
 
 ### 4. Registry entities
 - **Agents** — runtime, model, sandbox, skills.
@@ -73,9 +70,9 @@ two copies in sync.
 | `GET /api/runs?state=&limit=&offset=` | run list (newest first) |
 | `GET /api/runs/{run_id}` | one run's full detail |
 | `GET /api/meta` | system summary + whether a manifest is loaded |
-| `GET /api/workflows` | workflow templates as DAGs + event lineage |
+| `GET /api/workflows` | workflow templates as DAGs (cron workflows carry their schedule) |
 | `GET /api/registry` | agents / sandboxes / events / limits (secrets redacted) |
-| `GET /api/schedules` | cron workflows + poll sensors (last/next run) + webhooks |
+| `GET /api/sensors` | sensors: signature + emitted event (poll sensors carry last/next run) |
 
 All view-shaping lives in `loopy_runtime/dashboard/views.py` as pure, unit-tested functions;
 the FastAPI handlers in `app.py` stay thin.
