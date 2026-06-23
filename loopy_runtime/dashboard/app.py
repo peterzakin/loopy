@@ -6,9 +6,9 @@ compiled manifest is supplied, the static system definition too — over JSON:
     GET /api/runs?state=&limit=&offset=   the run list (newest first)
     GET /api/runs/{run_id}                one run's full detail (history + outputs)
     GET /api/meta                         system summary + whether a manifest is loaded
-    GET /api/workflows                    workflow templates as DAGs + cross-workflow lineage
+    GET /api/workflows                    workflow templates as DAGs (+ cron schedule) + lineage
     GET /api/registry                     agents / sandboxes / events / limits (secrets redacted)
-    GET /api/schedules                    cron workflows + poll sensors (last/next run)
+    GET /api/sensors                      sensors: signature + emitted event (+ poll last/next)
 
 It takes a `StateStore` (not a DB path) and an optional `Manifest`, so it's testable against the
 in-memory store and the `loopy admin` CLI owns opening the SQLite file and loading the manifest.
@@ -29,7 +29,7 @@ from loopy_runtime.dashboard.views import (
     build_meta,
     build_registry,
     build_run_detail,
-    build_schedules,
+    build_sensors,
     build_workflows,
     summary_to_dict,
 )
@@ -68,15 +68,15 @@ def create_app(store: StateStore, manifest: Manifest | None = None) -> FastAPI:
 
     @app.get("/api/workflows")
     async def workflows():
-        return build_workflows(manifest)
+        return await build_workflows(manifest, store)
 
     @app.get("/api/registry")
     async def registry():
         return build_registry(manifest)
 
-    @app.get("/api/schedules")
-    async def schedules():
-        return await build_schedules(manifest, store)
+    @app.get("/api/sensors")
+    async def sensors():
+        return await build_sensors(manifest, store)
 
     # Mounted last so it doesn't shadow the API routes above.
     app.mount("/static", StaticFiles(directory=_STATIC), name="static")

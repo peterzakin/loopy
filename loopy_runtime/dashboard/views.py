@@ -101,7 +101,6 @@ def build_meta(manifest: Manifest | None) -> dict[str, Any]:
     if manifest is None:
         return {"manifest_present": False}
     reg = manifest.registry
-    cron = len(manifest.cron_entries())
     return {
         "manifest_present": True,
         "schema_version": manifest.schema_version,
@@ -113,7 +112,7 @@ def build_meta(manifest: Manifest | None) -> dict[str, Any]:
             "sandboxes": len(reg.sandboxes),
             "events": len(reg.events),
             "sensors": len(manifest.sensors),
-            "schedules": cron + sum(1 for s in manifest.sensors if s.trigger.kind == "poll"),
+            "cron": len(manifest.cron_entries()),
         },
     }
 
@@ -225,81 +224,80 @@ def _workflow_view(name: str, wf: WorkflowSpec) -> dict[str, Any]:
     }
 
 
-def build_workflows(manifest: Manifest | None) -> dict[str, Any]:
-    """Every workflow as a DAG (steps + edges + topological layers), plus the cross-workflow
-    event lineage (which workflow/sensor produces an event and which workflows consume it)."""
-    if manifest is None:
-        return {"manifest_present": False}
-    lineage = {
-        name: {"producers": list(e.producers), "consumers": list(e.consumers)}
-        for name, e in manifest.lineage.events.items()
-    }
-    return {
-        "manifest_present": True,
-        "workflows": [_workflow_view(n, wf) for n, wf in sorted(manifest.workflows.items())],
-        "lineage": lineage,
-    }
-
-
-async def build_schedules(manifest: Manifest | None, store: StateStore) -> dict[str, Any]:
-    """The system's time-driven entry points: cron-triggered workflows and poll sensors, each
-    with its last fire (the stored watermark) and computed next fire. Webhook sensors are listed
-    separately as inbound (event-driven, not scheduled) triggers."""
+async def build_workflows(manifest: Manifest | None, store: StateStore) -> dict[str, Any]:
+    """Every workflow as a DAG (steps + edges + topological layers), plus the cross-workflow event
+    lineage. Cron-triggered workflows also carry their schedule — last fire (stored watermark) and
+    computed next fire — so the workflows view can group them into their own section."""
     if manifest is None:
         return {"manifest_present": False}
 
     # Imported lazily — keeps the dashboard importable without the scheduler's deps at module load.
-    from loopy_runtime.sensors.scheduler import cron_next, parse_interval
+    from loopy_runtime.sensors.scheduler import cron_next
 
     now = datetime.now(UTC)
-    schedules: list[dict[str, Any]] = []
+    workflows: list[dict[str, Any]] = []
+    for name, wf in sorted(manifest.workflows.items()):
+        view = _workflow_view(name, wf)
+        trig = view["trigger"]
+        if trig and trig.get("kind") == "cron":
+            entry = wf.steps.get(wf.entry) if wf.entry else None
+            last = await store.get_watermark(entry.id) if entry else None
+            next_run = None
+            if trig.get("expr"):
+                try:
+                    next_run = cron_next(trig["expr"], last or now, trig.get("tz"))
+                except Exception:  # noqa: BLE001 — a bad expr shouldn't 500 the view
+                    next_run = None
+            view["schedule"] = {"last_run": _iso(last), "next_run": _iso(next_run)}
+        else:
+            view["schedule"] = None
+        workflows.append(view)
 
-    for wf_name, entry in manifest.cron_entries():
-        trig = entry.trigger
-        last = await store.get_watermark(entry.id)
-        next_run = None
-        if trig and trig.expr:
-            try:
-                next_run = cron_next(trig.expr, last or now, trig.tz)
-            except Exception:  # noqa: BLE001 — a bad expr shouldn't 500 the view
-                next_run = None
-        schedules.append(
-            {
-                "type": "cron",
-                "workflow": wf_name,
-                "step": entry.id,
-                "expr": trig.expr if trig else None,
-                "tz": trig.tz if trig else None,
-                "emits": list(entry.emits),
-                "last_run": _iso(last),
-                "next_run": _iso(next_run),
-            }
-        )
+    lineage = {
+        name: {"producers": list(e.producers), "consumers": list(e.consumers)}
+        for name, e in manifest.lineage.events.items()
+    }
+    return {"manifest_present": True, "workflows": workflows, "lineage": lineage}
 
+
+def _signature(s) -> str:
+    """A representative source signature for a sensor. By convention a sensor takes a request-like
+    argument and returns its emitted event (see examples/*/sensors)."""
+    return f"def {s.fn}(req) -> {s.emits}"
+
+
+async def build_sensors(manifest: Manifest | None, store: StateStore) -> dict[str, Any]:
+    """Sensors — the project's inputs — with their function signature and emitted event. Poll
+    sensors also carry last/next fire; webhook sensors carry their inbound path."""
+    if manifest is None:
+        return {"manifest_present": False}
+
+    from loopy_runtime.sensors.scheduler import parse_interval
+
+    now = datetime.now(UTC)
+    sensors: list[dict[str, Any]] = []
     for s in manifest.sensors:
-        if s.trigger.kind != "poll":
-            continue
-        last = await store.get_watermark(s.name)
-        next_run = None
-        if s.trigger.interval:
-            try:
-                next_run = (last or now) + parse_interval(s.trigger.interval)
-            except Exception:  # noqa: BLE001
-                next_run = None
-        schedules.append(
-            {
-                "type": "poll",
-                "sensor": s.name,
-                "interval": s.trigger.interval,
-                "emits": s.emits,
-                "last_run": _iso(last),
-                "next_run": _iso(next_run),
-            }
-        )
-
-    webhooks = [
-        {"sensor": s.name, "path": s.trigger.path, "emits": s.emits}
-        for s in manifest.sensors
-        if s.trigger.kind == "webhook"
-    ]
-    return {"manifest_present": True, "schedules": schedules, "webhooks": webhooks}
+        item: dict[str, Any] = {
+            "name": s.name,
+            "kind": s.trigger.kind,
+            "module": s.module,
+            "fn": s.fn,
+            "qualname": f"{s.module}.{s.fn}",
+            "emits": s.emits,
+            "signature": _signature(s),
+        }
+        if s.trigger.kind == "poll":
+            last = await store.get_watermark(s.name)
+            next_run = None
+            if s.trigger.interval:
+                try:
+                    next_run = (last or now) + parse_interval(s.trigger.interval)
+                except Exception:  # noqa: BLE001
+                    next_run = None
+            item["interval"] = s.trigger.interval
+            item["last_run"] = _iso(last)
+            item["next_run"] = _iso(next_run)
+        elif s.trigger.kind == "webhook":
+            item["path"] = s.trigger.path
+        sensors.append(item)
+    return {"manifest_present": True, "sensors": sensors}
