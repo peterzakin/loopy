@@ -5,6 +5,7 @@
     loopy run       start the server: host sensor webhooks; events drive workflow runs
     loopy trigger   fire one event at the manifest and run it to completion (for testing)
     loopy admin     serve the read-only dashboard over the run-state DB `loopy run` writes
+    loopy demo      serve the dashboard against in-memory fake data (dev-only; safe to delete)
 
 Heavy deps are imported lazily per command so `loopy compile` stays runtime-free.
 """
@@ -1233,6 +1234,42 @@ def admin(
     extra = "" if loaded is None else f"  (manifest {manifest})"
     typer.echo(f"loopy dashboard → http://{host}:{port}  (reading {db}){extra}")
     config = uvicorn.Config(create_app(store, loaded), host=host, port=port, log_level="warning")
+    asyncio.run(uvicorn.Server(config).serve())  # pragma: no cover - long-lived server
+
+
+@app.command()
+def demo(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address."),
+    port: int = typer.Option(9000, "--port", help="Port to serve the dashboard on."),
+    no_browser: bool = typer.Option(
+        False, "--no-browser", help="Don't try to open the dashboard in a browser."
+    ),
+) -> None:
+    """Serve the admin dashboard against in-memory fake data — for developing the dashboard.
+
+    A throwaway convenience: no project, compile, DB, or network. It synthesizes a manifest and
+    a seeded run store in process so every view (runs, schedules, workflows, registry) has
+    something to show. Safe to delete along with `loopy_runtime/dashboard/demo.py`.
+    """
+    import asyncio
+    import webbrowser
+
+    import uvicorn
+
+    from loopy_runtime.dashboard.app import create_app
+    from loopy_runtime.dashboard.demo import build_demo_manifest, seed_demo_store
+
+    store = asyncio.run(seed_demo_store())
+    manifest = build_demo_manifest()
+
+    url = f"http://{host}:{port}"
+    typer.echo(f"loopy demo dashboard → {url}  (fake data, in-memory — not a real deployment)")
+    if not no_browser:
+        try:
+            webbrowser.open(url)
+        except Exception:  # noqa: BLE001 — no browser (e.g. headless) is fine; the URL is printed
+            pass
+    config = uvicorn.Config(create_app(store, manifest), host=host, port=port, log_level="warning")
     asyncio.run(uvicorn.Server(config).serve())  # pragma: no cover - long-lived server
 
 
