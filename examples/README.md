@@ -1,0 +1,47 @@
+# Loopy cookbook
+
+Each subdirectory here is a **self-contained Loopy project** — its own `registry.yml`,
+`workflows/`, and (where it helps) `sensors/` and `skills/` — with a README that explains what
+it shows and how to run it. They're meant to be read in `loopy compile` order: compile one,
+look at the DAG it prints, then open the files it points to.
+
+The examples are grouped by what you're trying to learn.
+
+## Start here — run something
+
+| Example | What it shows |
+|---|---|
+| [`codefix/`](codefix/) | The smallest *runnable* loop: one `CodeTask` event → an agent edits a checkout and opens a PR. Its README is the canonical **"run locally"** quickstart (sandbox providers, git auth, the dashboard). Start here to actually run something. |
+
+## Event-driven loops — the canonical shapes
+
+| Example | What it shows |
+|---|---|
+| [`github/`](github/) | The **webhook** loop. GitHub posts every event to one `/hooks/github` URL; the signature is verified once at the edge, then fanned out to two sensors (PR opened → review, PR merged → find follow-on work). |
+| [`incidents/`](incidents/) | The **multi-workflow** loop from the top-level README: triage → resolve → confirm, plus a nightly `upkeep` cron scan — four workflows wired by events only at the real seams. |
+
+## Patterns from the Anthropic cookbook
+
+| Example | What it shows |
+|---|---|
+| [`effective-agents/`](effective-agents/) | Anthropic's [**Building Effective Agents**](https://github.com/anthropics/anthropic-cookbook/tree/main/patterns/agents) patterns — prompt chaining, routing, parallelization, orchestrator-workers, evaluator-optimizer — each re-authored as a Loopy workflow. A good map of how the cookbook's Python control flow (`if`/`while`/`for`) becomes static DAG edges, typed outputs, and loop-back events. |
+
+## Research loops
+
+| Example | What it shows |
+|---|---|
+| [`auto-research/`](auto-research/) | A self-driving research loop in the spirit of Karpathy's "automated research": poll papers → digest → hypothesize → run a small experiment → write up → reflect and loop. Shows a bounded self-perpetuating loop (depth guard + budgets) built only from existing primitives. |
+
+## Conventions every example follows
+
+- **One directory, one project.** A subdirectory is everything `loopy compile <dir>` needs.
+- **`registry.yml` holds the inline config** (Agents · Sandboxes · Events); the directories
+  with bodies (`workflows/`, `skills/`, `sensors/`) hold the authored artifacts. This mirrors
+  the organizing principle in the top-level [`README.md`](../README.md).
+- **Secrets are gitignored.** Each example ships a `dev.env.example`; copy it to
+  `secrets/dev.env` (the path the registry's `env_file:` references) and fill it in.
+- **Compile first.** `uv run loopy compile examples/<name>` is the gate — it prints the DAG and
+  fails if any `on:`/`emits:` names an unregistered event or any `{{ }}` ref doesn't resolve.
+
+New to Loopy? Read the top-level [`README.md`](../README.md) for the authoring model first,
+then `codefix/` to run one end-to-end.

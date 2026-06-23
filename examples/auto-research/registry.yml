@@ -1,0 +1,91 @@
+# auto-research — a self-driving research loop, in the spirit of Andrej Karpathy's
+# "automated research" idea: an agent that keeps reading new papers, forms a concrete
+# hypothesis, runs a *small* experiment to test it, writes up what it found, and then
+# reflects to spawn the next hypothesis — closing the loop and starting over.
+#
+# It assumes nothing Loopy doesn't already do. The cadence is a poll sensor; each stage is
+# an ordinary agent step; experiments run in a sandbox that has Python and egress; the loop
+# closes with a loop-back event (Hypothesis), the same mechanism as the evaluator-optimizer
+# in examples/effective-agents.
+#
+#   arxiv_poll ─▶ PaperFound ─▶ digest ─▶ PaperDigest ─▶ ideate ─▶ Hypothesis
+#         ┌──────────────────────────────────────────────────────────┘
+#         ▼
+#      experiment ─▶ ExperimentDone ─▶ writeup(report) ─▶ FindingLogged
+#                                              │
+#                                          (reflect) ─▶ Hypothesis ─▶ experiment ...
+
+defaults:
+  agent:
+    sandbox: Reading
+    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
+
+sandboxes:
+  # Reading desk — reading, ideating, and writing. Needs the paper source and the model API,
+  # plus GitHub to push the research log. No heavy compute.
+  Reading:
+    provider: daytona
+    image: { debian_slim: "3.12", apt: [git], workdir: /home/daytona, user: daytona }
+    network: [export.arxiv.org, arxiv.org, github.com, api.anthropic.com]
+    env_file: secrets/dev.env       # gitignored; ANTHROPIC_API_KEY (+ GITHUB_TOKEN if no App)
+    repos: [you/research-log]        # the writeup target — point this at a repo you can push to
+
+  # Lab — where experiments actually run. Python + pip, and egress to fetch packages. Keep
+  # experiments small (see the experiment-hygiene skill); this is a sandbox, not a cluster.
+  Lab:
+    provider: daytona
+    image:
+      debian_slim: "3.12"
+      apt: [git, python3, python3-pip, python3-venv]
+      workdir: /home/daytona
+      user: daytona
+    network: [github.com, api.anthropic.com, pypi.org, files.pythonhosted.org]
+    env_file: secrets/dev.env
+    repos: [you/research-log]
+
+agents:
+  # The reasoning roles get Opus; the bigger model earns its keep on reading and ideation.
+  Researcher: { harness: { model: claude-opus-4-8 }, skills: [paper-reading] }
+  Engineer:   { sandbox: Lab, skills: [experiment-hygiene] }
+  Writer:     {}
+
+events:
+  # ── ingested by the sensor ──
+  PaperFound:
+    fields:
+      paper_id: id     # arXiv id, e.g. 2401.01234
+      title: str
+      url: url
+      abstract: str
+
+  # ── digest → ideate ──
+  PaperDigest:
+    fields:
+      paper_id: id
+      title: str
+      claims: str      # the key claims, in plain language
+      methods: str     # how they tested them
+      results: str     # what they found
+
+  # ── ideate → experiment, AND reflect → experiment (the loop-back) ──
+  Hypothesis:
+    fields:
+      origin: str          # the paper id or prior finding that prompted this
+      statement: str       # one falsifiable claim to test
+      experiment_plan: str # the smallest experiment that would test it
+      depth: int           # loop guard: how many hops from the original paper
+
+  # ── experiment → writeup ──
+  ExperimentDone:
+    fields:
+      statement: str
+      metric: str          # what was measured
+      result: str          # the number / outcome, with the seed and setup
+      supported: enum[yes, no, inconclusive]
+      depth: int
+
+  # ── terminal: the finding is logged ──
+  FindingLogged:
+    fields:
+      report_url: url
+      conclusion: str

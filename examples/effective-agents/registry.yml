@@ -1,0 +1,77 @@
+# effective-agents — Anthropic's agent workflow patterns, encoded as Loopy workflows.
+#
+# Source recipe: the Anthropic "Building Effective Agents" cookbook
+# (anthropic-cookbook/patterns/agents) and its companion post. Each pattern in that
+# notebook is a way of composing LLM calls; here each one is a Loopy *workflow*, so the
+# composition is authored as files and the engine — not a Python script — drives the DAG.
+#
+# One project, five workflows (one per pattern):
+#   chaining/      prompt chaining     — a fixed pipeline; each step refines the last
+#   routing/       routing             — classify input, then handle it per the class
+#   parallel/      parallelization     — fan out independent work, then aggregate
+#   orchestrator/  orchestrator-workers— plan subtasks, execute them, synthesize
+#   evaluator/     evaluator-optimizer — generate, grade, and loop back until it passes
+#
+# How the cookbook's control flow maps onto Loopy (no new features assumed):
+#   • Loopy DAG edges are *static* — `after:` is fixed at compile time, there are no
+#     conditional edges. So any "if the LLM decides X" branch lives in the agent's prose
+#     (and skills), not in the graph. Routing and the optimizer's stop-condition are
+#     authored that way below.
+#   • Iteration ("keep refining until good") is a *loop-back event*: a step `emits:` the
+#     same event its workflow triggers `on:`, re-entering the loop with new feedback.
+
+defaults:
+  agent:
+    sandbox: Dev
+    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
+
+# One sandbox for the whole project. These patterns are text-in/text-out, so the only
+# egress they need is the model API; no repo is cloned. (Swap in `daytona` for a cloud
+# sandbox, or add tools to `apt:`/`network:` if a worker needs to run code.)
+sandboxes:
+  Dev:
+    provider: docker
+    image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
+    network: [api.anthropic.com]
+    env_file: secrets/dev.env   # gitignored; supplies ANTHROPIC_API_KEY
+
+# Agents — one per role the patterns call for. Capability is the sandbox + skills + budget;
+# the harder-reasoning roles (Judge, Orchestrator) get a bigger model.
+agents:
+  Writer:       {}                                                    # drafts / transforms text
+  Classifier:   {}                                                    # the router's brain
+  Reviewer:     {}                                                    # one of several parallel reviewers
+  Judge:        { harness: { model: claude-opus-4-8 }, skills: [grading-rubric] }
+  Orchestrator: { harness: { model: claude-opus-4-8 } }               # plans the subtasks
+  Worker:       {}                                                    # executes the plan
+
+# Events — the bus contract. One entry event per pattern; `ContentRequested` is special:
+# the evaluator loop both triggers on it and re-emits it, so the loop closes on the bus.
+events:
+  # ── prompt chaining ──
+  TextSubmitted:
+    fields:
+      text: str        # raw input to push through the pipeline
+
+  # ── routing ──
+  SupportQuery:
+    fields:
+      query: str       # the customer's question
+      customer: str    # who asked (for logging / personalization)
+
+  # ── parallelization ──
+  ChangeSubmitted:
+    fields:
+      summary: str     # one-line description of the change to review
+      diff_url: url    # where the diff can be read
+
+  # ── orchestrator-workers ──
+  FeatureRequest:
+    fields:
+      request: str     # the feature, in prose
+
+  # ── evaluator-optimizer (loop-back) ──
+  ContentRequested:
+    fields:
+      brief: str       # what to produce
+      feedback: str    # grader notes from the previous round; empty on the first pass

@@ -240,8 +240,18 @@ signed-webhook example, and `sensors/sensors.py` in a scaffolded project.
 
 ## Examples / run it locally
 
+[`examples/`](examples/) is the **cookbook** — each subdirectory is a self-contained project
+with its own README, grouped in [`examples/README.md`](examples/README.md) (start-here,
+event-driven loops, ports of the Anthropic cookbook, and research loops).
+
 - [`examples/incidents/`](examples/incidents/) — the canonical multi-workflow loop this README
   describes (triage → resolve → confirm, plus an `upkeep` cron scan).
+- [`examples/effective-agents/`](examples/effective-agents/) — Anthropic's *Building Effective
+  Agents* patterns (prompt chaining, routing, parallelization, orchestrator-workers,
+  evaluator-optimizer), each re-authored as a Loopy workflow.
+- [`examples/auto-research/`](examples/auto-research/) — a self-driving research loop in the
+  spirit of Karpathy's "automated research": digest → hypothesize → experiment → write up →
+  reflect, bounded by a depth guard and per-experiment budgets.
 - [`examples/github/`](examples/github/) — the canonical **webhook** loop: GitHub posts every
   event to one `/hooks/github` URL; `loopy run` verifies the `X-Hub-Signature-256` HMAC once at the
   edge, then fans the delivery out to two sensors (PR opened → code review, PR merged → find
