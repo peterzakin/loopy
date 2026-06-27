@@ -82,7 +82,7 @@ runtime needs.
 
 ## 3. Field types — JSON Schema + pydantic (no custom type system)
 
-We own **no** type semantics. Field types in `registry.yml` (event `fields:`) and step `output:`
+We own **no** type semantics. Field types in `registry.yml` (event field maps) and step `output:`
 are represented canonically as **JSON Schema (draft 2020-12)** in the manifest, validated at
 runtime by **pydantic v2**, and code-generated into `loopy.events` classes via
 **`datamodel-code-generator`**. JSON Schema is the wire format; pydantic is the validator/codegen;
@@ -165,7 +165,7 @@ extracts refs; arbitrary `{% %}` or multi-segment paths → `LOOPY-E301`.
 - **T4** (soft, v1-optional) type compatibility where a ref feeds a typed slot — deferred; v1
   treats refs as opaque substitution and validates existence only.
 - **T5 (flat keys — decision).** `<field>` is a **top-level key** of the producer's output object
-  (or the event's `fields:`), so a ref is exactly two segments: `{{ producer.key }}`. There is **no**
+  (or the event's field map), so a ref is exactly two segments: `{{ producer.key }}`. There is **no**
   dotted descent into nested objects (`{{ fix.result.score }}` → `LOOPY-E301`). This keeps ref
   validation a single lookup against the schema's top-level `properties` and avoids array-index /
   `additionalProperties` / union ambiguities.
@@ -232,8 +232,8 @@ Beyond per-pass checks, the whole-IR pass adds:
   every `agent.skills[]` resolves to a skill in `skills/` — unresolved → error (no external skills).
 - **X3** every *event-kind* `on:` / `emits:` event is registered in `registry.yml` (cron triggers
   are not events and need no registry entry).
-- **X4** every `output:` and event `fields:` type parses via the shared desugar pass — event
-  `fields:` at P2, step `output:` at P3 — surfacing `LOOPY-E201` on unknown shorthand.
+- **X4** every `output:` and event field type parses via the shared desugar pass — event
+  fields at P2, step `output:` at P3 — surfacing `LOOPY-E201` on unknown shorthand.
 - **X5** **lineage**: build the event graph (producers = sensors + steps that `emit`; consumers =
   steps whose `on:` names it). An `on:` event with **no** producer → **warning** `LOOPY-W501`
   (dead trigger). A terminal `emits:` with no consumer is **allowed** (e.g. `GoalShipped`).
@@ -396,7 +396,7 @@ Some codes are shared where the same failure surfaces from more than one place (
 | **E107** | W7 | P4 | duplicate step name in a workflow / `(workflow, step)` id collision |
 | **E110** | — | P4 | malformed `cron("<expr>"[, tz=…])` — missing quotes, bad expr, or unknown tz |
 | **E111** | — | P3/P4 | `on:` lists multiple events (unions unsupported) |
-| **E201** | X4 | P2/P3 | unknown type shorthand in event `fields:` or step `output:` (desugar) |
+| **E201** | X4 | P2/P3 | unknown type shorthand in an event field or step `output:` (desugar) |
 | **E210** | X1 | P8 | entity name not Capitalized, or reserved `default` misused |
 | **E211** | X1 | P8 | duplicate entity name in `registry.yml` |
 | **E214** | X1 | P8 | a sandbox definition is missing its required `provider:` (`local`/`docker`/`daytona`) |

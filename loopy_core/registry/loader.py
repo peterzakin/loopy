@@ -253,8 +253,8 @@ def _load_agents(ag_map: Mapping, default_agent: Mapping, file: str) -> dict[str
 def _load_events(ev_map: Mapping, file: str, diags: DiagnosticCollector) -> dict[str, Event]:
     out: dict[str, Event] = {}
     for name, body in ev_map.items():
-        body = body or {}
-        raw_fields = body.get("fields") or {}
+        # An event body *is* its field map: `EventName: { key: type, ... }`.
+        raw_fields = body or {}
         fields: dict[str, dict] = {}
         for fname, ftype in raw_fields.items():
             schema = desugar(ftype, span=span_at(file, _line_of(raw_fields, fname)), diags=diags)

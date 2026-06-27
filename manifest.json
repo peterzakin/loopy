@@ -1,0 +1,408 @@
+{
+  "compiled_at": "2026-06-27T17:38:32.125519+00:00",
+  "lineage": {
+    "events": {
+      "GoalShipped": {
+        "consumers": [],
+        "producers": [
+          "resolve/ship"
+        ]
+      },
+      "Incident": {
+        "consumers": [
+          "triage/investigate"
+        ],
+        "producers": [
+          "sentry_issues"
+        ]
+      },
+      "MetricThreshold": {
+        "consumers": [
+          "confirm/check"
+        ],
+        "producers": [
+          "metric_watch"
+        ]
+      },
+      "WorkItem": {
+        "consumers": [
+          "resolve/arbitrate"
+        ],
+        "producers": [
+          "triage/investigate",
+          "upkeep/scan-deps"
+        ]
+      }
+    }
+  },
+  "loopy_version": "0.1.0",
+  "registry": {
+    "agents": {
+      "Fixer": {
+        "harness": {
+          "model": "claude-opus-4-8",
+          "runtime": "claude-code"
+        },
+        "sandbox": "default",
+        "skills": [
+          "testing"
+        ]
+      },
+      "Investigator": {
+        "harness": {
+          "model": "claude-sonnet-4-6",
+          "runtime": "claude-code"
+        },
+        "sandbox": "default",
+        "skills": [
+          "triage",
+          "repro-authoring"
+        ]
+      },
+      "Releaser": {
+        "harness": {
+          "model": "claude-sonnet-4-6",
+          "runtime": "claude-code"
+        },
+        "sandbox": "default",
+        "skills": [
+          "rollout"
+        ]
+      },
+      "Reviewer": {
+        "harness": {
+          "model": "claude-sonnet-4-6",
+          "runtime": "claude-code"
+        },
+        "sandbox": "default",
+        "skills": [
+          "rubrics/fix-quality"
+        ]
+      }
+    },
+    "events": {
+      "GoalShipped": {
+        "fields": {
+          "goal_id": {
+            "type": "string"
+          }
+        }
+      },
+      "Incident": {
+        "fields": {
+          "issue_id": {
+            "type": "string"
+          },
+          "link": {
+            "format": "uri",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "sentry",
+              "linear",
+              "datadog",
+              "pagerduty",
+              "slack"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "MetricThreshold": {
+        "fields": {
+          "goal_id": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkItem": {
+        "fields": {
+          "link": {
+            "format": "uri",
+            "type": "string"
+          },
+          "proposed_goal": {
+            "type": "string"
+          },
+          "repro": {
+            "type": "string"
+          },
+          "root_cause": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "sentry",
+              "linear",
+              "datadog",
+              "pagerduty",
+              "slack",
+              "cve"
+            ],
+            "type": "string"
+          }
+        }
+      }
+    },
+    "sandboxes": {
+      "default": {
+        "env_file": [
+          "secrets/default.env"
+        ],
+        "image": {
+          "apt": [
+            "git"
+          ],
+          "debian_slim": "3.12",
+          "user": "daytona",
+          "workdir": "/home/daytona"
+        },
+        "network": [
+          "github.com"
+        ],
+        "provider": "daytona",
+        "repos": [
+          {
+            "depth": 1,
+            "path": null,
+            "ref": null,
+            "url": "acme/runbooks"
+          }
+        ]
+      }
+    }
+  },
+  "schema_version": "1",
+  "sensors": [
+    {
+      "emits": "MetricThreshold",
+      "fn": "metric_watch",
+      "module": "sensors.sensors",
+      "name": "metric_watch",
+      "trigger": {
+        "interval": "5m",
+        "kind": "poll"
+      }
+    },
+    {
+      "emits": "Incident",
+      "fn": "sentry_issues",
+      "module": "sensors.sensors",
+      "name": "sentry_issues",
+      "trigger": {
+        "kind": "webhook",
+        "path": "/hooks/sentry"
+      }
+    }
+  ],
+  "workflows": {
+    "confirm": {
+      "entry": "check",
+      "steps": {
+        "check": {
+          "after": [],
+          "agent": "Reviewer",
+          "body": "Confirm whether goal {{ event.goal_id }} actually moved the metric, or reopen it.",
+          "budget": null,
+          "emits": [],
+          "id": "confirm/check",
+          "output": {},
+          "refs": [
+            {
+              "field": "goal_id",
+              "producer": "event",
+              "raw": "{{ event.goal_id }}"
+            }
+          ],
+          "trigger": {
+            "event": "MetricThreshold",
+            "kind": "event"
+          }
+        }
+      }
+    },
+    "resolve": {
+      "entry": "arbitrate",
+      "steps": {
+        "arbitrate": {
+          "after": [],
+          "agent": "Investigator",
+          "body": "Decide the goal for \"{{ event.proposed_goal }}\" given the work item at {{ event.link }}.",
+          "budget": null,
+          "emits": [],
+          "id": "resolve/arbitrate",
+          "output": {
+            "goal": {
+              "type": "string"
+            }
+          },
+          "refs": [
+            {
+              "field": "proposed_goal",
+              "producer": "event",
+              "raw": "{{ event.proposed_goal }}"
+            },
+            {
+              "field": "link",
+              "producer": "event",
+              "raw": "{{ event.link }}"
+            }
+          ],
+          "trigger": {
+            "event": "WorkItem",
+            "kind": "event"
+          }
+        },
+        "fix": {
+          "after": [
+            "arbitrate"
+          ],
+          "agent": "Fixer",
+          "body": "Implement the goal: {{ arbitrate.goal }}. Open a PR and summarize the change.",
+          "budget": null,
+          "emits": [],
+          "id": "resolve/fix",
+          "output": {
+            "pr_url": {
+              "format": "uri",
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "refs": [
+            {
+              "field": "goal",
+              "producer": "arbitrate",
+              "raw": "{{ arbitrate.goal }}"
+            }
+          ],
+          "trigger": null
+        },
+        "review": {
+          "after": [
+            "fix"
+          ],
+          "agent": "Reviewer",
+          "body": "Review {{ fix.pr_url }}: {{ fix.summary }}. Return a pass/fail verdict.",
+          "budget": null,
+          "emits": [],
+          "id": "resolve/review",
+          "output": {
+            "verdict": {
+              "enum": [
+                "pass",
+                "fail"
+              ],
+              "type": "string"
+            }
+          },
+          "refs": [
+            {
+              "field": "pr_url",
+              "producer": "fix",
+              "raw": "{{ fix.pr_url }}"
+            },
+            {
+              "field": "summary",
+              "producer": "fix",
+              "raw": "{{ fix.summary }}"
+            }
+          ],
+          "trigger": null
+        },
+        "ship": {
+          "after": [
+            "review"
+          ],
+          "agent": "Releaser",
+          "body": "If {{ review.verdict }} is pass, merge the PR and ship the change.",
+          "budget": null,
+          "emits": [
+            "GoalShipped"
+          ],
+          "id": "resolve/ship",
+          "output": {},
+          "refs": [
+            {
+              "field": "verdict",
+              "producer": "review",
+              "raw": "{{ review.verdict }}"
+            }
+          ],
+          "trigger": null
+        }
+      }
+    },
+    "triage": {
+      "entry": "investigate",
+      "steps": {
+        "investigate": {
+          "after": [],
+          "agent": "Investigator",
+          "body": "Triage incident {{ event.issue_id }} \u2014 \"{{ event.title }}\" ({{ event.link }}).\nFind the root cause and normalize it into a WorkItem for the resolve loop.",
+          "budget": null,
+          "emits": [
+            "WorkItem"
+          ],
+          "id": "triage/investigate",
+          "output": {},
+          "refs": [
+            {
+              "field": "issue_id",
+              "producer": "event",
+              "raw": "{{ event.issue_id }}"
+            },
+            {
+              "field": "title",
+              "producer": "event",
+              "raw": "{{ event.title }}"
+            },
+            {
+              "field": "link",
+              "producer": "event",
+              "raw": "{{ event.link }}"
+            }
+          ],
+          "trigger": {
+            "event": "Incident",
+            "kind": "event"
+          }
+        }
+      }
+    },
+    "upkeep": {
+      "entry": "scan-deps",
+      "steps": {
+        "scan-deps": {
+          "after": [],
+          "agent": "Investigator",
+          "body": "Scan dependencies changed since {{ event.last_run }} and open WorkItems for any risks.",
+          "budget": null,
+          "emits": [
+            "WorkItem"
+          ],
+          "id": "upkeep/scan-deps",
+          "output": {},
+          "refs": [
+            {
+              "field": "last_run",
+              "producer": "event",
+              "raw": "{{ event.last_run }}"
+            }
+          ],
+          "trigger": {
+            "expr": "0 3 * * *",
+            "kind": "cron",
+            "tz": null
+          }
+        }
+      }
+    }
+  }
+}

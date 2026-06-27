@@ -50,28 +50,23 @@ agents:
 events:
   # ── prompt chaining ──
   TextSubmitted:
-    fields:
-      text: str        # raw input to push through the pipeline
+    text: str        # raw input to push through the pipeline
 
   # ── routing ──
   SupportQuery:
-    fields:
-      query: str       # the customer's question
-      customer: str    # who asked (for logging / personalization)
+    query: str       # the customer's question
+    customer: str    # who asked (for logging / personalization)
 
   # ── parallelization ──
   ChangeSubmitted:
-    fields:
-      summary: str     # one-line description of the change to review
-      diff_url: url    # where the diff can be read
+    summary: str     # one-line description of the change to review
+    diff_url: url    # where the diff can be read
 
   # ── orchestrator-workers ──
   FeatureRequest:
-    fields:
-      request: str     # the feature, in prose
+    request: str     # the feature, in prose
 
   # ── evaluator-optimizer (loop-back) ──
   ContentRequested:
-    fields:
-      brief: str       # what to produce
-      feedback: str    # grader notes from the previous round; empty on the first pass
+    brief: str       # what to produce
+    feedback: str    # grader notes from the previous round; empty on the first pass

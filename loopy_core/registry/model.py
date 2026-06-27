@@ -49,7 +49,8 @@ class Agent(BaseModel):
 
 class Event(BaseModel):
     name: str
-    # top-level key -> JSON Schema fragment (draft 2020-12)
+    # field name -> JSON Schema fragment (draft 2020-12). Authored directly under the
+    # event in registry.yml (`EventName: { key: type, ... }`); no `fields:` wrapper.
     fields: dict[str, dict] = Field(default_factory=dict)
     span: Span
 
