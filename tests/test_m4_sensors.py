@@ -13,12 +13,12 @@ REGISTRY = (
     "  Incident:\n"
     "    fields:\n"
     "      source: enum[sentry, linear]\n"
-    "      issue_id: id\n"
+    "      issue_id: str\n"
     "      title: str\n"
     "      link: url\n"
     "  MetricThreshold:\n"
     "    fields:\n"
-    "      goal_id: id\n"
+    "      goal_id: str\n"
 )
 
 S_CODES = {codes.E401, codes.E402, codes.E403}

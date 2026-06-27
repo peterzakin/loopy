@@ -153,8 +153,8 @@ agents:
 # Typed field maps.
 events:
   # published by sensors
-  Incident:        { fields: { source: enum[sentry, linear, datadog, pagerduty, slack], issue_id: id, title: str, link: url } }
-  MetricThreshold: { fields: { goal_id: id } }
+  Incident:        { fields: { source: enum[sentry, linear, datadog, pagerduty, slack], issue_id: str, title: str, link: url } }
+  MetricThreshold: { fields: { goal_id: str } }
   # emitted by steps — cross-workflow seams + terminal announcements
   WorkItem:
     fields:
@@ -163,7 +163,7 @@ events:
       root_cause:    str
       proposed_goal: str
       repro:         str
-  GoalShipped:     { fields: { goal_id: id } }                         # terminal announcement
+  GoalShipped:     { fields: { goal_id: str } }                        # terminal announcement
 ```
 
 ## `skills/`

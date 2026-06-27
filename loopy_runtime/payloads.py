@@ -19,8 +19,6 @@ def default_value_for_schema(schema: dict) -> Any:
         fmt = schema.get("format")
         if fmt == "uri":
             return "https://example.test"
-        if fmt == "loopy-id":
-            return "stub-id"
         return "stub"
     if kind == "integer":
         return 0

@@ -82,7 +82,6 @@
       "GoalShipped": {
         "fields": {
           "goal_id": {
-            "format": "loopy-id",
             "type": "string"
           }
         }
@@ -90,7 +89,6 @@
       "Incident": {
         "fields": {
           "issue_id": {
-            "format": "loopy-id",
             "type": "string"
           },
           "link": {
@@ -115,7 +113,6 @@
       "MetricThreshold": {
         "fields": {
           "goal_id": {
-            "format": "loopy-id",
             "type": "string"
           }
         }

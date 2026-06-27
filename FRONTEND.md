@@ -88,14 +88,13 @@ runtime by **pydantic v2**, and code-generated into `loopy.events` classes via
 **`datamodel-code-generator`**. JSON Schema is the wire format; pydantic is the validator/codegen;
 both round-trip with each other.
 
-The README's terse forms (`str`, `enum[pass, fail]`, `id`) are kept purely as **authoring sugar** —
+The README's terse forms (`str`, `enum[pass, fail]`, `url`) are kept purely as **authoring sugar** —
 a small, mechanical desugar table, not a type system:
 
 | Authored | JSON Schema emitted |
 |---|---|
 | `str` | `{"type": "string"}` |
 | `int` / `float` / `bool` | `{"type": "integer" / "number" / "boolean"}` |
-| `id` | `{"type": "string", "format": "loopy-id"}` |
 | `url` | `{"type": "string", "format": "uri"}` |
 | `enum[a, b]` | `{"type": "string", "enum": ["a", "b"]}` |
 

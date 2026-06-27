@@ -66,7 +66,7 @@ def build_demo_manifest() -> Manifest:
                     "Incident": {
                         "fields": {
                             "source": {"enum": ["sentry", "pagerduty", "datadog"]},
-                            "issue_id": {"type": "string", "format": "loopy-id"},
+                            "issue_id": {"type": "string"},
                             "title": {"type": "string"},
                             "link": {"type": "string", "format": "uri"},
                         }

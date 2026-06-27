@@ -16,9 +16,9 @@ REGISTRY = (
     "sandboxes: { default: { provider: local } }\n"
     "agents: { Investigator: {} }\n"
     "events:\n"
-    "  Incident: { fields: { issue_id: id } }\n"
+    "  Incident: { fields: { issue_id: str } }\n"
     "  WorkItem: { fields: { note: str } }\n"
-    "  MetricThreshold: { fields: { goal_id: id } }\n"
+    "  MetricThreshold: { fields: { goal_id: str } }\n"
 )
 
 M2_CODES = {
