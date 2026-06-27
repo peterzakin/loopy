@@ -110,11 +110,10 @@ def test_type_desugar_table(tmp_path):
     registry = (
         "events:\n"
         "  Incident:\n"
-        "    fields:\n"
-        "      source: enum[sentry, linear]\n"
-        "      flagged: bool\n"
-        "      link: url\n"
-        "      count: int\n"
+        "    source: enum[sentry, linear]\n"
+        "    flagged: bool\n"
+        "    link: url\n"
+        "    count: int\n"
     )
     write_project(tmp_path, {"registry.yml": registry})
     fields = compile_project(tmp_path).project.registry.events["Incident"].fields
@@ -125,26 +124,26 @@ def test_type_desugar_table(tmp_path):
 
 
 def test_raw_json_schema_passes_through(tmp_path):
-    registry = "events:\n  E:\n    fields:\n      tags: { type: array, items: { type: string } }\n"
+    registry = "events:\n  E:\n    tags: { type: array, items: { type: string } }\n"
     write_project(tmp_path, {"registry.yml": registry})
     fields = compile_project(tmp_path).project.registry.events["E"].fields
     assert fields["tags"] == {"type": "array", "items": {"type": "string"}}
 
 
 def test_unknown_type_shorthand_reports_e201_at_line(tmp_path):
-    # x: is on line 4 of the file.
-    registry = "events:\n  Bad:\n    fields:\n      x: notatype\n"
+    # x: is on line 3 of the file.
+    registry = "events:\n  Bad:\n    x: notatype\n"
     write_project(tmp_path, {"registry.yml": registry})
     result = compile_project(tmp_path)
-    assert_code(result, codes.E201, file="registry.yml", line=4)
+    assert_code(result, codes.E201, file="registry.yml", line=3)
 
 
 def test_removed_id_shorthand_reports_e201(tmp_path):
     # `id` was removed from the desugar table; it is now an unknown shorthand.
-    registry = "events:\n  Bad:\n    fields:\n      x: id\n"
+    registry = "events:\n  Bad:\n    x: id\n"
     write_project(tmp_path, {"registry.yml": registry})
     result = compile_project(tmp_path)
-    assert_code(result, codes.E201, file="registry.yml", line=4)
+    assert_code(result, codes.E201, file="registry.yml", line=3)
 
 
 def test_naming_lowercase_agent_reports_e210(tmp_path):

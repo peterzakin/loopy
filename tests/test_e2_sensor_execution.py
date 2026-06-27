@@ -19,11 +19,10 @@ from tests.helpers import write_project
 REGISTRY = (
     "events:\n"
     "  Incident:\n"
-    "    fields:\n"
-    "      source: enum[sentry]\n"
-    "      issue_id: str\n"
-    "      title: str\n"
-    "      link: url\n"
+    "    source: enum[sentry]\n"
+    "    issue_id: str\n"
+    "    title: str\n"
+    "    link: url\n"
 )
 
 SENSOR_MODULE = (

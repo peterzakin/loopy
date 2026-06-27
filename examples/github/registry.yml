@@ -32,25 +32,21 @@ agents:
 events:
   # ── inbound (published by the GitHub webhook sensors) ──
   PullRequestOpened:
-    fields:
-      number: int      # PR number
-      repo: str        # owner/name
-      title: str
-      branch: str      # head ref (the PR's source branch)
-      base: str        # base ref (what it merges into)
-      url: url         # html_url of the PR
+    number: int      # PR number
+    repo: str        # owner/name
+    title: str
+    branch: str      # head ref (the PR's source branch)
+    base: str        # base ref (what it merges into)
+    url: url         # html_url of the PR
   PullRequestMerged:
-    fields:
-      number: int
-      repo: str
-      title: str
-      url: url
-      merged_by: str   # login of whoever merged it
+    number: int
+    repo: str
+    title: str
+    url: url
+    merged_by: str   # login of whoever merged it
   # ── outbound (emitted by the steps; available for a downstream workflow to subscribe to) ──
   ReviewPosted:
-    fields:
-      verdict: str
-      comments_posted: int
+    verdict: str
+    comments_posted: int
   WorkProposed:
-    fields:
-      ideas: str
+    ideas: str

@@ -76,7 +76,7 @@ def test_manifest_is_order_independent():
 REGISTRY = (
     "sandboxes:\n  default:\n    provider: local\n"
     "agents:\n  Worker: { sandbox: default }\n"
-    "events:\n  Incident:\n    fields:\n      issue_id: str\n"
+    "events:\n  Incident:\n    issue_id: str\n"
 )
 
 
@@ -130,7 +130,7 @@ def test_unregistered_event_reports_e504(tmp_path):
 
 
 def test_dead_trigger_reports_w501(tmp_path):
-    registry = "agents:\n  Worker: {}\nevents:\n  Lonely:\n    fields:\n      x: str\n"
+    registry = "agents:\n  Worker: {}\nevents:\n  Lonely:\n    x: str\n"
     write_project(
         tmp_path,
         {

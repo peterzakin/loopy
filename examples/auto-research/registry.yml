@@ -52,40 +52,35 @@ agents:
 events:
   # ── ingested by the sensor ──
   PaperFound:
-    fields:
-      paper_id: str     # arXiv id, e.g. 2401.01234
-      title: str
-      url: url
-      abstract: str
+    paper_id: str     # arXiv id, e.g. 2401.01234
+    title: str
+    url: url
+    abstract: str
 
   # ── digest → ideate ──
   PaperDigest:
-    fields:
-      paper_id: str
-      title: str
-      claims: str      # the key claims, in plain language
-      methods: str     # how they tested them
-      results: str     # what they found
+    paper_id: str
+    title: str
+    claims: str      # the key claims, in plain language
+    methods: str     # how they tested them
+    results: str     # what they found
 
   # ── ideate → experiment, AND reflect → experiment (the loop-back) ──
   Hypothesis:
-    fields:
-      origin: str          # the paper id or prior finding that prompted this
-      statement: str       # one falsifiable claim to test
-      experiment_plan: str # the smallest experiment that would test it
-      depth: int           # loop guard: how many hops from the original paper
+    origin: str          # the paper id or prior finding that prompted this
+    statement: str       # one falsifiable claim to test
+    experiment_plan: str # the smallest experiment that would test it
+    depth: int           # loop guard: how many hops from the original paper
 
   # ── experiment → writeup ──
   ExperimentDone:
-    fields:
-      statement: str
-      metric: str          # what was measured
-      result: str          # the number / outcome, with the seed and setup
-      supported: enum[yes, no, inconclusive]
-      depth: int
+    statement: str
+    metric: str          # what was measured
+    result: str          # the number / outcome, with the seed and setup
+    supported: enum[yes, no, inconclusive]
+    depth: int
 
   # ── terminal: the finding is logged ──
   FindingLogged:
-    fields:
-      report_url: url
-      conclusion: str
+    report_url: url
+    conclusion: str

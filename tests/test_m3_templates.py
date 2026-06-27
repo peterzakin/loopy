@@ -12,7 +12,7 @@ REGISTRY = (
     "sandboxes: { default: { provider: local } }\n"
     "agents: { Investigator: {} }\n"
     "events:\n"
-    "  Incident: { fields: { issue_id: str, title: str } }\n"
+    "  Incident: { issue_id: str, title: str }\n"
 )
 
 M3_CODES = {codes.E301, codes.E302, codes.E303, codes.E304, codes.E305}

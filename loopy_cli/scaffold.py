@@ -75,14 +75,12 @@ agents:
 events:
   # the task to act on — fire one by hand with `loopy trigger --event CodeTask --fields '{...}'`
   CodeTask:
-    fields:
-      task: str     # what to change, in prose
-      branch: str   # the branch to push the edit on
+    task: str     # what to change, in prose
+    branch: str   # the branch to push the edit on
   # emitted once the PR is open — a downstream workflow could subscribe with `on: PROpened`
   PROpened:
-    fields:
-      pr_url: url
-      summary: str
+    pr_url: url
+    summary: str
 """
 
 _OPEN_PR_MD = """\
@@ -270,13 +268,11 @@ agents:
 events:
   # the note to distill — fire one by hand with `loopy trigger --event Note --fields '{...}'`
   Note:
-    fields:
-      text: str     # the content to summarize, in prose
+    text: str     # the content to summarize, in prose
   # emitted once the summary is ready — a downstream step could subscribe with `on: Summarized`
   Summarized:
-    fields:
-      summary: str
-      action_items: str
+    summary: str
+    action_items: str
 """
 
 _ORCH_WORKFLOW_MD = """\

@@ -32,11 +32,9 @@ events:
   # the task to act on — published by a sensor in a real deployment, or fired by hand with
   # `loopy trigger --event CodeTask --fields '{...}'` (see README).
   CodeTask:
-    fields:
-      task: str     # what to change, in prose
-      branch: str   # the branch to push the edit on
+    task: str     # what to change, in prose
+    branch: str   # the branch to push the edit on
   # emitted when the PR is open — a downstream workflow could subscribe to it (none here).
   PROpened:
-    fields:
-      pr_url: url
-      summary: str
+    pr_url: url
+    summary: str
