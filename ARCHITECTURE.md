@@ -404,8 +404,8 @@ suite.
 
 ### 4.1 Registry + type DSL
 Parse `registry.yml` into typed models (`Defaults`, `Sandbox`, `Agent`, `Event`); apply
-`defaults.agent` inheritance; parse the field-type mini-DSL (`id`, `str`, `int`, `url`,
-`enum[a,b]`). Enforce naming: entities Capitalized; `default`
+`defaults.agent` inheritance; parse the field-type mini-DSL (`str`, `int`, `float`, `bool`,
+`url`, `enum[a,b]`). Enforce naming: entities Capitalized; `default`
 is the one reserved lowercase sandbox.
 
 ### 4.2 Event codegen → `loopy.events`

@@ -30,11 +30,11 @@ events:
   Incident:
     fields:
       source: enum[sentry, linear, datadog, pagerduty, slack]
-      issue_id: id
+      issue_id: str
       title: str
       link: url
   MetricThreshold:
-    fields: { goal_id: id }
+    fields: { goal_id: str }
   # emitted by steps — cross-workflow seams + terminal announcements
   WorkItem:
     fields:
@@ -44,4 +44,4 @@ events:
       proposed_goal: str
       repro: str
   GoalShipped:
-    fields: { goal_id: id }
+    fields: { goal_id: str }

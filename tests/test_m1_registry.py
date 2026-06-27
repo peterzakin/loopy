@@ -112,14 +112,14 @@ def test_type_desugar_table(tmp_path):
         "  Incident:\n"
         "    fields:\n"
         "      source: enum[sentry, linear]\n"
-        "      issue_id: id\n"
+        "      flagged: bool\n"
         "      link: url\n"
         "      count: int\n"
     )
     write_project(tmp_path, {"registry.yml": registry})
     fields = compile_project(tmp_path).project.registry.events["Incident"].fields
     assert fields["source"] == {"type": "string", "enum": ["sentry", "linear"]}
-    assert fields["issue_id"] == {"type": "string", "format": "loopy-id"}
+    assert fields["flagged"] == {"type": "boolean"}
     assert fields["link"] == {"type": "string", "format": "uri"}
     assert fields["count"] == {"type": "integer"}
 
@@ -134,6 +134,14 @@ def test_raw_json_schema_passes_through(tmp_path):
 def test_unknown_type_shorthand_reports_e201_at_line(tmp_path):
     # x: is on line 4 of the file.
     registry = "events:\n  Bad:\n    fields:\n      x: notatype\n"
+    write_project(tmp_path, {"registry.yml": registry})
+    result = compile_project(tmp_path)
+    assert_code(result, codes.E201, file="registry.yml", line=4)
+
+
+def test_removed_id_shorthand_reports_e201(tmp_path):
+    # `id` was removed from the desugar table; it is now an unknown shorthand.
+    registry = "events:\n  Bad:\n    fields:\n      x: id\n"
     write_project(tmp_path, {"registry.yml": registry})
     result = compile_project(tmp_path)
     assert_code(result, codes.E201, file="registry.yml", line=4)

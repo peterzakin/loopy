@@ -76,7 +76,7 @@ def test_manifest_is_order_independent():
 REGISTRY = (
     "sandboxes:\n  default:\n    provider: local\n"
     "agents:\n  Worker: { sandbox: default }\n"
-    "events:\n  Incident:\n    fields:\n      issue_id: id\n"
+    "events:\n  Incident:\n    fields:\n      issue_id: str\n"
 )
 
 

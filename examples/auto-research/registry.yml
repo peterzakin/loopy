@@ -53,7 +53,7 @@ events:
   # ── ingested by the sensor ──
   PaperFound:
     fields:
-      paper_id: id     # arXiv id, e.g. 2401.01234
+      paper_id: str     # arXiv id, e.g. 2401.01234
       title: str
       url: url
       abstract: str
@@ -61,7 +61,7 @@ events:
   # ── digest → ideate ──
   PaperDigest:
     fields:
-      paper_id: id
+      paper_id: str
       title: str
       claims: str      # the key claims, in plain language
       methods: str     # how they tested them

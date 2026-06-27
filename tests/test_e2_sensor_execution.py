@@ -21,7 +21,7 @@ REGISTRY = (
     "  Incident:\n"
     "    fields:\n"
     "      source: enum[sentry]\n"
-    "      issue_id: id\n"
+    "      issue_id: str\n"
     "      title: str\n"
     "      link: url\n"
 )

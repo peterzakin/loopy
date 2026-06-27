@@ -16,7 +16,6 @@ _SIMPLE: dict[str, dict] = {
     "int": {"type": "integer"},
     "float": {"type": "number"},
     "bool": {"type": "boolean"},
-    "id": {"type": "string", "format": "loopy-id"},
     "url": {"type": "string", "format": "uri"},
 }
 
@@ -41,6 +40,6 @@ def desugar(shorthand: object, *, span: Span, diags: DiagnosticCollector) -> dic
         codes.E201,
         f"unknown type shorthand: {shorthand!r}",
         span=span,
-        hint="use one of str/int/float/bool/id/url/enum[...], or inline a JSON Schema object",
+        hint="use one of str/int/float/bool/url/enum[...], or inline a JSON Schema object",
     )
     return None
