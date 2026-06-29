@@ -1,7 +1,7 @@
 """P1 — parse registry.yml into a typed Registry with defaults applied (FRONTEND §2).
 
 Parses with ruamel.yaml so keys retain line numbers for `file:line` spans, applies
-`defaults.agent` inheritance (deep-merge `harness`, replace `tools`/`skills` lists,
+`defaults.agent` inheritance (deep-merge `harness`, replace `skills` lists,
 scalar override for `sandbox`), desugars event field types, and runs X1 naming.
 """
 

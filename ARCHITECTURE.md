@@ -92,7 +92,7 @@ triggering event, must satisfy these. Each requirement is also where a modular p
 | **B1** | **Trigger → run instantiation.** On receiving a registered event (or a cron tick) that matches a manifest entry step's `on:`, create a new run rooted at that step. | The `on:` step is the DAG root. |
 | **B2** | **DAG execution honoring `after:`.** Run each non-entry step only after all its `after:` predecessors complete, passing predecessor **outputs** by reference for `{{ step.field }}` resolution. | The engine's core job. |
 | **B3** | **Template resolution at runtime.** Resolve `{{ event.* }}` (entry event) and `{{ step.* }}` (a direct `after:` predecessor's output) against real run data before invoking the agent. | Values only exist at run time. |
-| **B4** | **Agent invocation + typed output capture.** Run a step's prose against its bound agent (model + tools + skills + sandbox) and validate the result against the step's `output:` schema. | Steps are agent tasks. |
+| **B4** | **Agent invocation + typed output capture.** Run a step's prose against its bound agent (model + skills + sandbox) and validate the result against the step's `output:` schema. | Steps are agent tasks. |
 | **B5** | **Event emission onto the bus.** When a step (or sensor) `emits:` a registered event, publish it so other workflows' `on:` subscriptions fire — including any event-driven loop-back to a workflow's entry. | Cross-workflow seams. |
 | **B6** | **Budget enforcement.** Enforce `budget.wall_clock` (minutes), per-step `budget.spend.usd`, per-workflow USD caps (registry `limits.workflows.<name>.spend.usd`), and an *experimental* cumulative cascade USD cap (registry `limits.cascade_spend.usd`) — all gated on cost-reporting harnesses — that terminate runaway loop-backs; honor `window`/`latency` (days). | Runs span days; must be bounded. |
 | **B7** | **Durable timers.** `cron(expr)` ticks and budget/wait windows must survive process restarts (no language `sleep`). | Day-long waits can't live in memory. |
@@ -126,7 +126,7 @@ modular" = swap the `Runtime`; the rest give modularity along orthogonal axes.
 |---|---|---|---|
 | **`Runtime`** | Orchestration: walk the DAG, schedule steps, record outputs, drive timers, resume. The durable-execution core. | B1–B3, B7, B10, B11 | InMemory · DurableLite (sqlite/pg) · Temporal adapter |
 | **`StateStore`** | Persist run history (event-sourced log), step outputs, watermarks (`last_run`). | B8, B10, B11 | dict (in-mem) · SQLite · Postgres · Temporal history |
-| **`AgentHarness`** | Run a step's prose against a model + tools + skills inside a sandbox; return structured output. | B4 | claude-code (Claude Code) · codex (OpenAI Codex) |
+| **`AgentHarness`** | Run a step's prose against a model + skills inside a sandbox; return structured output. | B4 | claude-code (Claude Code) · codex (OpenAI Codex) |
 | **`SandboxProvider`** | Provision compute + egress from a sandbox spec (image build, network allowlist). | B4 | Daytona · local subprocess · container |
 | **`EventBus`** | Route registered events to `on:` subscribers. In-proc = single machine; networked = distributed. | B5 | in-process · **Redis (Streams)** · NATS · Kafka |
 | **`SensorRunner`** | The **language-pluggable** ingress edge: hosts + runs the developer's `@sensor` code, normalizes returns into `Event`s, and delivers them to the `EventReceiver`. Stateless. | B1 (ingress) | Python (FastAPI) · (future) Node/TS |
