@@ -1,6 +1,8 @@
 # Loopy
 
-Loopy is a **code-first, agent-neutral** framework for authoring agent automations. Your
+**Open source (Apache-2.0) · Python 3.12+**
+
+Loopy is an **open-source, agent-neutral, code-first** framework for authoring agent automations. Your
 automations are *files in your repo* — workflows, skills, and sensors authored as Markdown and
 code — so they version, diff, and review like the rest of your codebase. There's no canvas to
 click together: `loopy compile` builds the workflow's DAG straight from those files. Each step's
@@ -302,4 +304,10 @@ loopy admin                            # in another terminal → http://127.0.0.
 brings up the containerized stack instead, which keeps its state in a Docker volume; the one-shot
 `loopy trigger` path is in-memory and isn't recorded.) See [`DEPLOYMENT.md`](DEPLOYMENT.md) for the
 `state:` config block and caveats.
+
+## License
+
+Loopy is open source under the [Apache License 2.0](LICENSE). You're free to use, modify, and
+distribute it, including commercially; the license adds an express patent grant and asks that you
+preserve attribution and note significant changes.
 

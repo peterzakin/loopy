@@ -3,7 +3,14 @@ name = "loopy-computer"
 version = "0.1.0"
 description = "Loopy frontend: compile workflows into a validated manifest (the dbt-core of durable agent workflows)"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
     "pydantic>=2.6",
     "ruamel.yaml>=0.18",
@@ -45,7 +52,7 @@ packages = ["loopy_core", "loopy_runtime", "loopy_cli"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
