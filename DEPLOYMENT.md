@@ -522,6 +522,96 @@ carries the GitHub App creds for token minting. (The container stack builds the 
 local source tree when one is present, otherwise from the pinned PyPI release (`loopy-computer`) via
 the shipped `Dockerfile.pypi` — so container mode needs only Docker, not a source checkout.)
 
+### B″. Render — the single-node stack on a managed host (a worked example)
+
+Topology B′ assumes you bring a Docker host and let `loopy run` orchestrate the redis + engine
+containers with compose. On a managed platform like **Render** there is no Docker daemon to
+orchestrate, so you wire the same composition from the platform's own primitives instead. The
+**only** change from B′ is who brings up the parts: Render runs the engine container directly with
+`--in-process` (the same command the compose `loopy` service runs internally), and you point
+`--bus redis` at Render's managed Redis rather than a sidecar container. No `.md` changes, no
+recompile, same five modules.
+
+The mapping is one Render resource per piece:
+
+| B′ piece | Render resource | Notes |
+|---|---|---|
+| `loopy` engine process | a **Web Service** (Docker), **single instance** | it hosts the sensor webhooks, so it needs the public HTTPS ingress a Web Service gives. SQLite is a single writer and a disk pins the service to one instance anyway — never scale it past one. |
+| `EventBus` (redis) | a **Key Value** instance (managed Redis) | `REDIS_URL` is read from it via `fromService`, never pasted. Pick a plan with persistence so accepted-but-unprocessed events survive a restart (the reason the compose stack runs redis with `--appendonly yes`). |
+| `StateStore` (SQLite) | a **persistent disk** at `/state` | run history survives a redeploy. The disk is what forces (and matches) the single-instance constraint. |
+| `Sandbox` (Daytona) | **unchanged** — external | agents still run in Daytona; Render hosts only the engine. `DAYTONA_API_KEY`/`DAYTONA_API_URL` ride the service env. |
+
+The engine ships as its own image (Render has no bind mount, so the project travels *inside* the
+image rather than mounted read-only at `/project` as in B′). Install the release from PyPI, copy the
+project in, and compile during the build so a red compile fails the deploy:
+
+```dockerfile
+# Dockerfile — the engine image Render builds from your repo
+FROM python:3.11-slim
+RUN pip install --no-cache-dir "loopy-computer[redis]"
+
+WORKDIR /project
+COPY . /project
+RUN loopy compile .            # green compile gates the build; writes manifest.json
+
+ENTRYPOINT ["loopy"]
+CMD ["run", "manifest.json", "--in-process", "--root", ".", \
+     "--host", "0.0.0.0", "--port", "8000", \
+     "--bus", "redis", "--state", "sqlite", "--state-path", "/state/state.db"]
+```
+
+A `render.yaml` Blueprint declares the two services and the disk; the Web Service reads its
+`REDIS_URL` straight from the Key Value instance:
+
+```yaml
+services:
+  - type: web                  # the engine: sensor webhooks + runtime
+    name: loopy-engine
+    runtime: docker
+    numInstances: 1            # SQLite is a single writer: never scale past one
+    disk:
+      name: loopy-state        # run history survives a redeploy
+      mountPath: /state
+      sizeGB: 1
+    envVars:
+      - key: REDIS_URL
+        fromService: { type: keyvalue, name: loopy-bus, property: connectionString }
+      - key: DAYTONA_API_KEY        # set in the dashboard (secret)
+        sync: false
+      - key: GITHUB_WEBHOOK_SECRET
+        sync: false
+      - key: GITHUB_APP_ID          # control-plane creds (token minting)
+        sync: false
+      - key: GITHUB_APP_PRIVATE_KEY
+        sync: false
+
+  - type: keyvalue             # the EventBus: managed Redis
+    name: loopy-bus
+    maxmemoryPolicy: noeviction
+    ipAllowList: []            # internal only; reachable from the engine service
+```
+
+**The three secret surfaces (§6, §3.2) map onto two Render features.** Infra/control-plane creds —
+`DAYTONA_API_KEY`/`DAYTONA_API_URL` and the GitHub App's `GITHUB_APP_ID`/`GITHUB_APP_PRIVATE_KEY`
+(in the escaped-newline form `loopy auth github` writes) — are the engine's process env, set as the
+service env vars above. The one that is *not* an env var is the **agent/workload secret**: it lives
+in the sandbox `env_file` (e.g. `secrets/dev.env`), which is gitignored and therefore in neither the
+repo nor the image. Add it as a Render **Secret File** at the same project-relative path the
+`env_file:` in `registry.yml` names, and `EnvFileSecretsResolver` resolves it at run time exactly as
+on a VM. (`sensors/.env`, if used, is added the same way.)
+
+**Ingress.** Render terminates TLS and gives the Web Service a public hostname; register each
+source's webhook against its `/hooks/...` paths, which `loopy run` prints on startup. Set
+`GITHUB_WEBHOOK_SECRET` so GitHub deliveries are signature-verified at the edge. The engine serves
+only `POST` webhook routes and exposes no health endpoint, so leave Render's health check path blank
+— it falls back to the open-port check on `:8000`.
+
+**The B′ durability caveat still applies, unchanged.** The disk and Key Value persistence make
+*run history* and the *event queue* survive a restart, but a run that is mid-flight when the engine
+redeploys is lost — the InMemory `Runtime` stubs crash-recoverable `resume` (B10). In-flight
+durability is exactly what topology C below adds; Render is a clean home for that too (point the
+durable `Runtime` at a Render Postgres), but the adapter is the work, not the hosting.
+
 ### C. Durable / distributed — the production target (design-complete, behind the same interfaces)
 
 ```
