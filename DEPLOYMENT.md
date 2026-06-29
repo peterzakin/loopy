@@ -547,7 +547,7 @@ project in, and compile during the build so a red compile fails the deploy:
 
 ```dockerfile
 # Dockerfile — the engine image Render builds from your repo
-FROM python:3.11-slim
+FROM python:3.12-slim
 RUN pip install --no-cache-dir "loopy-computer[redis]"
 
 WORKDIR /project
