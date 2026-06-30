@@ -264,9 +264,10 @@ def init(
     """Scaffold a new Loopy project: registry, a runnable starter workflow, and an env file.
 
     By default a short wizard offers to close the gaps the scaffold leaves on purpose —
-    reusing an `ANTHROPIC_API_KEY` already in your environment, and wiring git auth — then
-    reports whatever's still missing (the same checks as `loopy doctor`). `--non-interactive`
-    skips the prompts entirely and just writes the placeholder scaffold.
+    reusing an `ANTHROPIC_API_KEY` already in your environment, recording a Redis connection
+    string if you want the networked event bus, and wiring git auth — then reports whatever's
+    still missing (the same checks as `loopy doctor`). `--non-interactive` skips the prompts
+    entirely and just writes the placeholder scaffold.
     """
     from loopy_cli.scaffold import InvalidProjectName, scaffold_project, validate_project_name
 
@@ -308,6 +309,7 @@ def init(
     if interactive:
         _offer_ambient_anthropic_key(target)
         _offer_ambient_daytona_creds(target)
+        _offer_redis_bus(target)
         # Git auth only matters if the agent actually clones a repo. With none configured,
         # creating a GitHub App would have nothing to install on — so skip it and say why.
         if repos:
@@ -427,6 +429,42 @@ def _offer_ambient_daytona_creds(target: Path) -> None:
     wrote = " + ".join(updates)
     typer.echo(
         "  " + typer.style("✓", fg=typer.colors.GREEN) + f" wrote {wrote} to loopy.env"
+    )
+    typer.echo()
+
+
+def _offer_redis_bus(target: Path) -> None:
+    """Ask whether to use Redis as the event bus, and if so record the connection string.
+
+    The default bus is the in-process backend — right for a first local run, no external service.
+    Redis is the networked mode (decoupled Runtime workers consuming a shared stream, surviving
+    restarts). Opting in writes the connection string into `loopy.env` as `REDIS_URL` (replacing
+    its commented stub in place); the scaffold deliberately ships no `loopy.yaml`, so the bus
+    itself is selected at launch with `loopy run --bus redis`. Skips silently when `loopy.env`
+    already has a `REDIS_URL` (e.g. re-init over an existing tree) so we never clobber one.
+    """
+    from loopy_runtime.config import DEFAULT_REDIS_URL
+    from loopy_runtime.secrets import load_control_plane_env, write_control_plane_env
+
+    # Already configured (e.g. re-init over an existing tree) — nothing to offer, don't clobber.
+    if load_control_plane_env(target).get("REDIS_URL"):
+        return
+
+    if not typer.confirm(
+        "  Use Redis as the event bus? (default: in-process — single node, no external service)",
+        default=False,
+    ):
+        return
+
+    url = typer.prompt("  Redis connection string", default=DEFAULT_REDIS_URL).strip()
+    if not url:
+        url = DEFAULT_REDIS_URL
+
+    write_control_plane_env(target, {"REDIS_URL": url})
+    typer.echo(
+        "  "
+        + typer.style("✓", fg=typer.colors.GREEN)
+        + " wrote REDIS_URL to loopy.env — start the engine with `loopy run --bus redis` to use it"
     )
     typer.echo()
 

@@ -271,6 +271,66 @@ def test_ambient_daytona_offer_does_not_clobber_existing(tmp_path, monkeypatch):
     assert load_control_plane_env(target)["DAYTONA_API_KEY"] == "dtn_already_set"
 
 
+def test_redis_offer_writes_url_when_confirmed(tmp_path, monkeypatch):
+    """Opting into Redis records the connection string in loopy.env — and writes no loopy.yaml."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo")
+
+    monkeypatch.setattr("typer.confirm", lambda *a, **k: True)
+    monkeypatch.setattr("typer.prompt", lambda *a, **k: "redis://localhost:6379")
+    loopy_cli._offer_redis_bus(target)
+
+    assert load_control_plane_env(target)["REDIS_URL"] == "redis://localhost:6379"
+    # No config file is introduced — the bus is selected at launch with `loopy run --bus redis`.
+    assert not (target / "loopy.yaml").exists()
+
+
+def test_redis_offer_writes_custom_url(tmp_path, monkeypatch):
+    """A non-default connection string is written through verbatim."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo")
+
+    monkeypatch.setattr("typer.confirm", lambda *a, **k: True)
+    monkeypatch.setattr("typer.prompt", lambda *a, **k: "redis://cache.internal:6380/2")
+    loopy_cli._offer_redis_bus(target)
+
+    assert load_control_plane_env(target)["REDIS_URL"] == "redis://cache.internal:6380/2"
+
+
+def test_redis_offer_respects_decline(tmp_path, monkeypatch):
+    """Declining leaves the in-process default — no REDIS_URL, no loopy.yaml, no URL prompt."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo")
+
+    monkeypatch.setattr("typer.confirm", lambda *a, **k: False)
+
+    def _boom(*a, **k):  # the connection-string prompt must never be reached on decline
+        raise AssertionError("should not prompt for a URL when Redis is declined")
+
+    monkeypatch.setattr("typer.prompt", _boom)
+    loopy_cli._offer_redis_bus(target)
+
+    assert "REDIS_URL" not in load_control_plane_env(target)
+    assert not (target / "loopy.yaml").exists()
+
+
+def test_redis_offer_does_not_clobber_existing(tmp_path, monkeypatch):
+    """An already-configured REDIS_URL in loopy.env is left untouched — no prompt, no overwrite."""
+    from loopy_runtime.secrets import write_control_plane_env
+
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo")
+    write_control_plane_env(target, {"REDIS_URL": "redis://existing:6379"})
+
+    def _boom(*a, **k):  # must not prompt when a URL is already configured
+        raise AssertionError("should not prompt when loopy.env already has REDIS_URL")
+
+    monkeypatch.setattr("typer.confirm", _boom)
+    loopy_cli._offer_redis_bus(target)
+
+    assert load_control_plane_env(target)["REDIS_URL"] == "redis://existing:6379"
+
+
 def test_init_non_interactive_writes_placeholder_scaffold(tmp_path, monkeypatch):
     """`--non-interactive` skips every prompt and leaves the verbatim placeholder scaffold."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-realkey0123456789")  # would be offered if asked
