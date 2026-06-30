@@ -6,6 +6,7 @@
     loopy trigger   fire one event at the manifest and run it to completion (for testing)
     loopy admin     serve the read-only dashboard over the run-state DB `loopy run` writes
     loopy demo      serve the dashboard against in-memory fake data (dev-only; safe to delete)
+    loopy help      show this overview, or help for one command (`loopy help run`)
 
 Heavy deps are imported lazily per command so `loopy compile` stays runtime-free.
 """
@@ -35,6 +36,55 @@ app.add_typer(auth_app, name="auth")
 @app.callback()
 def main() -> None:
     """Author, compile, and run durable agent workflows."""
+
+
+@app.command()
+def help(  # noqa: A001 - the command is literally named `help`; shadowing the builtin is intended
+    ctx: typer.Context,
+    command: list[str] | None = typer.Argument(
+        None, help="Command to describe, e.g. `loopy help run` or `loopy help auth github`."
+    ),
+) -> None:
+    """Show help for loopy, or for a specific command.
+
+    `loopy help` prints the top-level overview (same as `loopy --help`); `loopy help <command>`
+    prints that command's help (same as `loopy <command> --help`), walking sub-apps like
+    `loopy help auth github`.
+    """
+    # The group context is the parent — `ctx` itself belongs to this `help` command. Rendering
+    # the parent's help keeps the output identical to `loopy --help`, with no second source to
+    # drift. Walking `get_command` down the tree reuses click's own resolution, so a new command
+    # or sub-app shows up here automatically.
+    #
+    # Duck-typed on purpose: Typer renders through a vendored click (`typer._click`), so its
+    # groups are NOT instances of the top-level `click.Group` and an isinstance check would
+    # wrongly reject them. We test for `get_command` (only groups have it) and build each
+    # sub-context from the parent context's own class, staying within whichever click Typer uses.
+    group_ctx = ctx.parent
+    if not command:
+        typer.echo(group_ctx.get_help())
+        return
+
+    context_cls = type(group_ctx)
+    cmd = group_ctx.command
+    cmd_ctx = group_ctx
+    path = "loopy"
+    for token in command:
+        get_command = getattr(cmd, "get_command", None)
+        if get_command is None:  # a leaf command — nothing to descend into
+            typer.echo(f"error: '{path}' has no subcommands", err=True)
+            raise typer.Exit(code=1)
+        sub = get_command(cmd_ctx, token)
+        if sub is None:
+            typer.echo(
+                f"error: unknown command '{token}'. Run `loopy help` for the command list.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        cmd_ctx = context_cls(sub, info_name=token, parent=cmd_ctx)
+        cmd = sub
+        path = f"{path} {token}"
+    typer.echo(cmd.get_help(cmd_ctx))
 
 
 def _enable_progress_logging() -> None:
@@ -264,9 +314,10 @@ def init(
     """Scaffold a new Loopy project: registry, a runnable starter workflow, and an env file.
 
     By default a short wizard offers to close the gaps the scaffold leaves on purpose —
-    reusing an `ANTHROPIC_API_KEY` already in your environment, and wiring git auth — then
-    reports whatever's still missing (the same checks as `loopy doctor`). `--non-interactive`
-    skips the prompts entirely and just writes the placeholder scaffold.
+    reusing an `ANTHROPIC_API_KEY` already in your environment, recording a Redis connection
+    string if you want the networked event bus, and wiring git auth — then reports whatever's
+    still missing (the same checks as `loopy doctor`). `--non-interactive` skips the prompts
+    entirely and just writes the placeholder scaffold.
     """
     from loopy_cli.scaffold import InvalidProjectName, scaffold_project, validate_project_name
 
@@ -308,6 +359,7 @@ def init(
     if interactive:
         _offer_ambient_anthropic_key(target)
         _offer_ambient_daytona_creds(target)
+        _offer_redis_bus(target)
         # Git auth only matters if the agent actually clones a repo. With none configured,
         # creating a GitHub App would have nothing to install on — so skip it and say why.
         if repos:
@@ -427,6 +479,42 @@ def _offer_ambient_daytona_creds(target: Path) -> None:
     wrote = " + ".join(updates)
     typer.echo(
         "  " + typer.style("✓", fg=typer.colors.GREEN) + f" wrote {wrote} to loopy.env"
+    )
+    typer.echo()
+
+
+def _offer_redis_bus(target: Path) -> None:
+    """Ask whether to use Redis as the event bus, and if so record the connection string.
+
+    The default bus is the in-process backend — right for a first local run, no external service.
+    Redis is the networked mode (decoupled Runtime workers consuming a shared stream, surviving
+    restarts). Opting in writes the connection string into `loopy.env` as `REDIS_URL` (replacing
+    its commented stub in place); `loopy run` auto-selects the Redis bus whenever `REDIS_URL` is
+    set, so no flag or `loopy.yaml` is needed (and `--bus inproc` still forces in-process). Skips
+    silently when `loopy.env` already has a `REDIS_URL` (e.g. re-init) so we never clobber one.
+    """
+    from loopy_runtime.config import DEFAULT_REDIS_URL
+    from loopy_runtime.secrets import load_control_plane_env, write_control_plane_env
+
+    # Already configured (e.g. re-init over an existing tree) — nothing to offer, don't clobber.
+    if load_control_plane_env(target).get("REDIS_URL"):
+        return
+
+    if not typer.confirm(
+        "  Use Redis as the event bus? (default: in-process — single node, no external service)",
+        default=False,
+    ):
+        return
+
+    url = typer.prompt("  Redis connection string", default=DEFAULT_REDIS_URL).strip()
+    if not url:
+        url = DEFAULT_REDIS_URL
+
+    write_control_plane_env(target, {"REDIS_URL": url})
+    typer.echo(
+        "  "
+        + typer.style("✓", fg=typer.colors.GREEN)
+        + " wrote REDIS_URL to loopy.env — `loopy run` will use the Redis bus automatically"
     )
     typer.echo()
 
@@ -933,10 +1021,16 @@ def run(
     host: str | None = typer.Option(None, "--host", help="Override sensor_server.host."),
     port: int | None = typer.Option(None, "--port", help="Override sensor_server.port."),
     bus: str | None = typer.Option(
-        None, "--bus", help="EventBus: inproc | redis. Overrides config."
+        None,
+        "--bus",
+        help="EventBus: inproc | redis. Overrides config and the REDIS_URL auto-detection "
+        "(default: redis when REDIS_URL is set, else inproc).",
     ),
     redis_url: str | None = typer.Option(
-        None, "--redis-url", help="Redis URL (or REDIS_URL env var; used when bus=redis)."
+        None,
+        "--redis-url",
+        help="Redis URL (or REDIS_URL env var). Selects the redis bus on its own unless --bus says "
+        "otherwise.",
     ),
     state: str | None = typer.Option(
         None, "--state", help="StateStore: sqlite | inproc. Overrides config (default sqlite)."
@@ -1008,6 +1102,7 @@ def run(
             bus=bus,
             state_backend=state,
             state_path=state_path,
+            redis_url=redis_url,
         )
     except ConfigError as exc:
         typer.echo(f"error: {exc}", err=True)
