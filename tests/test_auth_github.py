@@ -103,6 +103,31 @@ def test_write_env_preserves_comments_and_unrelated_keys(tmp_path):
     assert "GITHUB_APP_ID=42" in text  # new key appended
 
 
+def test_write_env_replaces_commented_stub_in_place(tmp_path):
+    # The scaffold ships commented placeholders; `loopy auth github` should fill them
+    # in place, not leave the stub behind and append a duplicate-looking line below.
+    (tmp_path / "loopy.env").write_text(
+        "# --- GitHub App ---\n"
+        "# GITHUB_APP_ID=\n"
+        "# GITHUB_APP_PRIVATE_KEY=\n"
+        "\n"
+        "# DAYTONA_API_KEY=\n"
+    )
+    write_control_plane_env(
+        tmp_path, {"GITHUB_APP_ID": "42", "GITHUB_APP_PRIVATE_KEY": "pem"}
+    )
+    text = (tmp_path / "loopy.env").read_text()
+    assert "# GITHUB_APP_ID=" not in text  # stub consumed, not left behind
+    assert "# GITHUB_APP_PRIVATE_KEY=" not in text
+    assert text.count("GITHUB_APP_ID=") == 1  # no duplicate appended at the bottom
+    assert text.count("GITHUB_APP_PRIVATE_KEY=") == 1
+    assert "# DAYTONA_API_KEY=" in text  # untouched stub for a key we didn't write
+    assert load_control_plane_env(tmp_path) == {
+        "GITHUB_APP_ID": "42",
+        "GITHUB_APP_PRIVATE_KEY": "pem",
+    }
+
+
 def test_write_env_updates_in_place_and_is_idempotent(tmp_path):
     write_control_plane_env(tmp_path, {"GITHUB_APP_ID": "1", "REDIS_URL": "redis://x"})
     write_control_plane_env(tmp_path, {"GITHUB_APP_ID": "2"})  # rewrite in place

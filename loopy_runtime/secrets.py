@@ -94,6 +94,12 @@ def write_control_plane_env(root: str | Path, updates: Mapping[str, str]) -> Pat
     Used by onboarding (`loopy auth github`) to land creds without a manual edit.
     Existing keys are rewritten in place; new keys are appended; comments,
     blank lines, and unrelated keys are preserved untouched (no clobber).
+
+    A commented stub (e.g. the scaffold's `# GITHUB_APP_ID=` placeholder) for a key
+    we're writing is replaced in place by the real `KEY=value`. Without this the stub
+    line — being a comment — wouldn't match, so the value would be appended at the
+    bottom and the now-misleading `# GITHUB_APP_ID=` stub would linger above it.
+
     Idempotent — re-running with the same values is a no-op on content. Returns
     the file path. Values are never logged.
     """
@@ -108,6 +114,15 @@ def write_control_plane_env(root: str | Path, updates: Mapping[str, str]) -> Pat
             if key in remaining:
                 lines.append(f"{key}={remaining.pop(key)}")
                 continue
+        elif stripped.startswith("#"):
+            # Commented stub like `# GITHUB_APP_ID=`: if it names a key we're writing,
+            # replace it in place rather than leaving the stub and appending below.
+            uncommented = stripped.lstrip("#").strip()
+            if "=" in uncommented:
+                key = uncommented.partition("=")[0].strip()
+                if key and key in remaining:
+                    lines.append(f"{key}={remaining.pop(key)}")
+                    continue
         lines.append(line)
     lines.extend(f"{key}={value}" for key, value in remaining.items())
     text = "\n".join(lines)
