@@ -435,23 +435,26 @@ step is touched.</strong></p>
   </div>
 </div>
 
-<h3 style="margin-top:18px"><code>loopy.yaml</code> — deployment defaults for <code>loopy run</code></h3>
-<p>The <code>run</code>-time wiring choices map to an optional config file so they need not be
-retyped as flags. Absent the file, defaults apply unchanged.</p>
-<pre class="ascii">sensor_server:        # the host:port that binds the sensor-webhook listener
-  host: 0.0.0.0
-  port: 8000
-bus: redis            # inproc (single-process) | redis (networked broker)</pre>
-<p>Precedence is <strong>explicit flag &gt; <code>loopy.yaml</code> &gt; built-in default</strong>,
-so <code>--bus inproc</code> still wins over a file that says <code>redis</code>. Connection
-strings stay in the environment, never the file: <code>bus: redis</code> reads its URL from the
-<code>REDIS_URL</code> env var (or the <code>--redis-url</code> flag), defaulting to
-<code>redis://localhost:6379</code>. <code>sandbox</code> is <em>not</em> a config key and not a
-launch flag — each sandbox's <code>provider:</code> is declared in <code>registry.yml</code>, and
-the runtime routes each step to the backend its sandbox names. <code>state:</code> (durable StateStore) and <code>limits:</code> (spend caps)
-are reserved for B10/B-cost and not yet read.</p>
-<h3 style="margin-top:18px"><code>loopy.env</code> — the secret companion to <code>loopy.yaml</code></h3>
-<p>Because connection strings and provider keys can't live in the YAML, a local-dev convenience
+<h3 style="margin-top:18px"><code>loopy run</code> wiring flags</h3>
+<p>The <code>run</code>-time wiring choices are passed as CLI flags, resolved over built-in
+defaults; there is no config file. The common case needs no flags at all.</p>
+<pre class="ascii">loopy run manifest.json \
+  --host 0.0.0.0 --port 8000 \   # the host:port that binds the sensor-webhook listener
+  --bus redis \                  # inproc (single-process) | redis (networked broker)
+  --state sqlite                 # sqlite (durable, default) | inproc (ephemeral)</pre>
+<p>When <code>--bus</code> is not given, it is auto-detected from the Redis connection string: a
+<code>REDIS_URL</code> in the environment (or a <code>--redis-url</code> flag) selects
+<code>redis</code>, otherwise <code>inproc</code>; <code>--bus inproc</code> always forces the
+single-process bus. Connection strings stay in the environment, never in a file: the
+<code>redis</code> bus reads its URL from the <code>REDIS_URL</code> env var (or the
+<code>--redis-url</code> flag), defaulting to <code>redis://localhost:6379</code>. The sandbox
+backend is not a launch flag — each sandbox's <code>provider:</code> is declared in
+<code>registry.yml</code>, and the runtime routes each step to the backend its sandbox names.
+<code>--state</code> selects the run-history <code>StateStore</code>, defaulting to a durable
+SQLite file (<code>.loopy/state.db</code>); <code>--state inproc</code> opts into the ephemeral
+store.</p>
+<h3 style="margin-top:18px"><code>loopy.env</code> — control-plane infra creds for local dev</h3>
+<p>Because connection strings and provider keys never belong in checked-in config, a local-dev convenience
 file supplies them: <code>loopy run</code> reads <code>loopy.env</code> at the project root and
 merges it into the process env with <strong>non-override</strong> (a value already set in the
 real/platform environment always wins), <em>before</em> resolving <code>redis_url</code> and before
@@ -492,7 +495,7 @@ DAYTONA_API_URL=https://...</pre>
   <li><strong>Control-plane / infra creds.</strong> The creds the engine itself needs go in its <strong>process env</strong>:
     <code>DAYTONA_API_KEY</code> / <code>DAYTONA_API_URL</code> (for the <code>daytona</code> provider, loopy's default sandbox — the SDK ships in the core deps),
     and <code>REDIS_URL</code> / <code>--redis-url</code> (for <code>--bus redis</code>). In production these come from the platform;
-    for local dev drop them in <code>loopy.env</code> at the project root (the secret companion to <code>loopy.yaml</code>, merged
+    for local dev drop them in <code>loopy.env</code> at the project root (merged
     with non-override). Infra creds only — agent secrets stay in sandbox <code>env_file</code>s, sensor secrets in <code>sensors/.env</code>.
     For the <code>local</code> provider: nothing — but agents run as host subprocesses, so it's dev-only.</li>
   <li><strong>Egress allowlist.</strong> Each sandbox's <code>network:</code> list is the egress contract — it

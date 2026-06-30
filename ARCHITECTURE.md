@@ -491,17 +491,17 @@ workflow `.md`.
   - **Control-plane / infra creds** — the creds the *engine itself* needs (`REDIS_URL`,
     `DAYTONA_API_KEY`/`DAYTONA_API_URL`). In production these are the deployment's process env; for
     local dev they may be supplied from **`loopy.env`** at the project root
-    (`load_control_plane_env`), merged with `setdefault` (real/platform env always wins). This is
-    the secret companion to `loopy.yaml`; the explicit name keeps its scope unambiguous —
-    connection strings / provider keys only, never agent or sensor secrets.
-- **Runtime config (`loopy.yaml` + `loopy.env`):** deployment defaults for `loopy run` (the
-  `sensor_server` host/port and the `bus` backend) live in an optional `loopy.yaml`, mapping ~1:1
-  to CLI flags. Resolution precedence is **explicit flag > `loopy.yaml` > built-in default**; an
-  absent file changes nothing. Connection strings/secrets stay out of the YAML — `redis_url`
-  resolves from `--redis-url` > the `REDIS_URL` env var > default, where that env var may itself be
-  seeded for local dev from `loopy.env` (the secret companion, loaded before resolution).
-  `sandbox` is *not* a config key (it's registry-owned, per-agent); `state:`/`limits:` are reserved
-  for the durable StateStore (B10) and spend caps. See `DEPLOYMENT.md` §5.
+    (`load_control_plane_env`), merged with `setdefault` (real/platform env always wins). The
+    explicit name keeps its scope unambiguous — connection strings / provider keys only, never
+    agent or sensor secrets.
+- **Runtime config (`loopy run` flags + `loopy.env`):** deployment defaults for `loopy run` (the
+  sensor-webhook host/port, the `bus` backend, and the `state` store) are passed as CLI flags
+  (`--host`/`--port`/`--bus`/`--state`/`--state-path`), resolved over built-in defaults in
+  `loopy_runtime/config.py`. There is no config file. Connection strings/secrets stay out of the
+  flags — `redis_url` resolves from `--redis-url` > the `REDIS_URL` env var > default, where that
+  env var may itself be seeded for local dev from `loopy.env` (loaded before resolution). The bus
+  is auto-detected when unpinned: a `REDIS_URL` present ⇒ `redis`, absent ⇒ `inproc`. `sandbox` is
+  registry-owned, per-agent, and not a launch flag. See `DEPLOYMENT.md` §5.
 
 ---
 
