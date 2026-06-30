@@ -372,33 +372,27 @@ toolchain, and the runtime's post-acquire probe (#16) is the backstop that fails
 actionable error if the snapshot is missing a required binary. Drop back to a declarative
 `image:` build whenever the toolchain changes (then re-bake the snapshot).
 
-**`loopy.yaml` — deployment defaults for `loopy run`.** The `run`-time wiring choices map to a
-small config file so they need not be retyped as flags. It is optional: absent the file,
-defaults apply unchanged.
+**`loopy run` wiring flags.** The `run`-time wiring choices are passed as CLI flags, resolved over
+built-in defaults; there is no config file. The common case needs no flags at all.
 
-```yaml
-# loopy.yaml (next to where you invoke `loopy run`; override path with --config)
-sensor_server:        # the host:port that binds the sensor-webhook listener
-  host: 0.0.0.0
-  port: 8000
-bus: redis            # inproc (single-process) | redis (networked broker)
-state:                # where run history is recorded (B12 observability)
-  backend: sqlite     # sqlite (durable, default) | inproc (ephemeral)
-  path: .loopy/state.db
+```bash
+loopy run manifest.json \
+  --host 0.0.0.0 --port 8000 \   # the host:port that binds the sensor-webhook listener
+  --bus redis \                  # inproc (single-process) | redis (networked broker)
+  --state sqlite \               # sqlite (durable, default) | inproc (ephemeral)
+  --state-path .loopy/state.db   # where run history is recorded (B12 observability)
 ```
 
-Precedence is **explicit flag > loopy.yaml > auto-detect**, so `--bus inproc` still wins over a
-file that says `redis`. When neither a flag nor the file pins `bus`, it is auto-detected from the
-Redis connection string: a `REDIS_URL` in the environment (or a `--redis-url` flag) selects the
-`redis` bus, otherwise `inproc`. So setting `REDIS_URL` is enough to opt into Redis with no flag
-or `loopy.yaml`. Connection strings stay in the environment, never the file: the `redis` bus reads
-its URL from `REDIS_URL` (or `--redis-url`), defaulting to `redis://localhost:6379`. `sandbox` is *not* a config key and *not* a launch flag — each
-sandbox's `provider:` (`local`/`docker`/`daytona`) is declared in `registry.yml`, and the runtime
-routes each step to the backend its sandbox names.
-`state:` selects the run-history `StateStore`: it defaults to a durable **SQLite** file
+When `--bus` is not given, it is auto-detected from the Redis connection string: a `REDIS_URL` in
+the environment (or a `--redis-url` flag) selects the `redis` bus, otherwise `inproc`. So setting
+`REDIS_URL` is enough to opt into Redis with no flag, and `--bus inproc` always forces the
+single-process bus. Connection strings stay in the environment, never in a file: the `redis` bus
+reads its URL from `REDIS_URL` (or `--redis-url`), defaulting to `redis://localhost:6379`. The
+sandbox backend is not a launch flag — each sandbox's `provider:` (`local`/`docker`/`daytona`) is
+declared in `registry.yml`, and the runtime routes each step to the backend its sandbox names.
+`--state` selects the run-history `StateStore`: it defaults to a durable **SQLite** file
 (`.loopy/state.db`, gitignored), so run history survives restarts and the `loopy admin` dashboard
-can read it (see below); `--state inproc` / `backend: inproc` opts back into the old ephemeral
-store. `limits:` (spend caps) is still reserved for B-cost and not yet read.
+can read it (see below); `--state inproc` opts back into the old ephemeral store.
 
 **`loopy admin` — the read-only run dashboard (B12).** Run history written by `loopy run` is
 served by a separate, read-only web process:
@@ -416,8 +410,8 @@ single-host (it reads the local file) and unauthenticated — bind it to localho
 your own auth; internet exposure is out of scope for v1. OpenTelemetry/metrics export is a later
 layer.
 
-**`loopy.env` — the secret companion to `loopy.yaml`.** Because connection strings and provider
-keys can't live in the YAML, a local-dev convenience file supplies them: `loopy run` reads
+**`loopy.env` — control-plane infra creds for local dev.** Because connection strings and provider
+keys never belong in checked-in config, a local-dev convenience file supplies them: `loopy run` reads
 `loopy.env` at the project root and merges it into the process env with **non-override** (a value
 already set in the real/platform environment always wins), *before* resolving `redis_url` and
 before any Daytona client is created. It holds **infra creds only** — `REDIS_URL`,
@@ -661,8 +655,8 @@ What you actually need in place for a successful run, in order:
    for the `daytona` provider (loopy's default sandbox), `DAYTONA_API_KEY` / `DAYTONA_API_URL`
    (the SDK ships in the core deps); for `--bus redis`, a reachable `REDIS_URL` (or `--redis-url`). In production these
    come from the platform (container env, systemd, CI secret store). For **local dev**, drop them
-   in **`loopy.env`** at the project root — the secret companion to `loopy.yaml`, merged into the
-   process env at `loopy run` with non-override (a value set in the real environment always wins).
+   in **`loopy.env`** at the project root — merged into the process env at `loopy run` with
+   non-override (a value set in the real environment always wins).
    Keep this file to infra creds only; agent secrets live in sandbox `env_file`s (item 3) and
    sensor secrets in `sensors/.env` (item 4). For the `local` provider: nothing — but agents run as
    subprocesses on the host, so it's dev-only.

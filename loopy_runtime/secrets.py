@@ -23,9 +23,9 @@ from loopy_runtime.manifest_model import SandboxSpec
 # sensors), gitignored, never compiled into the manifest.
 SENSOR_ENV_FILE = "sensors/.env"
 
-# The control-plane dotenv, relative to the project root — infra creds for the engine itself,
-# the secret companion to `loopy.yaml`. Explicitly named (not a bare `.env`) so its scope is
-# unambiguous: connection strings / provider keys only, never agent or sensor secrets.
+# The control-plane dotenv, relative to the project root — infra creds for the engine itself.
+# Explicitly named (not a bare `.env`) so its scope is unambiguous: connection strings /
+# provider keys only, never agent or sensor secrets.
 CONTROL_PLANE_ENV_FILE = "loopy.env"
 
 
@@ -137,8 +137,8 @@ def load_control_plane_env(root: str | Path) -> dict[str, str]:
     """Load the control-plane dotenv (`loopy.env` under the project root) into an env map.
 
     Holds the infra creds the engine itself needs — `REDIS_URL`,
-    `DAYTONA_API_KEY`/`DAYTONA_API_URL` — the secret companion to the non-secret `loopy.yaml`.
-    Returns an empty map when the file is absent. The caller merges these into the process env
+    `DAYTONA_API_KEY`/`DAYTONA_API_URL`. Returns an empty map when the file is absent. The caller
+    merges these into the process env
     with `setdefault` (non-override), so a value set in the real/platform environment always
     wins: this file is a local-dev convenience, not the production mechanism. Provider keys and
     connection strings only — keep agent secrets (sandbox `env_file`) and sensor secrets

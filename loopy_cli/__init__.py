@@ -490,7 +490,7 @@ def _offer_redis_bus(target: Path) -> None:
     Redis is the networked mode (decoupled Runtime workers consuming a shared stream, surviving
     restarts). Opting in writes the connection string into `loopy.env` as `REDIS_URL` (replacing
     its commented stub in place); `loopy run` auto-selects the Redis bus whenever `REDIS_URL` is
-    set, so no flag or `loopy.yaml` is needed (and `--bus inproc` still forces in-process). Skips
+    set, so no flag is needed (and `--bus inproc` still forces in-process). Skips
     silently when `loopy.env` already has a `REDIS_URL` (e.g. re-init) so we never clobber one.
     """
     from loopy_runtime.config import DEFAULT_REDIS_URL
@@ -642,8 +642,8 @@ def _write_manifest(project, out: Path) -> None:  # noqa: ANN001 - compile.model
     out.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
 
-# Source globs that affect a compiled manifest — used for the staleness check below. `loopy.yaml`
-# is deliberately excluded: it's deploy config consumed at `run`, not compiled into the manifest.
+# Source globs that affect a compiled manifest — used for the staleness check below. Deploy-time
+# wiring (`--bus`, `--host`, etc.) is consumed at `run`, not compiled into the manifest.
 _MANIFEST_SOURCE_DIRS = ("workflows", "skills", "sensors")
 
 
@@ -1015,15 +1015,12 @@ def run(
         help="A manifest.json, or a project directory to compile (default: manifest.json).",
     ),
     root: Path = typer.Option(Path("."), "--root", help="Project root (for env_file + sensors)."),
-    config: Path = typer.Option(
-        Path("loopy.yaml"), "--config", help="Deployment defaults (loopy.yaml); flags override it."
-    ),
-    host: str | None = typer.Option(None, "--host", help="Override sensor_server.host."),
-    port: int | None = typer.Option(None, "--port", help="Override sensor_server.port."),
+    host: str | None = typer.Option(None, "--host", help="Sensor webhook bind host."),
+    port: int | None = typer.Option(None, "--port", help="Sensor webhook bind port."),
     bus: str | None = typer.Option(
         None,
         "--bus",
-        help="EventBus: inproc | redis. Overrides config and the REDIS_URL auto-detection "
+        help="EventBus: inproc | redis. Overrides the REDIS_URL auto-detection "
         "(default: redis when REDIS_URL is set, else inproc).",
     ),
     redis_url: str | None = typer.Option(
@@ -1033,7 +1030,7 @@ def run(
         "otherwise.",
     ),
     state: str | None = typer.Option(
-        None, "--state", help="StateStore: sqlite | inproc. Overrides config (default sqlite)."
+        None, "--state", help="StateStore: sqlite | inproc (default sqlite)."
     ),
     state_path: str | None = typer.Option(
         None, "--state-path", help="SQLite state DB path (default .loopy/state.db, under --root)."
@@ -1076,7 +1073,7 @@ def run(
         return
 
     from loopy_runtime.bus.factory import make_event_bus
-    from loopy_runtime.config import ConfigError, load_config, resolve, resolve_redis_url
+    from loopy_runtime.config import ConfigError, resolve, resolve_redis_url
     from loopy_runtime.manifest_model import load_manifest
     from loopy_runtime.receiver import LocalEventReceiver
     from loopy_runtime.secrets import load_control_plane_env, load_sensor_env
@@ -1100,7 +1097,6 @@ def run(
 
     try:
         cfg = resolve(
-            load_config(config),
             host=host,
             port=port,
             bus=bus,
