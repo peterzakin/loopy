@@ -52,6 +52,10 @@ class Event(BaseModel):
     # field name -> JSON Schema fragment (draft 2020-12). Authored directly under the
     # event in registry.yml (`EventName: { key: type, ... }`); no `fields:` wrapper.
     fields: dict[str, dict] = Field(default_factory=dict)
+    # True for platform-shipped built-ins injected by the compiler (compile/builtins.py).
+    # Compile-only: it gates codegen (a dotted name can't be a Python class) but is not
+    # serialized — the runtime validates built-in events like any other.
+    builtin: bool = False
     span: Span
 
 

@@ -110,8 +110,12 @@ class SensorSpec(_Model):
     name: str
     trigger: SensorTriggerSpec
     emits: str
-    module: str
-    fn: str
+    # "module" (user-authored; import module.fn) or "builtin" (platform-shipped; resolve a
+    # mapper from the runtime registry by `emits`). Built-ins leave module/fn unset.
+    source: str = "module"
+    provider: str | None = None
+    module: str | None = None
+    fn: str | None = None
 
 
 class EventLineageSpec(_Model):

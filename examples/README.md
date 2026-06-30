@@ -17,7 +17,7 @@ The examples are grouped by what you're trying to learn.
 
 | Example | What it shows |
 |---|---|
-| [`github/`](github/) | The **webhook** loop. GitHub posts every event to one `/hooks/github` URL; the signature is verified once at the edge, then fanned out to two sensors (PR opened → review, PR merged → find follow-on work). |
+| [`github/`](github/) | The **built-in event** loop. A workflow triggers on `Github.PullRequestOpened` / `Github.PullRequestMerged` with no sensor or event declaration; the compiler injects the contract + a `/hooks/github` sensor, the signature is verified at the edge, and the matching workflow fires (PR opened → review, PR merged → find follow-on work). |
 | [`incidents/`](incidents/) | The **multi-workflow** loop from the top-level README: triage → resolve → confirm, plus a nightly `upkeep` cron scan — four workflows wired by events only at the real seams. |
 
 ## Patterns from the Anthropic cookbook

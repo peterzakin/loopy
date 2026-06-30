@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from loopy_core.compile.builtins import inject_builtins
 from loopy_core.compile.crosscheck import cross_check
 from loopy_core.compile.diagnostics import DiagnosticCollector
 from loopy_core.compile.model import Lineage, Project
@@ -37,15 +38,19 @@ def compile_project(root: str | Path) -> CompileResult:
     registry = load_registry(inv, diags)
     # P3–P5 — workflows: frontmatter, steps, DAG, template-ref extraction
     workflows = load_workflows(inv, registry, diags)
+    # P7 — sensors (loaded before P6 so the built-in pass can guard the reserved namespace
+    # over both user events and user sensors before refs resolve)
+    user_sensors = load_sensors(inv, registry, diags)
+    # Built-ins — register referenced Github.* event contracts + synthesize their sensors,
+    # so P6 ref-resolution and X3/X5 see them as ordinary registered/produced events.
+    builtin_sensors = inject_builtins(registry, workflows, user_sensors, diags)
     # P6 — statically resolve template refs against events + after: predecessors
     resolve_refs(workflows, registry, diags)
-    # P7 — sensors
-    sensors = load_sensors(inv, registry, diags)
 
     project = Project(
         registry=registry,
         workflows=workflows,
-        sensors=sensors,
+        sensors=user_sensors + builtin_sensors,
         lineage=Lineage(),  # populated by X5 in cross_check
     )
 

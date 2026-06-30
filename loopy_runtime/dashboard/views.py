@@ -262,7 +262,10 @@ async def build_workflows(manifest: Manifest | None, store: StateStore) -> dict[
 
 def _signature(s) -> str:
     """A representative source signature for a sensor. By convention a sensor takes a request-like
-    argument and returns its emitted event (see examples/*/sensors)."""
+    argument and returns its emitted event (see examples/*/sensors). Built-ins have no user
+    function — show the platform provider they're served by instead."""
+    if getattr(s, "source", "module") == "builtin":
+        return f"# built-in {s.provider} sensor -> {s.emits}"
     return f"def {s.fn}(req) -> {s.emits}"
 
 
@@ -282,7 +285,7 @@ async def build_sensors(manifest: Manifest | None, store: StateStore) -> dict[st
             "kind": s.trigger.kind,
             "module": s.module,
             "fn": s.fn,
-            "qualname": f"{s.module}.{s.fn}",
+            "qualname": f"{s.module}.{s.fn}" if s.module and s.fn else s.name,
             "emits": s.emits,
             "signature": _signature(s),
         }

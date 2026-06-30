@@ -986,7 +986,11 @@ def run(
     from loopy_runtime.manifest_model import load_manifest
     from loopy_runtime.receiver import LocalEventReceiver
     from loopy_runtime.secrets import load_control_plane_env, load_sensor_env
-    from loopy_runtime.sensors.loader import load_poll_sensor, load_webhook_sensor
+    from loopy_runtime.sensors.loader import (
+        builtin_webhook_sensor,
+        load_poll_sensor,
+        load_webhook_sensor,
+    )
     from loopy_runtime.sensors.runner import FastAPISensorRunner, synthesizing_publisher
     from loopy_runtime.sensors.scheduler import PollScheduler, parse_interval
     from loopy_runtime.state.factory import make_state_store
@@ -1065,7 +1069,10 @@ def run(
         if sensor.trigger.kind != "webhook" or not sensor.trigger.path:
             continue
         try:
-            fn = load_webhook_sensor(sensor, root)  # run the real @sensor function
+            if sensor.source == "builtin":
+                fn = builtin_webhook_sensor(sensor)  # platform-shipped mapper, no user code
+            else:
+                fn = load_webhook_sensor(sensor, root)  # run the real @sensor function
         except Exception as exc:  # noqa: BLE001 - any load failure degrades gracefully
             typer.echo(
                 f"warning: sensor '{sensor.name}' not loadable ({exc}); synthesizing events",

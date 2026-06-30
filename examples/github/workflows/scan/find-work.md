@@ -1,5 +1,5 @@
 ---
-on: PullRequestMerged
+on: Github.PullRequestMerged
 agent: Scout
 output:
   ideas: str

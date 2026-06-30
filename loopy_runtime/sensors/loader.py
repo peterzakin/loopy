@@ -92,6 +92,30 @@ def load_webhook_sensor(spec: SensorSpec, root: str | Path) -> Callable[[dict], 
     return invoke
 
 
+def builtin_webhook_sensor(spec: SensorSpec) -> Callable[[dict], Event | None]:
+    """Resolve a platform-shipped built-in sensor: look its payload->fields mapper up by
+    `emits` (no user module to import) and wrap the result in a runtime `Event`. The mapper
+    returns None for deliveries that aren't this event's concern."""
+    from loopy_runtime.scm.github_builtins import BUILTIN_MAPPERS
+
+    mapper = BUILTIN_MAPPERS.get(spec.emits)
+    if mapper is None:
+        raise KeyError(f"no built-in mapper registered for '{spec.emits}'")
+
+    def invoke(payload: dict) -> Event | None:
+        fields = mapper(payload)
+        if fields is None:
+            return None
+        return Event(
+            name=spec.emits,
+            fields=fields,
+            id=f"builtin-{next(_ids)}",
+            emitted_at=datetime.now(UTC),
+        )
+
+    return invoke
+
+
 def load_poll_sensor(spec: SensorSpec, root: str | Path) -> Callable[[Tick], list[Event]]:
     """Mirror of `load_webhook_sensor` for poll sensors: return a callable `Tick ->
     list[Event]` that runs the real sensor function with a scheduler `Tick` (not a webhook

@@ -27,6 +27,11 @@ class Sensor(BaseModel):
     name: str
     trigger: SensorTrigger
     emits: str  # declared, registered event name
-    module: str  # language-appropriate locator (dotted path for Python)
-    fn: str
+    # `source` discriminates a user-authored sensor (a Python module the backend imports)
+    # from a platform-shipped built-in (resolved from a runtime mapper registry by `emits`).
+    # A built-in carries `provider` and leaves `module`/`fn` unset.
+    source: Literal["module", "builtin"] = "module"
+    provider: str | None = None  # set iff source == "builtin", e.g. "github"
+    module: str | None = None  # language-appropriate locator (dotted path for Python)
+    fn: str | None = None
     span: Span

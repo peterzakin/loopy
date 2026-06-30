@@ -1,5 +1,5 @@
 ---
-on: PullRequestOpened
+on: Github.PullRequestOpened
 agent: Reviewer
 output:
   verdict: str

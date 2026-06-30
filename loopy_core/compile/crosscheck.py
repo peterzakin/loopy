@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from loopy_core.builtins import is_reserved
 from loopy_core.compile import codes
 from loopy_core.compile.diagnostics import DiagnosticCollector
 from loopy_core.compile.model import EventLineage, Lineage, Project
@@ -28,17 +29,19 @@ def cross_check(project: Project, inv: Inventory, diags: DiagnosticCollector) ->
                     span=step.span,
                 )
             for event in step.emits:
-                if event not in registry.events:
+                # Reserved-namespace events are validated by the built-in pass (E215/E112).
+                if event not in registry.events and not is_reserved(event):
                     diags.error(
                         codes.E504,
                         f"step '{step.id}' emits unregistered event '{event}'",
                         span=step.span,
                     )
             if step.trigger is not None and step.trigger.kind == "event":
-                if step.trigger.event not in registry.events:
+                event = step.trigger.event
+                if event not in registry.events and not is_reserved(event):
                     diags.error(
                         codes.E504,
-                        f"step '{step.id}' triggers on unregistered event '{step.trigger.event}'",
+                        f"step '{step.id}' triggers on unregistered event '{event}'",
                         span=step.span,
                     )
 

@@ -1,10 +1,12 @@
-# github — react to GitHub events delivered to one webhook. Two clear loops:
-#   • a PR is opened   → an agent reviews the diff and posts comments     (PullRequestOpened)
-#   • a PR is merged   → an agent proposes the follow-on work it implies  (PullRequestMerged)
+# github — react to GitHub events with zero sensor boilerplate. Two clear loops:
+#   • a PR is opened   → an agent reviews the diff and posts comments     (Github.PullRequestOpened)
+#   • a PR is merged   → an agent proposes the follow-on work it implies  (Github.PullRequestMerged)
 #
-# Both sensors listen on the SAME URL (/hooks/github): GitHub posts every event type there,
-# so the runner fans each delivery out to both sensors and only the matching one emits. See
-# README for the GitHub App / webhook setup and how the signature is verified at the edge.
+# The `Github.*` events are BUILT IN: a workflow triggers on them directly (see workflows/),
+# and the compiler injects the event contract + a sensor on /hooks/github for you — no
+# `events:` entry and no `sensors/` module to write. GitHub posts every event type to that one
+# URL; the runner verifies the signature once at the edge and fans each delivery out to the
+# built-in sensors, and only the matching one emits. See README for the App / webhook setup.
 
 # Defaults — every agent inherits these; override a field only when needed.
 defaults:
@@ -27,24 +29,10 @@ agents:
   Reviewer: {}   # reviews an opened PR
   Scout: {}      # mines a merged PR for follow-on work
 
-# Events — the bus contract. A step's `on:` may only name an event registered here, and a
-# sensor's `emits` must match one of these.
+# Events — only the OUTBOUND events the steps emit need declaring here. The inbound
+# `Github.PullRequestOpened` / `Github.PullRequestMerged` triggers are built in (their
+# contracts are registered automatically when a workflow triggers on them).
 events:
-  # ── inbound (published by the GitHub webhook sensors) ──
-  PullRequestOpened:
-    number: int      # PR number
-    repo: str        # owner/name
-    title: str
-    branch: str      # head ref (the PR's source branch)
-    base: str        # base ref (what it merges into)
-    url: url         # html_url of the PR
-  PullRequestMerged:
-    number: int
-    repo: str
-    title: str
-    url: url
-    merged_by: str   # login of whoever merged it
-  # ── outbound (emitted by the steps; available for a downstream workflow to subscribe to) ──
   ReviewPosted:
     verdict: str
     comments_posted: int
