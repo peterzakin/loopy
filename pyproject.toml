@@ -1,7 +1,7 @@
 [project]
 name = "loopy-computer"
 version = "0.1.0"
-description = "Loopy frontend: compile workflows into a validated manifest (the dbt-core of durable agent workflows)"
+description = "Loopy: a framework for agent automations"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
