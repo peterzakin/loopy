@@ -6,6 +6,7 @@
     loopy trigger   fire one event at the manifest and run it to completion (for testing)
     loopy admin     serve the read-only dashboard over the run-state DB `loopy run` writes
     loopy demo      serve the dashboard against in-memory fake data (dev-only; safe to delete)
+    loopy help      show this overview, or help for one command (`loopy help run`)
 
 Heavy deps are imported lazily per command so `loopy compile` stays runtime-free.
 """
@@ -35,6 +36,55 @@ app.add_typer(auth_app, name="auth")
 @app.callback()
 def main() -> None:
     """Author, compile, and run durable agent workflows."""
+
+
+@app.command()
+def help(  # noqa: A001 - the command is literally named `help`; shadowing the builtin is intended
+    ctx: typer.Context,
+    command: list[str] | None = typer.Argument(
+        None, help="Command to describe, e.g. `loopy help run` or `loopy help auth github`."
+    ),
+) -> None:
+    """Show help for loopy, or for a specific command.
+
+    `loopy help` prints the top-level overview (same as `loopy --help`); `loopy help <command>`
+    prints that command's help (same as `loopy <command> --help`), walking sub-apps like
+    `loopy help auth github`.
+    """
+    # The group context is the parent — `ctx` itself belongs to this `help` command. Rendering
+    # the parent's help keeps the output identical to `loopy --help`, with no second source to
+    # drift. Walking `get_command` down the tree reuses click's own resolution, so a new command
+    # or sub-app shows up here automatically.
+    #
+    # Duck-typed on purpose: Typer renders through a vendored click (`typer._click`), so its
+    # groups are NOT instances of the top-level `click.Group` and an isinstance check would
+    # wrongly reject them. We test for `get_command` (only groups have it) and build each
+    # sub-context from the parent context's own class, staying within whichever click Typer uses.
+    group_ctx = ctx.parent
+    if not command:
+        typer.echo(group_ctx.get_help())
+        return
+
+    context_cls = type(group_ctx)
+    cmd = group_ctx.command
+    cmd_ctx = group_ctx
+    path = "loopy"
+    for token in command:
+        get_command = getattr(cmd, "get_command", None)
+        if get_command is None:  # a leaf command — nothing to descend into
+            typer.echo(f"error: '{path}' has no subcommands", err=True)
+            raise typer.Exit(code=1)
+        sub = get_command(cmd_ctx, token)
+        if sub is None:
+            typer.echo(
+                f"error: unknown command '{token}'. Run `loopy help` for the command list.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        cmd_ctx = context_cls(sub, info_name=token, parent=cmd_ctx)
+        cmd = sub
+        path = f"{path} {token}"
+    typer.echo(cmd.get_help(cmd_ctx))
 
 
 def _enable_progress_logging() -> None:

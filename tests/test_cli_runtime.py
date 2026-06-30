@@ -213,3 +213,42 @@ def test_resolve_dashboard_port_exits_when_window_exhausted():
     finally:
         sock.close()
     assert exc.value.exit_code == 1
+
+
+# --- loopy help ---------------------------------------------------------------
+
+
+def test_help_lists_all_commands():
+    """`loopy help` prints the top-level overview, including every registered command."""
+    result = runner.invoke(app, ["help"])
+    assert result.exit_code == 0, result.output
+    for command in ("init", "compile", "doctor", "run", "trigger", "help", "auth"):
+        assert command in result.output
+
+
+def test_help_for_a_command_shows_its_usage():
+    """`loopy help run` renders that command's own help (its usage line + options)."""
+    result = runner.invoke(app, ["help", "run"])
+    assert result.exit_code == 0, result.output
+    # CliRunner uses a default prog name, so match the command-specific tail, not the prefix.
+    assert "run [OPTIONS]" in result.output
+    assert "--bus" in result.output  # a flag unique to `run`
+
+
+def test_help_walks_into_sub_apps():
+    """`loopy help auth github` descends through the auth sub-app to the leaf command."""
+    result = runner.invoke(app, ["help", "auth", "github"])
+    assert result.exit_code == 0, result.output
+    assert "auth github [OPTIONS]" in result.output
+
+
+def test_help_unknown_command_errors():
+    result = runner.invoke(app, ["help", "bogus"])
+    assert result.exit_code == 1
+    assert "unknown command 'bogus'" in result.output
+
+
+def test_help_rejects_subcommand_of_a_leaf():
+    result = runner.invoke(app, ["help", "run", "extra"])
+    assert result.exit_code == 1
+    assert "no subcommands" in result.output
