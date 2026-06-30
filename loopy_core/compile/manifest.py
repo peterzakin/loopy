@@ -128,6 +128,8 @@ def _sensor(sensor) -> dict:
         "name": sensor.name,
         "trigger": trigger,
         "emits": sensor.emits,
+        "source": sensor.source,
+        "provider": sensor.provider,
         "module": sensor.module,
         "fn": sensor.fn,
     }

@@ -1,22 +1,29 @@
-# github — react to GitHub webhooks
+# github — react to GitHub events (built-in, zero sensor code)
 
-Two loops driven by GitHub deliveries to a single webhook URL:
+Two loops driven by GitHub deliveries to a single webhook URL — and **neither needs a sensor
+or an event declaration**. The workflow just names a built-in `Github.*` event in its `on:`:
 
-| When | Sensor emits | Workflow | What the agent does |
+| When | Workflow triggers on | Workflow | What the agent does |
 | --- | --- | --- | --- |
-| A PR is **opened** | `PullRequestOpened` | `workflows/review/code-review.md` | reviews the diff and posts review comments |
-| A PR is **merged** | `PullRequestMerged` | `workflows/scan/find-work.md` | proposes the follow-on work the PR implies |
+| A PR is **opened** | `Github.PullRequestOpened` | `workflows/review/code-review.md` | reviews the diff and posts review comments |
+| A PR is **merged** | `Github.PullRequestMerged` | `workflows/scan/find-work.md` | proposes the follow-on work the PR implies |
 
-GitHub posts *every* event type to one URL, so both sensors listen on `/hooks/github`. The
-runner verifies the delivery signature once at the edge, then fans it out to both sensors;
-each returns its event only for the deliveries it cares about (a PR `opened` vs `closed`+merged).
+When a workflow triggers on a `Github.*` event, the compiler registers that event's contract
+and synthesizes a sensor on `/hooks/github` for you. GitHub posts *every* event type to that one
+URL, so the runner verifies the delivery signature once at the edge and fans it out to the
+built-in sensors; only the matching event emits (a PR `opened` vs `closed`+merged).
+
+The full built-in catalog is `Github.PullRequestOpened`, `Github.PullRequestMerged`,
+`Github.IssueOpened`, `Github.IssueCommentCreated`, and `Github.Push`. Trigger on any of them
+the same way. (The `Github.` namespace is reserved — you can't declare your own event or write a
+sensor in it; if you need an event the catalog doesn't cover, author a normal sensor as usual.)
 
 ## How it fits together
 
 ```
 GitHub ──webhook(/hooks/github, X-Hub-Signature-256)──▶ loopy ingress
-   verify HMAC  ─▶  fan out to both sensors  ─▶  on_pull_request_opened ─▶ PullRequestOpened ─▶ code-review
-                                              └▶  on_pull_request_merged ─▶ PullRequestMerged ─▶ find-work
+   verify HMAC  ─▶  fan out to built-in sensors  ─▶  Github.PullRequestOpened ─▶ code-review
+                                                  └▶  Github.PullRequestMerged ─▶ find-work
                          (each step runs in a sandbox with a scoped GitHub token injected)
 ```
 
@@ -24,6 +31,10 @@ GitHub ──webhook(/hooks/github, X-Hub-Signature-256)──▶ loopy ingress
 - **Outbound trust:** `loopy auth github` configures a GitHub App; the runtime mints a
   short-lived, repo-scoped installation token per step and injects it into the sandbox — no
   static PAT crosses the boundary (`scm/token_provider.py`).
+
+> Scope note: a built-in event fires for **any** repository the GitHub App delivers — there is no
+> per-repo filter on the trigger. Scope is whatever the App is installed on (here, the repo in
+> `sandboxes.Dev.repos`).
 
 ## Setup
 
@@ -38,7 +49,7 @@ GitHub ──webhook(/hooks/github, X-Hub-Signature-256)──▶ loopy ingress
    - Payload URL: `https://<your-host>/hooks/github`
    - Content type: `application/json`
    - Secret: the value from step 2
-   - Events: **Pull requests**
+   - Events: **Pull requests** (subscribe to Issues / Pushes too if you trigger on those)
    (For local dev, expose `http://127.0.0.1:8000` with a tunnel, e.g. `cloudflared`/`ngrok`.)
 4. **Model + sandbox creds:** `cp dev.env.example secrets/dev.env` and fill it in.
 
@@ -54,10 +65,11 @@ with `loopy admin` (dashboard at http://127.0.0.1:9000).
 
 ### Try it without GitHub
 
-Drive a sensor by hand with a sample payload (signature check applies only to the HTTP edge):
+Drive a built-in event by hand with a sample payload (the signature check applies only to the
+HTTP edge, so a direct trigger skips it):
 
 ```
-loopy trigger --event PullRequestOpened \
+loopy trigger --event Github.PullRequestOpened \
   --fields '{"number":1,"repo":"octocat/Hello-World","title":"Add widget","branch":"feat/widget","base":"main","url":"https://github.com/octocat/Hello-World/pull/1"}'
 ```
 

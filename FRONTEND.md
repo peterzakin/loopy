@@ -32,6 +32,12 @@ Non-negotiable: **collect all diagnostics, never fail-fast** — one run reports
 | P8 | **Validate** | `compile/pipeline.py` | diagnostics (errors + warnings) |
 | P9 | **Emit** | `compile/manifest.py` | `manifest.json` + `loopy.events` stubs |
 
+> **Built-in events** (§7.1) are injected between sensor loading and reference resolution:
+> sensors are loaded *before* P6 so the built-in pass can guard the reserved namespace over
+> both user events and user sensors, register referenced `Github.*` event contracts, and
+> synthesize their producing sensors — so P6 and P8 then see them as ordinary registered
+> events with producers.
+
 Passes accumulate into an in-memory IR; P8 runs cross-cutting checks over the whole IR; P9
 serializes. Each pass attaches a **source span** (`file`, `line`, `col`) to every node so
 diagnostics and the manifest can point back to source.
@@ -67,7 +73,7 @@ class Workflow(BaseModel):  name: str; entry: str; steps: dict[str,Step]; dag: "
 
 # sensors/model.py  (defined in M0, populated/validated in M4 — §7)
 class SensorTrigger(BaseModel): kind: Literal["webhook","poll"]; path: str|None; interval: str|None; span: Span  # distinct from Trigger
-class Sensor(BaseModel):        name: str; trigger: SensorTrigger; emits: str; module: str; fn: str; span: Span    # emits = declared registered event; module = language-appropriate locator (dotted for Python)
+class Sensor(BaseModel):        name: str; trigger: SensorTrigger; emits: str; source: Literal["module","builtin"]; provider: str|None; module: str|None; fn: str|None; span: Span  # source="module": user code (import module.fn); source="builtin": platform-shipped (resolve a runtime mapper by emits, provider set, no module/fn)
 
 # compile/model.py  (defined in M0; Lineage populated by M5/X5 — derived, span-exempt)
 class EventLineage(BaseModel):  producers: list[str]; consumers: list[str]              # sorted for determinism
@@ -221,6 +227,32 @@ resolves `{{ }}` at run time against recorded values.
   added to the descriptor when the second sensor language lands (so the backend `SensorRunner` picks
   the right runtime); Python-only until then.
 
+### 7.1 Built-in events (zero-config triggers)
+
+A workflow may trigger on a **platform-shipped** event without declaring it or authoring a
+sensor — e.g. `on: Github.PullRequestOpened`. The catalog lives in `loopy_core/builtins.py`
+(event contracts) with matching payload→fields mappers in `loopy_runtime/scm/github_builtins.py`
+(a test asserts the two halves never drift). The current `Github.*` catalog: `PullRequestOpened`,
+`PullRequestMerged`, `IssueOpened`, `IssueCommentCreated`, `Push`.
+
+- **Injection (`compile/builtins.py`).** For each `Github.*` event a workflow's `on:` names, the
+  pass registers its contract into the `Registry` (so `{{ event.field }}` refs resolve at P6 and
+  the backend re-validates the event at ingress) and synthesizes a built-in `Sensor` on
+  `/hooks/github` (`source="builtin"`, no `module`/`fn`) so the event has a producer (no `W501`).
+  Only referenced built-ins are injected — the catalog is not dumped wholesale.
+- **Reserved namespace.** `Github.` is reserved for built-ins. A user event, a user sensor's
+  `emits`, or a step's `emits` in that namespace → `LOOPY-E215`. An `on:` naming an unknown
+  built-in (`Github.Typo`) → `LOOPY-E112` (with the catalog of known names).
+- **Built-in events are excluded from `loopy.events` codegen** — a dotted name isn't a valid
+  Python class, and their mappers ship in the runtime, so sensor authors never import them. The
+  `Event.builtin` flag is compile-only (gates codegen) and is not serialized; the runtime
+  validates a built-in event exactly like any other.
+- **Scope (Option A).** A built-in fires for *any* repository the GitHub App delivers; there is
+  no per-repo trigger filter in v1.
+- **Runtime.** The `SensorRunner` resolves a `source="builtin"` spec via the mapper registry
+  (`builtin_webhook_sensor`) instead of importing user code; the `/hooks/github` HMAC verifier is
+  inherited unchanged.
+
 ---
 
 ## 8. Cross-cutting validation (P8)
@@ -231,12 +263,14 @@ Beyond per-pass checks, the whole-IR pass adds:
 - **X2** every `agent:` (step) resolves to a registered Agent; every `agent.sandbox` resolves;
   every `agent.skills[]` resolves to a skill in `skills/` — unresolved → error (no external skills).
 - **X3** every *event-kind* `on:` / `emits:` event is registered in `registry.yml` (cron triggers
-  are not events and need no registry entry).
+  are not events and need no registry entry). Reserved-namespace events (`Github.*`, §7.1) are
+  exempt here — the built-in pass owns their validation (`LOOPY-E112`/`E215`).
 - **X4** every `output:` and event field type parses via the shared desugar pass — event
   fields at P2, step `output:` at P3 — surfacing `LOOPY-E201` on unknown shorthand.
 - **X5** **lineage**: build the event graph (producers = sensors + steps that `emit`; consumers =
   steps whose `on:` names it). An `on:` event with **no** producer → **warning** `LOOPY-W501`
   (dead trigger). A terminal `emits:` with no consumer is **allowed** (e.g. `GoalShipped`).
+  Built-in events (§7.1) carry their synthesized sensor as producer, so they never warn.
 
 Diagnostics carry `{severity, code, message, span, hint?}`; codes are stable
 (`LOOPY-E###`/`LOOPY-W###`) so tests assert on them.
@@ -396,10 +430,12 @@ Some codes are shared where the same failure surfaces from more than one place (
 | **E107** | W7 | P4 | duplicate step name in a workflow / `(workflow, step)` id collision |
 | **E110** | — | P4 | malformed `cron("<expr>"[, tz=…])` — missing quotes, bad expr, or unknown tz |
 | **E111** | — | P3/P4 | `on:` lists multiple events (unions unsupported) |
+| **E112** | §7.1 | P7+ | `on:` names an unknown built-in event in a reserved namespace (e.g. `Github.Typo`) |
 | **E201** | X4 | P2/P3 | unknown type shorthand in an event field or step `output:` (desugar) |
 | **E210** | X1 | P8 | entity name not Capitalized, or reserved `default` misused |
 | **E211** | X1 | P8 | duplicate entity name in `registry.yml` |
 | **E214** | X1 | P8 | a sandbox definition is missing its required `provider:` (`local`/`docker`/`daytona`) |
+| **E215** | §7.1 | P7+ | a user event/sensor/step `emits` uses a reserved built-in namespace (e.g. `Github.*`) |
 | **E301** | T-grammar / T5 | P5/P6 | illegal template: control flow, filters, multi-segment / dotted path |
 | **E302** | T1 | P6 | `event.<field>` not in the triggering event's contract |
 | **E303** | T2 | P6 | cron trigger field other than `scheduled_at` / `last_run` |

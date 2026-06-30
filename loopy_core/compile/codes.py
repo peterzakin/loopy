@@ -19,6 +19,7 @@ E106 = "LOOPY-E106"  # after: graph has a cycle (W6)
 E107 = "LOOPY-E107"  # duplicate step name / id collision (W7)
 E110 = "LOOPY-E110"  # malformed cron("<expr>"[, tz=...])
 E111 = "LOOPY-E111"  # on: lists multiple events (unions unsupported)
+E112 = "LOOPY-E112"  # on: names an unknown built-in event (reserved namespace, not in catalog)
 
 # E2xx — registry / types
 E201 = "LOOPY-E201"  # unknown type shorthand in an event field or step output:
@@ -27,6 +28,7 @@ E211 = "LOOPY-E211"  # duplicate entity name in registry.yml (X1)
 E212 = "LOOPY-E212"  # malformed sandbox repos: entry (not owner/name string nor {url,...})
 E213 = "LOOPY-E213"  # malformed registry limits: (e.g. cascade_spend without a numeric usd)
 E214 = "LOOPY-E214"  # a sandbox definition is missing its required provider: (X1)
+E215 = "LOOPY-E215"  # a user event/sensor uses a reserved built-in namespace (e.g. Github.*)
 
 # E3xx — templates
 E301 = "LOOPY-E301"  # illegal template: control flow / filters / dotted path
@@ -64,12 +66,14 @@ ALL_CODES: frozenset[str] = frozenset(
         E107,
         E110,
         E111,
+        E112,
         E201,
         E210,
         E211,
         E212,
         E213,
         E214,
+        E215,
         E301,
         E302,
         E303,

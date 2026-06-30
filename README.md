@@ -187,12 +187,20 @@ The event-publish layer: code that turns the outside world into **registered eve
 more files (a single `sensors.py` is fine); each sensor is a function decorated with `@sensor`,
 triggered by a `poll` or a `webhook`.
 
+> **Common GitHub events are built in — you may not need a sensor at all.** A workflow can
+> trigger on a platform-shipped event directly (`on: Github.PullRequestOpened`) with no
+> `registry.yml` entry and no `sensors/` file; the compiler injects the contract and a
+> `/hooks/github` sensor for you. Catalog: `Github.PullRequestOpened`, `PullRequestMerged`,
+> `IssueOpened`, `IssueCommentCreated`, `Push`. The `Github.` namespace is reserved. See
+> [`examples/github/`](examples/github/). Write your own `@sensor` (below) for any source the
+> built-ins don't cover.
+
 > **Both `poll` and `webhook` are supported.** `loopy run` hosts each `@sensor(webhook=...)` as an
 > HTTP route and fans one path out to every sensor on it (GitHub posts every event type to a single
 > URL, so several sensors can share `/hooks/github`). Ingress can be signed: when
 > `GITHUB_WEBHOOK_SECRET` is set, `loopy run` verifies GitHub's `X-Hub-Signature-256` HMAC at the
-> edge before any sensor sees the payload. See [`examples/github/`](examples/github/) for a
-> signed-webhook loop and [`examples/incidents/sensors/sensors.py`](examples/incidents/sensors/sensors.py)
+> edge before any sensor sees the payload. See
+> [`examples/incidents/sensors/sensors.py`](examples/incidents/sensors/sensors.py)
 > for a mix of `webhook` and `poll` sensors.
 
 A sensor **returns a registered event** — and returning *is* emitting: the event goes on the
@@ -236,8 +244,9 @@ export const sensorRegistry = {
 };
 ```
 
-See [`examples/github/sensors/sensors.py`](examples/github/sensors/sensors.py) for the full
-signed-webhook example, and `sensors/sensors.py` in a scaffolded project.
+See [`examples/incidents/sensors/sensors.py`](examples/incidents/sensors/sensors.py) for a
+`webhook` + `poll` example, and `sensors/sensors.py` in a scaffolded project. For common GitHub
+events, prefer the built-in `Github.*` triggers (above) — no sensor required.
 
 ## Examples / run it locally
 

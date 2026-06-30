@@ -181,6 +181,8 @@
       "fn": "metric_watch",
       "module": "sensors.sensors",
       "name": "metric_watch",
+      "provider": null,
+      "source": "module",
       "trigger": {
         "interval": "5m",
         "kind": "poll"
@@ -191,6 +193,8 @@
       "fn": "sentry_issues",
       "module": "sensors.sensors",
       "name": "sentry_issues",
+      "provider": null,
+      "source": "module",
       "trigger": {
         "kind": "webhook",
         "path": "/hooks/sentry"
