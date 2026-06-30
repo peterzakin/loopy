@@ -439,9 +439,9 @@ def _offer_redis_bus(target: Path) -> None:
     The default bus is the in-process backend — right for a first local run, no external service.
     Redis is the networked mode (decoupled Runtime workers consuming a shared stream, surviving
     restarts). Opting in writes the connection string into `loopy.env` as `REDIS_URL` (replacing
-    its commented stub in place); the scaffold deliberately ships no `loopy.yaml`, so the bus
-    itself is selected at launch with `loopy run --bus redis`. Skips silently when `loopy.env`
-    already has a `REDIS_URL` (e.g. re-init over an existing tree) so we never clobber one.
+    its commented stub in place); `loopy run` auto-selects the Redis bus whenever `REDIS_URL` is
+    set, so no flag or `loopy.yaml` is needed (and `--bus inproc` still forces in-process). Skips
+    silently when `loopy.env` already has a `REDIS_URL` (e.g. re-init) so we never clobber one.
     """
     from loopy_runtime.config import DEFAULT_REDIS_URL
     from loopy_runtime.secrets import load_control_plane_env, write_control_plane_env
@@ -464,7 +464,7 @@ def _offer_redis_bus(target: Path) -> None:
     typer.echo(
         "  "
         + typer.style("✓", fg=typer.colors.GREEN)
-        + " wrote REDIS_URL to loopy.env — start the engine with `loopy run --bus redis` to use it"
+        + " wrote REDIS_URL to loopy.env — `loopy run` will use the Redis bus automatically"
     )
     typer.echo()
 
@@ -971,10 +971,16 @@ def run(
     host: str | None = typer.Option(None, "--host", help="Override sensor_server.host."),
     port: int | None = typer.Option(None, "--port", help="Override sensor_server.port."),
     bus: str | None = typer.Option(
-        None, "--bus", help="EventBus: inproc | redis. Overrides config."
+        None,
+        "--bus",
+        help="EventBus: inproc | redis. Overrides config and the REDIS_URL auto-detection "
+        "(default: redis when REDIS_URL is set, else inproc).",
     ),
     redis_url: str | None = typer.Option(
-        None, "--redis-url", help="Redis URL (or REDIS_URL env var; used when bus=redis)."
+        None,
+        "--redis-url",
+        help="Redis URL (or REDIS_URL env var). Selects the redis bus on its own unless --bus says "
+        "otherwise.",
     ),
     state: str | None = typer.Option(
         None, "--state", help="StateStore: sqlite | inproc. Overrides config (default sqlite)."
@@ -1046,6 +1052,7 @@ def run(
             bus=bus,
             state_backend=state,
             state_path=state_path,
+            redis_url=redis_url,
         )
     except ConfigError as exc:
         typer.echo(f"error: {exc}", err=True)

@@ -171,7 +171,9 @@ _LOOPY_ENV = """\
 # DAYTONA_API_KEY=
 # DAYTONA_API_URL=
 
-# --- Redis (only for --bus redis) ---
+# --- Redis event bus ---
+# Set REDIS_URL to run on the networked Redis bus; `loopy run` picks it up automatically
+# (leave it unset for the single-process in-memory bus). `--bus` overrides this.
 # REDIS_URL=redis://localhost:6379
 """
 
@@ -349,7 +351,9 @@ _ORCH_LOOPY_ENV = """\
 # DAYTONA_API_KEY=
 # DAYTONA_API_URL=
 
-# --- Redis (only for --bus redis) ---
+# --- Redis event bus ---
+# Set REDIS_URL to run on the networked Redis bus; `loopy run` picks it up automatically
+# (leave it unset for the single-process in-memory bus). `--bus` overrides this.
 # REDIS_URL=redis://localhost:6379
 
 # Adding a repo later? `loopy auth github` writes GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY here.

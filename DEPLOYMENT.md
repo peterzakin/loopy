@@ -387,10 +387,12 @@ state:                # where run history is recorded (B12 observability)
   path: .loopy/state.db
 ```
 
-Precedence is **explicit flag > loopy.yaml > built-in default**, so `--bus inproc` still wins
-over a file that says `redis`. Connection strings stay in the environment, never the file:
-`bus: redis` reads its URL from the `REDIS_URL` env var (or the `--redis-url` flag), defaulting
-to `redis://localhost:6379`. `sandbox` is *not* a config key and *not* a launch flag — each
+Precedence is **explicit flag > loopy.yaml > auto-detect**, so `--bus inproc` still wins over a
+file that says `redis`. When neither a flag nor the file pins `bus`, it is auto-detected from the
+Redis connection string: a `REDIS_URL` in the environment (or a `--redis-url` flag) selects the
+`redis` bus, otherwise `inproc`. So setting `REDIS_URL` is enough to opt into Redis with no flag
+or `loopy.yaml`. Connection strings stay in the environment, never the file: the `redis` bus reads
+its URL from `REDIS_URL` (or `--redis-url`), defaulting to `redis://localhost:6379`. `sandbox` is *not* a config key and *not* a launch flag — each
 sandbox's `provider:` (`local`/`docker`/`daytona`) is declared in `registry.yml`, and the runtime
 routes each step to the backend its sandbox names.
 `state:` selects the run-history `StateStore`: it defaults to a durable **SQLite** file

@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from loopy_runtime.config import (
-    DEFAULT_BUS,
     DEFAULT_HOST,
     DEFAULT_PORT,
     DEFAULT_REDIS_URL,
@@ -27,7 +26,8 @@ def _write(tmp_path, text: str):
 
 def test_missing_file_is_all_defaults(tmp_path):
     cfg = load_config(tmp_path / "loopy.yaml")
-    assert cfg == LoopyConfig(host=DEFAULT_HOST, port=DEFAULT_PORT, bus=DEFAULT_BUS)
+    # bus is left unspecified (None) at load time — resolve() auto-detects it from REDIS_URL.
+    assert cfg == LoopyConfig(host=DEFAULT_HOST, port=DEFAULT_PORT, bus=None)
 
 
 def test_empty_file_is_defaults(tmp_path):
@@ -43,7 +43,8 @@ def test_yaml_values_loaded(tmp_path):
 
 def test_partial_yaml_keeps_defaults(tmp_path):
     cfg = load_config(_write(tmp_path, "sensor_server:\n  port: 9999\n"))
-    assert (cfg.host, cfg.port, cfg.bus) == (DEFAULT_HOST, 9999, DEFAULT_BUS)
+    # No `bus:` key ⇒ unspecified (None); resolve() decides the effective bus.
+    assert (cfg.host, cfg.port, cfg.bus) == (DEFAULT_HOST, 9999, None)
 
 
 def test_unknown_keys_warn_not_fatal(tmp_path):
@@ -134,6 +135,36 @@ def test_resolve_state_flags_override():
 def test_resolve_bad_state_flag_raises():
     with pytest.raises(ConfigError):
         resolve(LoopyConfig(), state_backend="postgres")
+
+
+def test_resolve_bus_auto_redis_from_env(monkeypatch):
+    """Unspecified bus + REDIS_URL in the environment ⇒ the networked redis bus, no flag needed."""
+    monkeypatch.setenv("REDIS_URL", "redis://env:6379")
+    assert resolve(LoopyConfig()).bus == "redis"
+
+
+def test_resolve_bus_auto_inproc_without_redis(monkeypatch):
+    """Unspecified bus + no REDIS_URL ⇒ the single-process in-memory bus."""
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    assert resolve(LoopyConfig()).bus == "inproc"
+
+
+def test_resolve_bus_redis_url_flag_triggers_redis(monkeypatch):
+    """The --redis-url flag selects the redis bus on its own (no env var, no --bus)."""
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    assert resolve(LoopyConfig(), redis_url="redis://flag:6379").bus == "redis"
+
+
+def test_resolve_bus_flag_overrides_redis_env(monkeypatch):
+    """`--bus inproc` forces in-process even when REDIS_URL would otherwise auto-select redis."""
+    monkeypatch.setenv("REDIS_URL", "redis://env:6379")
+    assert resolve(LoopyConfig(), bus="inproc").bus == "inproc"
+
+
+def test_resolve_config_bus_wins_over_env(monkeypatch):
+    """An explicit loopy.yaml `bus:` beats REDIS_URL auto-detection (file is intentional)."""
+    monkeypatch.setenv("REDIS_URL", "redis://env:6379")
+    assert resolve(LoopyConfig(bus="inproc")).bus == "inproc"
 
 
 def test_redis_url_flag_wins(monkeypatch):

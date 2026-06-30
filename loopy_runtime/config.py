@@ -8,8 +8,12 @@ secret companion to this file; `loopy_runtime.secrets.load_control_plane_env`), 
 process env before resolution. `sandbox` is registry-owned and `root` is per-invocation, so
 neither lives here.
 
-Precedence is applied by the CLI via `resolve()`: explicit flag > loopy.yaml > built-in default.
-Parses with ruamel.yaml to match the compile frontend (`loopy_core/registry/loader.py`).
+Precedence is applied by the CLI via `resolve()`: explicit flag > loopy.yaml > auto-detect. For
+the bus, auto-detect reads `REDIS_URL` (the same env var `resolve_redis_url` uses, fed by
+`loopy.env`): a connection string present ⇒ the networked `redis` bus, absent ⇒ the single-process
+`inproc` bus. So writing `REDIS_URL` is enough to opt into Redis, and `--bus inproc` still forces
+the single-process bus. Parses with ruamel.yaml to match the compile frontend
+(`loopy_core/registry/loader.py`).
 """
 
 from __future__ import annotations
@@ -54,7 +58,9 @@ class ConfigError(Exception):
 class LoopyConfig:
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
-    bus: str = DEFAULT_BUS
+    # `None` means "no bus pinned" — `resolve()` then auto-detects from REDIS_URL. An explicit
+    # `inproc`/`redis` (from loopy.yaml or `--bus`) is carried as-is and wins over auto-detect.
+    bus: str | None = None
     state_backend: str = DEFAULT_STATE
     state_path: str = DEFAULT_STATE_PATH
 
@@ -101,8 +107,10 @@ def load_config(path: Path, *, on_warning: Callable[[str], None] = _default_warn
             if not isinstance(port, int) or isinstance(port, bool):
                 raise ConfigError(f"{path}: 'sensor_server.port' must be an integer")
 
-    bus = data.get("bus", DEFAULT_BUS)
-    if not isinstance(bus, str) or bus not in VALID_BUS:
+    # Unspecified (`None`) is preserved so `resolve()` can auto-detect from REDIS_URL; only a
+    # present-but-invalid value is an error.
+    bus = data.get("bus")
+    if bus is not None and (not isinstance(bus, str) or bus not in VALID_BUS):
         raise ConfigError(f"{path}: 'bus' must be one of {VALID_BUS} (got {bus!r})")
 
     state_backend, state_path = DEFAULT_STATE, DEFAULT_STATE_PATH
@@ -127,6 +135,22 @@ def load_config(path: Path, *, on_warning: Callable[[str], None] = _default_warn
     )
 
 
+def _resolve_bus(flag: str | None, configured: str | None, *, redis_url: str | None = None) -> str:
+    """Pick the event-bus backend: `--bus` flag > loopy.yaml `bus:` > auto-detect from REDIS_URL.
+
+    With neither a flag nor a file pinning the bus, auto-detect from the Redis connection string:
+    a `--redis-url` flag or a `REDIS_URL` in the environment (which `loopy.env` feeds) selects the
+    networked `redis` bus; with none, the single-process `inproc` bus. So writing `REDIS_URL` at
+    `loopy init` is enough to opt in with no flag, and `--bus inproc` always forces in-process.
+    The returned value is validated by the caller (`resolve`).
+    """
+    if flag is not None:
+        return flag
+    if configured is not None:
+        return configured
+    return "redis" if (redis_url or os.environ.get("REDIS_URL")) else DEFAULT_BUS
+
+
 def resolve(
     config: LoopyConfig,
     *,
@@ -135,17 +159,19 @@ def resolve(
     bus: str | None = None,
     state_backend: str | None = None,
     state_path: str | None = None,
+    redis_url: str | None = None,
 ) -> LoopyConfig:
     """Overlay explicit CLI flags onto a loaded config (flag wins; None means 'not passed').
 
-    Validates the final `bus`/`state_backend`, so an invalid `--bus`/`--state` flag is reported as
-    a ConfigError (the same clean path as an invalid file value) rather than surfacing later as a
-    factory ValueError.
+    The bus follows flag > file > auto-detect (see `_resolve_bus`); `redis_url` is the `--redis-url`
+    flag, consulted only for that auto-detection. Validates the final `bus`/`state_backend`, so an
+    invalid `--bus`/`--state` flag is reported as a ConfigError (the same clean path as an invalid
+    file value) rather than surfacing later as a factory ValueError.
     """
     resolved = LoopyConfig(
         host=host if host is not None else config.host,
         port=port if port is not None else config.port,
-        bus=bus if bus is not None else config.bus,
+        bus=_resolve_bus(bus, config.bus, redis_url=redis_url),
         state_backend=state_backend if state_backend is not None else config.state_backend,
         state_path=state_path if state_path is not None else config.state_path,
     )
