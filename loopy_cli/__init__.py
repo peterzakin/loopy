@@ -12,9 +12,11 @@ Heavy deps are imported lazily per command so `loopy compile` stays runtime-free
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
+import socket
 import sys
 from pathlib import Path
 
@@ -53,6 +55,59 @@ def _enable_progress_logging() -> None:
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     logger.propagate = False
+
+
+def _resolve_dashboard_port(host: str, preferred: int, *, attempts: int = 20) -> int:
+    """Return a bindable port at or after `preferred` on `host`.
+
+    The dashboard's default port is routinely already taken — a second `loopy admin`,
+    a `loopy demo` left running, an unrelated service. Rather than let uvicorn dump a raw
+    `address already in use` traceback, probe for a free port in a small window and announce
+    the fallback. Raises `typer.Exit` with a clear message (not a traceback) if the whole
+    window is busy, pointing the user at `--port`."""
+    for candidate in range(preferred, preferred + attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            # Match uvicorn's own SO_REUSEADDR so a successful probe predicts a successful serve.
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                probe.bind((host, candidate))
+            except OSError as exc:
+                if exc.errno in (errno.EADDRINUSE, errno.EACCES):
+                    continue  # busy or privileged — try the next one
+                raise
+            if candidate != preferred:
+                typer.echo(
+                    f"note: {host}:{preferred} is in use — serving on {candidate} instead "
+                    "(pass --port to choose another)",
+                    err=True,
+                )
+            return candidate
+    typer.echo(
+        f"error: no free port in {preferred}–{preferred + attempts - 1} on {host}. "
+        "Stop the existing dashboard or pass --port.",
+        err=True,
+    )
+    raise typer.Exit(code=1)
+
+
+def _serve_dashboard(config) -> None:
+    """Run a uvicorn server, turning a late bind failure into a clean error.
+
+    `_resolve_dashboard_port` removes the common case, but a port can still be claimed in the
+    race between probe and serve. Catch that here so the user gets one tidy line instead of a
+    stack trace."""
+    import asyncio
+
+    import uvicorn
+
+    try:
+        asyncio.run(uvicorn.Server(config).serve())
+    except OSError as exc:
+        typer.echo(
+            f"error: could not serve on {config.host}:{config.port} ({exc}).",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
 
 
 def _dim(text: str) -> str:
@@ -1208,8 +1263,6 @@ def admin(
     `loopy run` in one terminal, `loopy admin` in another. When `manifest.json` is present it also
     powers the workflow-template, registry, and schedule views; the run views work without it.
     """
-    import asyncio
-
     import uvicorn
 
     from loopy_runtime.dashboard.app import create_app
@@ -1231,10 +1284,11 @@ def admin(
     else:
         typer.echo(f"note: no {manifest} — templates/registry/schedules views will be empty")
 
+    port = _resolve_dashboard_port(host, port)
     extra = "" if loaded is None else f"  (manifest {manifest})"
     typer.echo(f"loopy dashboard → http://{host}:{port}  (reading {db}){extra}")
     config = uvicorn.Config(create_app(store, loaded), host=host, port=port, log_level="warning")
-    asyncio.run(uvicorn.Server(config).serve())  # pragma: no cover - long-lived server
+    _serve_dashboard(config)  # pragma: no cover - long-lived server
 
 
 @app.command()
@@ -1262,6 +1316,7 @@ def demo(
     store = asyncio.run(seed_demo_store())
     manifest = build_demo_manifest()
 
+    port = _resolve_dashboard_port(host, port)
     url = f"http://{host}:{port}"
     typer.echo(f"loopy demo dashboard → {url}  (fake data, in-memory — not a real deployment)")
     if not no_browser:
@@ -1270,7 +1325,7 @@ def demo(
         except Exception:  # noqa: BLE001 — no browser (e.g. headless) is fine; the URL is printed
             pass
     config = uvicorn.Config(create_app(store, manifest), host=host, port=port, log_level="warning")
-    asyncio.run(uvicorn.Server(config).serve())  # pragma: no cover - long-lived server
+    _serve_dashboard(config)  # pragma: no cover - long-lived server
 
 
 if __name__ == "__main__":  # pragma: no cover

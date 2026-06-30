@@ -10,10 +10,19 @@ simulated with a control-plane `loopy.env`; the provider is built, not exercised
 
 from __future__ import annotations
 
+import socket
+
 import pytest
+import typer
 from typer.testing import CliRunner
 
-from loopy_cli import _make_token_provider, _run_record, app, build_runtime
+from loopy_cli import (
+    _make_token_provider,
+    _resolve_dashboard_port,
+    _run_record,
+    app,
+    build_runtime,
+)
 from loopy_runtime.bus.inproc import InProcessEventBus
 from loopy_runtime.contract import RunStatus, StepOutput
 from loopy_runtime.runtime.inmemory import InMemoryRuntime
@@ -158,3 +167,49 @@ def _manifest(*, limits=None):
             "lineage": {"events": {}},
         }
     )
+
+
+# --- dashboard port resolution (resilience: don't crash when the port is taken) ---
+
+
+def _bind_busy_port():
+    """Bind and listen on an OS-assigned port; return (socket, port). Caller closes it."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(1)
+    return sock, sock.getsockname()[1]
+
+
+def test_resolve_dashboard_port_returns_preferred_when_free():
+    # Grab a free port, release it, then confirm the resolver hands it straight back.
+    probe, port = _bind_busy_port()
+    probe.close()
+    assert _resolve_dashboard_port("127.0.0.1", port) == port
+
+
+def test_resolve_dashboard_port_skips_busy_port():
+    sock, busy = _bind_busy_port()
+    try:
+        chosen = _resolve_dashboard_port("127.0.0.1", busy)
+    finally:
+        sock.close()
+    assert chosen != busy
+    # The fallback must itself be bindable.
+    check = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    check.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        check.bind(("127.0.0.1", chosen))
+    finally:
+        check.close()
+
+
+def test_resolve_dashboard_port_exits_when_window_exhausted():
+    # A single-slot window over a busy port has nowhere to fall back: clean exit, no traceback.
+    sock, busy = _bind_busy_port()
+    try:
+        with pytest.raises(typer.Exit) as exc:
+            _resolve_dashboard_port("127.0.0.1", busy, attempts=1)
+    finally:
+        sock.close()
+    assert exc.value.exit_code == 1
