@@ -154,19 +154,21 @@ SensorRunner (any language)  ──Event──▶  EventReceiver  ──▶  Eve
 **Where the `EventReceiver` runs follows from one interface choice — and there are exactly two
 modes.** `receive(event) -> Optional[RunId]` permits both:
 
-- **Synchronous (in-process), today.** `receive` accepts the event and *triggers a run*, returning
-  its `RunId` (`LocalEventReceiver` just calls `Runtime.trigger`). Because it drives execution, it
-  co-resides with the `Runtime` in one process — single-node, in-process `EventBus`.
-- **Decoupled (distributed).** `receive` *publishes to the `EventBus` and returns `None` (an ack)*;
-  a `Runtime` worker produces the `RunId` later, on consume. Now the receiver is a small
-  **stateless ingress service in front of the broker**, scaled and kept up independently of the
-  engine.
+- **Publish-and-acknowledge, today.** `receive` validates the event and *publishes it to the
+  `EventBus`, returning `None` (an ack)*; a `Runtime` worker consumes off the bus and produces the
+  `RunId` later. This is what the shipped `LocalEventReceiver` does — it holds only an `EventBus`
+  handle and the registry contract (`LocalEventReceiver(bus, events)`), never a `Runtime` — so the
+  same code runs **embedded** in the single loopy process *or* as a **stateless ingress service in
+  front of the broker**, scaled and kept up independently of the engine.
+- **Synchronous (return the `RunId`).** The `Optional[RunId]` return also permits a receiver that
+  drives the run inline and returns its `RunId`. A remote receiver can't hold a connection open for a
+  minutes-to-days run, so this is a legacy form — not what `LocalEventReceiver` does today.
 
 So the `EventReceiver` has exactly **two physical homes, never more**: **embedded** in the single
-loopy process (synchronous mode), or a **standalone ingress service** in front of the broker
-(decoupled mode). Never inside the untrusted `SensorRunner`, and never inside the broker (Redis/NATS
-run no loopy code). This is what makes a TypeScript `SensorRunner` possible **without** a second
-`Runtime` — it just delivers `Event`s to the receiver.
+loopy process, or a **standalone ingress service** in front of the broker. Never inside the untrusted
+`SensorRunner`, and never inside the broker (Redis/NATS run no loopy code). This is what makes a
+TypeScript `SensorRunner` possible **without** a second `Runtime` — it just delivers `Event`s to the
+receiver.
 
 **Why validation lives at the receiver, and why auth doesn't (yet).** The receiver's job is
 *validation*, and it sits at ingress for one structural reason: the bus **fans out** (one event → N
@@ -330,9 +332,10 @@ class EventBus(Protocol):
 class EventReceiver(Protocol):
     async def receive(self, event: Event) -> Optional[RunId]:
         # Re-validate against the registry, then hand the event on. Two modes:
-        #   synchronous (in-proc) — trigger a run, return its RunId (today); or
-        #   decoupled — publish to the EventBus, return None (ack); a Runtime
-        #   worker produces the RunId on consume. The Optional permits both.
+        #   publish-and-ack — publish to the EventBus, return None (ack); a Runtime
+        #     worker produces the RunId on consume (today); or
+        #   synchronous (in-proc) — trigger a run, return its RunId (legacy).
+        #   The Optional permits both.
         ...
 
 # ── SensorRunner ─ B1 ingress (the webhook/push edge; language-pluggable) ──────────────
@@ -386,9 +389,9 @@ runtime = DurableLiteRuntime(                 # ← swap for InMemoryRuntime / T
                                               #   (claude-code → ClaudeCodeHarness, codex → CodexHarness)
     sandboxes= DaytonaProvider(),             # ← or LocalSandboxProvider in tests
     bus      = NatsEventBus(...),             # ← in-proc (single node) vs networked (distributed)
-    retry    = ExponentialBackoff(max_attempts=5),
+    retry    = ExponentialBackoffRetry(max_attempts=5),
 )
-sensor_runner = FastAPISensorRunner(LocalEventReceiver(runtime))   # producer → receiver → bus
+sensor_runner = FastAPISensorRunner(LocalEventReceiver(bus, events))   # producer → receiver → bus
 ```
 
 The **`Runtime` is the unit of durability modularity** — one adapter per provider (§9). The other
