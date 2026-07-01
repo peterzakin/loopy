@@ -16,12 +16,15 @@ and swap a step's runtime or model without touching its prose.
 
 ## Install
 
-Loopy isn't published to PyPI yet, so install it from a checkout of this repo:
+Loopy is published to PyPI as [`loopy-computer`](https://pypi.org/project/loopy-computer/):
 
 ```bash
-uv tool install .            # from the repo root: puts `loopy` on your PATH
-loopy init my-project        # scaffold a project, then `cd my-project`
+uv tool install loopy-computer   # puts `loopy` on your PATH
+loopy init my-project            # scaffold a project, then `cd my-project`
 ```
+
+Working from a checkout of this repo instead? `uv tool install .` from the repo root does the
+same thing with your local source.
 
 Every `loopy` command below assumes it's on your PATH. Prefer not to install? Prefix each
 command with `uv run` from the repo (e.g. `uv run loopy compile`).
