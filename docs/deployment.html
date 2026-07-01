@@ -454,8 +454,8 @@ backend is not a launch flag — each sandbox's <code>provider:</code> is declar
 SQLite file (<code>.loopy/state.db</code>); <code>--state inproc</code> opts into the ephemeral
 store.</p>
 <h3 style="margin-top:18px"><code>loopy.env</code> — control-plane infra creds for local dev</h3>
-<p>Because connection strings and provider keys never belong in checked-in config, a local-dev convenience
-file supplies them: <code>loopy run</code> reads <code>loopy.env</code> at the project root and
+<p>Connection strings and provider keys never belong in checked-in config, so for local development
+an optional env file supplies them: <code>loopy run</code> reads <code>loopy.env</code> at the project root and
 merges it into the process env with <strong>non-override</strong> (a value already set in the
 real/platform environment always wins), <em>before</em> resolving <code>redis_url</code> and before
 any Daytona client is created. Infra creds only — <code>REDIS_URL</code>,
@@ -463,7 +463,7 @@ any Daytona client is created. Infra creds only — <code>REDIS_URL</code>,
 <code>env_file</code>s and sensor secrets in <code>sensors/.env</code>. In production you typically
 skip the file and inject these from the platform's secret store, which the non-override semantics
 respect.</p>
-<pre class="ascii"># loopy.env (project root; gitignored; local-dev convenience)
+<pre class="ascii"># loopy.env (project root; gitignored; for local dev — production uses the platform env)
 REDIS_URL=redis://localhost:6379
 DAYTONA_API_KEY=dt-...
 DAYTONA_API_URL=https://...</pre>
