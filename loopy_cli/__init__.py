@@ -412,7 +412,7 @@ def _offer_ambient_anthropic_key(target: Path) -> None:
 
     The scaffold ships a `sk-ant-...` placeholder that compiles green but fails the first run.
     Most people trying loopy already have a key exported, so reuse it on the spot rather than
-    making them hand-edit `secrets/dev.env`. Skips silently when no usable key is present.
+    making them hand-edit `secrets/base.env`. Skips silently when no usable key is present.
     """
     from loopy_cli.doctor import PLACEHOLDER_ANTHROPIC_KEY
 
@@ -420,7 +420,7 @@ def _offer_ambient_anthropic_key(target: Path) -> None:
     if not key or key == PLACEHOLDER_ANTHROPIC_KEY:
         return
 
-    env_path = target / "secrets" / "dev.env"
+    env_path = target / "secrets" / "base.env"
     placeholder_line = f"ANTHROPIC_API_KEY={PLACEHOLDER_ANTHROPIC_KEY}"
     if not env_path.is_file() or placeholder_line not in env_path.read_text():
         return  # nothing to replace (already set, or layout changed) — don't guess
@@ -428,7 +428,7 @@ def _offer_ambient_anthropic_key(target: Path) -> None:
     masked = f"{key[:7]}…{key[-4:]}" if len(key) > 12 else "the value"
     if not typer.confirm(
         f"  Found ANTHROPIC_API_KEY in your environment ({masked}). "
-        f"Write it into secrets/dev.env?",
+        f"Write it into secrets/base.env?",
         default=True,
     ):
         return
@@ -438,7 +438,7 @@ def _offer_ambient_anthropic_key(target: Path) -> None:
     typer.echo(
         "  "
         + typer.style("✓", fg=typer.colors.GREEN)
-        + " wrote ANTHROPIC_API_KEY to secrets/dev.env"
+        + " wrote ANTHROPIC_API_KEY to secrets/base.env"
     )
     typer.echo()
 

@@ -64,7 +64,7 @@ sandboxes:
     provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
     network: [github.com, api.anthropic.com]   # git over https + the model API
-    env_file: secrets/dev.env                  # gitignored; resolved at run time
+    env_file: secrets/base.env                  # gitignored; resolved at run time
     __REPOS_LINE__
 
 # Agents — capability comes from the sandbox, skills, injected git creds, and budget.
@@ -157,7 +157,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 _LOOPY_ENV = """\
 # Control-plane credentials — the creds the loopy *engine* needs. These are NOT injected
-# into sandboxes (the agent's environment is secrets/dev.env); they stay at the control
+# into sandboxes (the agent's environment is secrets/base.env); they stay at the control
 # plane. Gitignored — never commit this file. Lines are KEY=VALUE; values are literal.
 
 # --- GitHub App (recommended git auth) ---
@@ -207,7 +207,7 @@ agent that edits a checkout and opens a pull request.
 # 1. confirm sandboxes.Dev.repos points at a repo you can push to (set from your init answer)
 
 # 2. give the sandbox its secrets
-#    edit secrets/dev.env and set ANTHROPIC_API_KEY
+#    edit secrets/base.env and set ANTHROPIC_API_KEY
 
 # 3. wire git auth (writes loopy.env in this project — gitignored)
 loopy auth github
@@ -260,7 +260,7 @@ sandboxes:
     provider: daytona
     image: { debian_slim: "3.12", workdir: /home/loopy, user: loopy }
     network: [api.anthropic.com]               # just the model API — no git, no repos
-    env_file: secrets/dev.env                  # gitignored; resolved at run time
+    env_file: secrets/base.env                  # gitignored; resolved at run time
 
 # Agents — capability comes from the sandbox, skills, and budget.
 agents:
@@ -344,7 +344,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 _ORCH_LOOPY_ENV = """\
 # Control-plane credentials — the creds the loopy *engine* needs. These are NOT injected
-# into sandboxes (the agent's environment is secrets/dev.env); they stay at the control
+# into sandboxes (the agent's environment is secrets/base.env); they stay at the control
 # plane. Gitignored — never commit this file. Lines are KEY=VALUE; values are literal.
 
 # --- Daytona (the default sandbox; required when a sandbox uses provider: daytona) ---
@@ -370,7 +370,7 @@ no code repo involved.
 
 ```bash
 # 1. give the sandbox its secrets
-#    edit secrets/dev.env and set ANTHROPIC_API_KEY
+#    edit secrets/base.env and set ANTHROPIC_API_KEY
 
 # 2. check it's runnable — a green compile is not a runnable project
 loopy doctor
@@ -408,7 +408,7 @@ def _coding_files(repos: list[str]) -> dict[str, str]:
         "workflows/codefix/open-pr.md": _OPEN_PR_MD,
         "skills/codefix/SKILL.md": _SKILL_MD,
         "sensors/sensors.py": _SENSORS_PY,
-        "secrets/dev.env": _DEV_ENV,
+        "secrets/base.env": _DEV_ENV,
         "loopy.env": _LOOPY_ENV,
         ".gitignore": _GITIGNORE,
         "README.md": _README_MD,
@@ -422,7 +422,7 @@ def _orchestrator_files() -> dict[str, str]:
         "workflows/summarize/summarize.md": _ORCH_WORKFLOW_MD,
         "skills/summarize/SKILL.md": _ORCH_SKILL_MD,
         "sensors/sensors.py": _ORCH_SENSORS_PY,
-        "secrets/dev.env": _ORCH_DEV_ENV,
+        "secrets/base.env": _ORCH_DEV_ENV,
         "loopy.env": _ORCH_LOOPY_ENV,
         ".gitignore": _GITIGNORE,
         "README.md": _ORCH_README_MD,

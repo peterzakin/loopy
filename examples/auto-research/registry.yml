@@ -27,7 +27,7 @@ sandboxes:
     provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/daytona, user: daytona }
     network: [export.arxiv.org, arxiv.org, github.com, api.anthropic.com]
-    env_file: secrets/dev.env       # gitignored; ANTHROPIC_API_KEY (+ GITHUB_TOKEN if no App)
+    env_file: secrets/base.env       # gitignored; ANTHROPIC_API_KEY (+ GITHUB_TOKEN if no App)
     repos: [you/research-log]        # the writeup target — point this at a repo you can push to
 
   # Lab — where experiments actually run. Python + pip, and egress to fetch packages. Keep
@@ -40,7 +40,7 @@ sandboxes:
       workdir: /home/daytona
       user: daytona
     network: [github.com, api.anthropic.com, pypi.org, files.pythonhosted.org]
-    env_file: secrets/dev.env
+    env_file: secrets/base.env
     repos: [you/research-log]
 
 agents:

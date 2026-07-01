@@ -20,8 +20,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # credentials and MUST be ignored.
 SECRET_PATHS = [
     "loopy.env",
-    "examples/codefix/secrets/dev.env",
-    "examples/incidents/secrets/default.env",
+    "examples/codefix/secrets/base.env",
+    "examples/incidents/secrets/base.env",
     "sensors/.env",
     ".loopy/key.pem",
 ]

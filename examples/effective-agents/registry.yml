@@ -33,7 +33,7 @@ sandboxes:
     provider: docker
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
     network: [api.anthropic.com]
-    env_file: secrets/dev.env   # gitignored; supplies ANTHROPIC_API_KEY
+    env_file: secrets/base.env   # gitignored; supplies ANTHROPIC_API_KEY
 
 # Agents — one per role the patterns call for. Capability is the sandbox + skills + budget;
 # the harder-reasoning roles (Judge, Orchestrator) get a bigger model.

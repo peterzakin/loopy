@@ -44,7 +44,7 @@ and fire any entry event by hand (from the repo root; drop `uv run` if `loopy` i
 
 ```bash
 mkdir -p examples/effective-agents/secrets
-echo 'ANTHROPIC_API_KEY=sk-ant-...' > examples/effective-agents/secrets/dev.env
+echo 'ANTHROPIC_API_KEY=sk-ant-...' > examples/effective-agents/secrets/base.env
 
 uv run loopy compile examples/effective-agents
 

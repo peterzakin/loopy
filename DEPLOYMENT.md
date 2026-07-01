@@ -362,7 +362,7 @@ sandboxes:
     provider: daytona
     image: { snapshot: loopy-claude-code }   # prebuilt; no apt/npm on each run
     network: [github.com]
-    env_file: secrets/default.env
+    env_file: secrets/base.env
 ```
 
 Build the snapshot once from the same layers your `image:` would compose (a Python/Node base
@@ -591,7 +591,7 @@ services:
 `DAYTONA_API_KEY`/`DAYTONA_API_URL` and the GitHub App's `GITHUB_APP_ID`/`GITHUB_APP_PRIVATE_KEY`
 (in the escaped-newline form `loopy auth github` writes) — are the engine's process env, set as the
 service env vars above. The one that is *not* an env var is the **agent/workload secret**: it lives
-in the sandbox `env_file` (e.g. `secrets/dev.env`), which is gitignored and therefore in neither the
+in the sandbox `env_file` (e.g. `secrets/base.env`), which is gitignored and therefore in neither the
 repo nor the image. Add it as a Render **Secret File** at the same project-relative path the
 `env_file:` in `registry.yml` names, and `EnvFileSecretsResolver` resolves it at run time exactly as
 on a VM. (`sensors/.env`, if used, is added the same way.)

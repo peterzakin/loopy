@@ -27,7 +27,7 @@ Every `loopy` command below assumes it's on your PATH. Prefer not to install? Pr
 command with `uv run` from the repo (e.g. `uv run loopy compile`).
 
 **Per-project convention.** A project is a directory, and its credentials live inside it:
-`secrets/dev.env` (the sandbox's environment — `ANTHROPIC_API_KEY`) and `loopy.env`
+`secrets/base.env` (the sandbox's environment — `ANTHROPIC_API_KEY`) and `loopy.env`
 (control-plane creds, written by `loopy auth github`). Both are gitignored. Run every command
 from the project directory so `loopy.env` and `--root` stay in sync — `loopy init` sets this up
 for you.
@@ -139,7 +139,7 @@ sandboxes:
     provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
     network: [github.com, api.anthropic.com]   # git over https + the model API
-    env_file: secrets/dev.env        # gitignored; injected as the sandbox's env
+    env_file: secrets/base.env        # gitignored; injected as the sandbox's env
     repos: [octocat/Hello-World]     # cloned into the workspace at acquire time (git auth injected)
 
 # Agents — capability comes from the sandbox (image + egress), skills, injected creds, and

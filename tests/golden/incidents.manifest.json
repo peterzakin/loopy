@@ -149,7 +149,7 @@
     "sandboxes": {
       "default": {
         "env_file": [
-          "secrets/default.env"
+          "secrets/base.env"
         ],
         "image": {
           "apt": [
