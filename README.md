@@ -27,10 +27,13 @@ Every `loopy` command below assumes it's on your PATH. Prefer not to install? Pr
 command with `uv run` from the repo (e.g. `uv run loopy compile`).
 
 **Per-project convention.** A project is a directory, and its credentials live inside it:
-`secrets/base.env` (the sandbox's environment — `ANTHROPIC_API_KEY`) and `loopy.env`
-(control-plane creds, written by `loopy auth github`). Both are gitignored. Run every command
-from the project directory so `loopy.env` and `--root` stay in sync — `loopy init` sets this up
-for you.
+`secrets/base.env` (the sandbox's environment — `ANTHROPIC_API_KEY`), `loopy.env`
+(control-plane creds, written by `loopy auth github`), and an optional `sensors/.env` for
+sensor-layer keys. All are gitignored. Run every command from the project directory so
+`loopy.env` and `--root` stay in sync — `loopy init` sets this up for you. `init` is
+interactive: it asks which repo(s) the agent should work on, offers to fill in credentials it
+finds in your environment (`ANTHROPIC_API_KEY`, `DAYTONA_API_KEY`), and finishes by running the
+same checks as `loopy doctor` so you know what's left before a first run.
 
 ## Workflows
 
@@ -130,7 +133,8 @@ defaults:
     harness: { runtime: claude-code, model: claude-sonnet-4-6 }
 
 # Sandbox — compute + egress. `image:` is the declarative build; `network:` the egress allowlist.
-# `env_file:` points at a gitignored dotenv whose keys are injected as the sandbox's environment
+# `env_file:` points at a gitignored dotenv (a path, or a list of paths merged in order) whose
+# keys are injected as the sandbox's environment
 # (the sandbox inherits *nothing* from your shell — secrets like `ANTHROPIC_API_KEY` must live
 # here). `repos:` are cloned into the workspace at acquire time, with git auth injected (see
 # "Examples / run it locally").
@@ -166,6 +170,16 @@ events:
     repro:         str
   GoalShipped:     { goal_id: str }                                    # terminal announcement
 ```
+
+> **Built-in agents.** Like the `Github.*` events (below), two agents ship with the platform:
+> `BaseClaude` (`claude-code`, `claude-sonnet-4-6`) and `BaseCodex` (`codex`, `gpt-5.5`). A step
+> may name either in `agent:` with **no** `registry.yml` entry — the compiler injects it, bound to
+> the project's `default` sandbox with no skills. Declaring your own agent under the same name
+> overrides the built-in.
+
+Beyond a single step's `budget:`, the registry takes a top-level `limits:` block for wider spend
+caps: `cascade_spend: { usd: <n> }` caps the total spend of an entire event cascade, and
+`workflows: { <Name>: { spend: { usd: <n> } } }` caps one named workflow.
 
 ### Event field types
 
@@ -255,24 +269,18 @@ def sentry_issues(req) -> Incident:                  # return type optional; myp
     return Incident(source="sentry", issue_id=i["id"], title=i["title"], link=i["permalink"])
 ```
 
-Sensors can be written in other languages too. Without free-function decorators (e.g. TypeScript),
-declare them in a single statically-analyzable `sensorRegistry` literal instead — same contract, a
-declared `emits` next to the trigger:
+Sensors are **Python-only today**: the compiler statically inspects every `.py` under `sensors/`
+(subdirectories included — organize them however you like) and nothing else. The design generalizes
+to other languages — a single statically-analyzable `sensorRegistry` literal for languages without
+free-function decorators (e.g. TypeScript) is specified in [`FRONTEND.md`](FRONTEND.md) §7 — but
+that surface isn't implemented yet.
 
-```typescript
-import type { Incident } from "loopy/events";        // generated — optional, for tsc
-
-export const sensorRegistry = {
-  sentryIssues: {
-    webhook: "/hooks/sentry",
-    emits: "Incident",                                // the contract the compiler reads
-    handler: (req): Incident => ({
-      source: "sentry", issue_id: req.body.data.issue.id,
-      title: req.body.data.issue.title, link: req.body.data.issue.permalink,
-    }),
-  },
-};
-```
+**Poll intervals are plain durations.** `@sensor(poll="5m")` takes a whole number plus a unit —
+`s`, `m`, `h`, or `d` (`"30s"`, `"1h"`, `"2d"`); a malformed interval is a compile-time error
+(`LOOPY-E403`). Ticks never overlap (the next is scheduled after the current one finishes), and a
+tick's watermark advances only after its events are delivered, so a failed poll re-covers the same
+window and skips no data. The very first tick asks for exactly one interval of history. To run on
+a clock rather than a gap, use `cron(...)` on a workflow's `on:` instead.
 
 See [`examples/incidents/sensors/sensors.py`](examples/incidents/sensors/sensors.py) for a
 `webhook` + `poll` example, and `sensors/sensors.py` in a scaffolded project. For common GitHub
@@ -321,9 +329,11 @@ A few things worth knowing before the first run:
   any git token — must be in the sandbox's `env_file`; exporting `ANTHROPIC_API_KEY` in your shell
   is not enough. (The bare `local` provider also needs `PATH`/`HOME` there; `docker`/`daytona` get
   those from the image.)
-- **`loopy compile <path>` generates a `loopy/` events package** under the project (`loopy/events.py`
-  + stubs, for your typechecker). It's already gitignored; pass `--out manifest.json` to also write
-  the manifest.
+- **`loopy compile <path>` writes `manifest.json` by default** (`--out` changes the path;
+  `--check` validates without writing — the CI gate). It also generates a `loopy/` events package
+  under the project (`loopy/events.py` + stubs, for your typechecker), already gitignored. And
+  there's no separate compile step in the dev loop: `loopy run` compiles a directory target and
+  recompiles a stale manifest automatically.
 - **A hand-fired event warns `LOOPY-W501 dead trigger`.** When you drive a workflow with
   `loopy trigger --event X` and no sensor produces `X`, compile flags it as a dead trigger. That's
   **expected** for the manual-trigger pattern — it's a warning, not an error, and the run proceeds.
@@ -339,10 +349,13 @@ loopy run --in-process manifest.json   # dev server: records runs as they execut
 loopy admin                            # in another terminal → http://127.0.0.1:9000
 ```
 
-`loopy admin` reads the same DB the dev server writes, so it needs no flags. (A bare `loopy run`
-brings up the containerized stack instead, which keeps its state in a Docker volume; the one-shot
-`loopy trigger` path is in-memory and isn't recorded.) See [`DEPLOYMENT.md`](DEPLOYMENT.md) for the
-`state:` config block and caveats.
+`loopy admin` reads the same DB the dev server writes, so it needs no flags; with a
+`manifest.json` present it also renders the workflow, sensor, and registry views, and `loopy demo`
+serves every view against in-memory sample data. (A bare `loopy run` brings up the containerized
+stack instead — a `redis` bus container plus the engine — which keeps its state in a Docker
+volume; the one-shot `loopy trigger` path is in-memory and isn't recorded.) The deployment knobs
+(`--bus inproc|redis`, `--state`, `--state-path`, `--host`/`--port`, `--detach`) and caveats are
+in [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 ## License
 
