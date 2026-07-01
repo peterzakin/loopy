@@ -4,12 +4,12 @@ Walks a self-hosting user through creating *their own* GitHub App and lands its
 credentials locally, so loopy can later mint short-lived, repo-scoped tokens for
 agents — no loopy-owned central app, no persistent server.
 
-The flow (see plans/future/repo-access/2026-06-18-loopy-auth-github.md):
+The flow (see plans/past/repo-access/2026-06-18-loopy-auth-github.md):
   1. build a manifest (minimal perms, no webhook) pointing at a local callback;
   2. serve a one-shot 127.0.0.1 listener (the `gh auth login` pattern);
   3. open the browser to a local page that auto-POSTs the manifest to GitHub;
   4. GitHub redirects back with a temporary `?code=`; exchange it for creds;
-  5. persist the PEM (gitignored, 0600) + ids into `loopy.env`;
+  5. persist the App id + private key (inline, gitignored) into `loopy.env`;
   6. print the install URL so the user picks which repos the App can touch;
   7. best-effort verify by minting a token.
 
