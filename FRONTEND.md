@@ -253,6 +253,22 @@ sensor — e.g. `on: Github.PullRequestOpened`. The catalog lives in `loopy_core
   (`builtin_webhook_sensor`) instead of importing user code; the `/hooks/github` HMAC verifier is
   inherited unchanged.
 
+### 7.2 Built-in agents (zero-config runtimes)
+
+A step may name a **platform-shipped** agent in its `agent:` without a `registry.yml` entry —
+one per runtime: `BaseClaude` (Claude Code, `claude-sonnet-4-6`) and `BaseCodex` (Codex,
+`gpt-5.5`). The catalog lives in `loopy_core/builtins.py` (`BUILTIN_AGENTS`).
+
+- **Injection (`compile/builtins.py`).** For each built-in a step names and the project didn't
+  declare, the pass registers an `Agent` with the fixed harness, the reserved `default` sandbox,
+  and no skills — so X2 (`cross_check`) resolves it like any registered agent and it serializes to
+  the manifest. Only referenced built-ins are injected; the catalog is not dumped wholesale.
+- **`default` sandbox required.** A built-in binds the reserved `default` sandbox — where compute
+  runs is never inferred, so a project must still supply a `default` sandbox (else `LOOPY-E502`).
+  A built-in ships no skills (project-specific; avoids `LOOPY-E503`).
+- **Override.** A user agent declared under the same name wins — the built-in only fills the gap.
+  A step naming an undeclared, non-built-in agent is unchanged: still `LOOPY-E501`.
+
 ---
 
 ## 8. Cross-cutting validation (P8)
