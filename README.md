@@ -167,6 +167,36 @@ events:
   GoalShipped:     { goal_id: str }                                    # terminal announcement
 ```
 
+### Event field types
+
+An event's fields are a `name: type` map. Loopy has no type system of its own: a field type is
+just a **JSON Schema** fragment (draft 2020-12), validated at runtime by pydantic and code-generated
+into the `loopy.events` classes. The terse forms below are authoring sugar over that.
+
+| Authored | Meaning | JSON Schema emitted |
+|---|---|---|
+| `str` | string | `{"type": "string"}` |
+| `int` | integer | `{"type": "integer"}` |
+| `float` | number | `{"type": "number"}` |
+| `bool` | boolean | `{"type": "boolean"}` |
+| `url` | string, URI-formatted | `{"type": "string", "format": "uri"}` |
+| `enum[a, b, c]` | one of a fixed set of strings | `{"type": "string", "enum": ["a", "b", "c"]}` |
+
+When the sugar is too limited, write **raw JSON Schema inline** instead. Anything that's already a
+schema object passes through untouched, so expressiveness is unbounded without growing the sugar:
+
+```yaml
+events:
+  Deploy:
+    service:  str
+    tags:     { type: array, items: { type: string } }   # raw JSON Schema — no shorthand needed
+    meta:     { type: object }
+```
+
+The same field types apply to a step's `output:` map. An unknown bare shorthand (not in the table
+above and not a valid schema object) is a compile-time error (`LOOPY-E201`). The authoritative
+reference is [`FRONTEND.md`](FRONTEND.md) §3.
+
 ## `skills/`
 
 Reusable agent skills, a sibling of `workflows/`. One directory per skill — a `SKILL.md` plus
