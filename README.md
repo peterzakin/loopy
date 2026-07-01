@@ -137,8 +137,8 @@ defaults:
 sandboxes:
   default:
     provider: daytona
-    image: { debian_slim: "3.12", apt: [git], workdir: /home/daytona, user: daytona }
-    network: [github.com]
+    image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
+    network: [github.com, api.anthropic.com]   # git over https + the model API
     env_file: secrets/dev.env        # gitignored; injected as the sandbox's env
     repos: [octocat/Hello-World]     # cloned into the workspace at acquire time (git auth injected)
 
