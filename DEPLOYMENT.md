@@ -410,8 +410,8 @@ single-host (it reads the local file) and unauthenticated — bind it to localho
 your own auth; internet exposure is out of scope for v1. OpenTelemetry/metrics export is a later
 layer.
 
-**`loopy.env` — control-plane infra creds for local dev.** Because connection strings and provider
-keys never belong in checked-in config, a local-dev convenience file supplies them: `loopy run` reads
+**`loopy.env` — control-plane infra creds for local dev.** Connection strings and provider keys
+never belong in checked-in config, so for local development an optional env file supplies them: `loopy run` reads
 `loopy.env` at the project root and merges it into the process env with **non-override** (a value
 already set in the real/platform environment always wins), *before* resolving `redis_url` and
 before any Daytona client is created. It holds **infra creds only** — `REDIS_URL`,
@@ -420,7 +420,7 @@ and sensor secrets in `sensors/.env`. In production you typically skip the file 
 straight from the platform's secret store, which the non-override semantics respect.
 
 ```ini
-# loopy.env (project root; gitignored; local-dev convenience)
+# loopy.env (project root; gitignored; for local dev — production uses the platform env)
 REDIS_URL=redis://localhost:6379
 DAYTONA_API_KEY=dt-...
 DAYTONA_API_URL=https://...
