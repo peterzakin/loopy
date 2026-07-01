@@ -38,8 +38,8 @@ The examples are grouped by what you're trying to learn.
 - **`registry.yml` holds the inline config** (Agents · Sandboxes · Events); the directories
   with bodies (`workflows/`, `skills/`, `sensors/`) hold the authored artifacts. This mirrors
   the organizing principle in the top-level [`README.md`](../README.md).
-- **Secrets are gitignored.** Each example ships a `dev.env.example`; copy it to
-  `secrets/dev.env` (the path the registry's `env_file:` references) and fill it in.
+- **Secrets are gitignored.** Each example ships a `base.env.example`; copy it to
+  `secrets/base.env` (the path the registry's `env_file:` references) and fill it in.
 - **Compile first.** `uv run loopy compile examples/<name>` is the gate — it prints the DAG and
   fails if any `on:`/`emits:` names an unregistered event or any `{{ }}` ref doesn't resolve.
 

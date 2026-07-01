@@ -54,7 +54,7 @@ The example compiles and is safe to read as-is. To actually run it:
 2. **A research-log repo.** Point both sandboxes' `repos:` at a repo you can push to (it's
    `you/research-log` in the registry) and wire git auth — see
    [`examples/codefix/`](../codefix/) for the `loopy auth github` flow.
-3. **Secrets.** `cp dev.env.example secrets/dev.env` and fill in `ANTHROPIC_API_KEY` (the
+3. **Secrets.** `cp base.env.example secrets/base.env` and fill in `ANTHROPIC_API_KEY` (the
    `Lab` sandbox also needs egress to PyPI, already in its `network:`).
 
 ```bash

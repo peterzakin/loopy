@@ -40,7 +40,7 @@ def _diagnose(root, *, control_plane_env=None):
 
 def _fix_key(root) -> None:
     """Replace the placeholder model key — the one scaffold gap unrelated to repos/auth."""
-    dev = root / "secrets/dev.env"
+    dev = root / "secrets/base.env"
     dev.write_text(dev.read_text().replace("sk-ant-...", "sk-ant-real-key"))
 
 
@@ -84,7 +84,7 @@ def test_clean_project_has_no_findings(tmp_path):
 def test_missing_env_file_is_an_error(tmp_path):
     root = tmp_path / "demo"
     scaffold_project(root, "demo")
-    (root / "secrets/dev.env").unlink()  # compile still passes — env_file is a reference only
+    (root / "secrets/base.env").unlink()  # compile still passes — env_file is a reference only
 
     findings = _diagnose(root)
     assert any(f.level == "error" and "missing" in f.message for f in findings)
@@ -93,7 +93,7 @@ def test_missing_env_file_is_an_error(tmp_path):
 def test_github_token_in_env_file_satisfies_auth(tmp_path):
     root = tmp_path / "demo"
     scaffold_project(root, "demo", repos=["me/app"])  # a declared repo makes git auth relevant
-    dev = root / "secrets/dev.env"
+    dev = root / "secrets/base.env"
     dev.write_text(dev.read_text().replace("# GITHUB_TOKEN=ghp_...", "GITHUB_TOKEN=ghp_real"))
 
     findings = _diagnose(root)

@@ -22,7 +22,7 @@ codefix/
   workflows/codefix/open-pr.md # on: CodeTask → edit + open PR → emits PROpened
   skills/codefix/SKILL.md       # how the agent should make the change
   sensors/sensors.py            # a stub poll producer for CodeTask (fire by hand instead)
-  dev.env.example               # template for the gitignored secrets/dev.env
+  base.env.example              # template for the gitignored secrets/base.env
 ```
 
 ## Run it locally
@@ -57,8 +57,8 @@ Copy the template to the gitignored path the registry references:
 
 ```bash
 mkdir -p examples/codefix/secrets
-cp examples/codefix/dev.env.example examples/codefix/secrets/dev.env
-# then edit secrets/dev.env
+cp examples/codefix/base.env.example examples/codefix/secrets/base.env
+# then edit secrets/base.env
 ```
 
 What the `env_file` must supply, by the sandbox's `provider:` (set in `registry.yml`):
@@ -91,8 +91,8 @@ loopy auth github          # App Manifest flow; ~2 clicks; writes .loopy/ + loop
 loopy auth status          # verify, then visit the printed install URL to pick repos
 ```
 
-With an App configured you can leave `GITHUB_TOKEN` out of `dev.env` entirely. Without one,
-put a token (`contents:write` + `pull_requests:write`) in `dev.env` as `GITHUB_TOKEN` — the
+With an App configured you can leave `GITHUB_TOKEN` out of `base.env` entirely. Without one,
+put a token (`contents:write` + `pull_requests:write`) in `base.env` as `GITHUB_TOKEN` — the
 sandbox's git is wired to read it for `github.com`. Pass `--no-tokens` to skip minting for a
 fully offline test.
 

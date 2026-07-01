@@ -58,7 +58,7 @@ def build_demo_manifest() -> Manifest:
                         "provider": "daytona",
                         "image": {"debian_slim": "3.12", "apt": ["git"]},
                         "network": ["github.com", "api.sentry.io"],
-                        "env_file": ["secrets/default.env", "secrets/sentry.env"],
+                        "env_file": ["secrets/base.env", "secrets/sentry.env"],
                         "repos": [{"url": "acme/runbooks", "depth": 1}],
                     }
                 },

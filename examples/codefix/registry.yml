@@ -19,7 +19,7 @@ sandboxes:
     provider: docker
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
     network: [github.com, api.anthropic.com]   # git over https + the model API
-    env_file: secrets/dev.env                  # gitignored; resolved by the backend at run time
+    env_file: secrets/base.env                  # gitignored; resolved by the backend at run time
     repos: [octocat/Hello-World]               # cloned into the workspace at acquire time (auth injected)
 
 # Agents — capability comes from the sandbox (image + egress), skills, the injected GitHub

@@ -24,7 +24,7 @@ def test_load_sensor_env_absent_is_empty(tmp_path):
 def test_load_sensor_env_ignores_other_dotenvs(tmp_path):
     # Only `sensors/.env` is the sensor surface; a sandbox env_file must not leak in.
     (tmp_path / "secrets").mkdir()
-    (tmp_path / "secrets" / "default.env").write_text("DAYTONA_API_KEY=should-not-load\n")
+    (tmp_path / "secrets" / "base.env").write_text("DAYTONA_API_KEY=should-not-load\n")
     assert load_sensor_env(tmp_path) == {}
 
 

@@ -191,7 +191,7 @@ def _manifest() -> Manifest:
                         "provider": "daytona",
                         "image": {"debian_slim": "3.12"},
                         "network": ["github.com"],
-                        "env_file": ["secrets/default.env", "secrets/extra.env"],
+                        "env_file": ["secrets/base.env", "secrets/extra.env"],
                         "repos": [{"url": "acme/runbooks", "depth": 1}],
                     }
                 },
@@ -277,7 +277,7 @@ def test_build_registry_redacts_secrets():
     assert sb["secrets"] == {"redacted": True, "count": 2}
     assert "env_file" not in sb
     blob = repr(reg)
-    assert "secrets/default.env" not in blob and "extra.env" not in blob
+    assert "secrets/base.env" not in blob and "extra.env" not in blob
     # non-secret fields still surface
     assert sb["network"] == ["github.com"]
     assert sb["repos"][0]["url"] == "acme/runbooks"

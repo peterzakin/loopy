@@ -39,7 +39,7 @@ GitHub ──webhook(/hooks/github, X-Hub-Signature-256)──▶ loopy ingress
 ## Setup
 
 1. **GitHub App for repo access** (recommended): `loopy auth github`, then install the App on
-   the repo in `sandboxes.Dev.repos`. (Or drop a `GITHUB_TOKEN` PAT in `secrets/dev.env`.)
+   the repo in `sandboxes.Dev.repos`. (Or drop a `GITHUB_TOKEN` PAT in `secrets/base.env`.)
 2. **Webhook secret** — generate one and put it in the control-plane env so the ingress can
    verify deliveries:
    ```
@@ -51,7 +51,7 @@ GitHub ──webhook(/hooks/github, X-Hub-Signature-256)──▶ loopy ingress
    - Secret: the value from step 2
    - Events: **Pull requests** (subscribe to Issues / Pushes too if you trigger on those)
    (For local dev, expose `http://127.0.0.1:8000` with a tunnel, e.g. `cloudflared`/`ngrok`.)
-4. **Model + sandbox creds:** `cp dev.env.example secrets/dev.env` and fill it in.
+4. **Model + sandbox creds:** `cp base.env.example secrets/base.env` and fill it in.
 
 ## Run it
 

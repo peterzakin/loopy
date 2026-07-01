@@ -25,7 +25,7 @@ def test_loads_incidents_manifest_into_typed_model():
     assert "triage" in m.workflows
     assert m.workflows["triage"].entry == "investigate"
     # sandbox env_file carried through (the addendum)
-    assert m.registry.sandboxes["default"].env_file == ["secrets/default.env"]
+    assert m.registry.sandboxes["default"].env_file == ["secrets/base.env"]
     # agent harness runtime present (drives the provider-key requirement)
     assert m.registry.agents["Investigator"].harness.runtime == "claude-code"
     # sensors typed

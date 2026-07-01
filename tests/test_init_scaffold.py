@@ -26,7 +26,7 @@ runner = CliRunner()
 
 def _key_line(target) -> str:
     """The single ANTHROPIC_API_KEY line from a scaffolded project's env_file."""
-    lines = (target / "secrets" / "dev.env").read_text().splitlines()
+    lines = (target / "secrets" / "base.env").read_text().splitlines()
     return next(line for line in lines if line.startswith("ANTHROPIC_API_KEY="))
 
 
@@ -78,7 +78,7 @@ def test_coding_scaffold_writes_canonical_layout(tmp_path):
         "workflows/codefix/open-pr.md",
         "skills/codefix/SKILL.md",
         "sensors/sensors.py",
-        "secrets/dev.env",
+        "secrets/base.env",
         "loopy.env",
         ".gitignore",
     } <= rels
@@ -100,7 +100,7 @@ def test_orchestrator_scaffold_writes_summarize_layout(tmp_path):
         "workflows/summarize/summarize.md",
         "skills/summarize/SKILL.md",
         "sensors/sensors.py",
-        "secrets/dev.env",
+        "secrets/base.env",
         "loopy.env",
         ".gitignore",
     } <= rels
