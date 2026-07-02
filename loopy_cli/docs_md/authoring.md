@@ -237,11 +237,17 @@ rather than a gap, use `cron(...)` on a workflow's `on:` instead.
 path out to every sensor on it (GitHub posts every event type to a single URL, so several
 sensors can share `/hooks/github`). The public delivery URL for a sensor is one base plus
 its path: set `LOOPY_PUBLIC_URL` in `loopy.env` (prompted for at `loopy init`) to your
-deployed host or dev tunnel, and `loopy run` prints each sensor's full delivery URL
-(e.g. `<base>/hooks/github`) at startup — the exact strings to paste into each source's
-webhook settings. Ingress can be signed: when `GITHUB_WEBHOOK_SECRET`
+deployed host or dev tunnel; `loopy webhooks list` prints every endpoint's full delivery
+URL (so does `loopy run` at startup) — the strings to paste into a source's webhook
+settings. For GitHub there's nothing to paste: **`loopy webhooks github`** registers the
+webhooks for you — it creates (or converges, idempotently) a webhook on each repo in
+`registry.yml` pointing at `<LOOPY_PUBLIC_URL>/hooks/github`, subscribed to the events
+your sensors need, authenticated as the App from `loopy auth github` (auth offers this
+step itself when the URL is already set; `--check` reports without changing anything).
+It also generates and lands `GITHUB_WEBHOOK_SECRET` in `loopy.env`, and when that secret
 is set, `loopy run` verifies GitHub's `X-Hub-Signature-256` HMAC at the edge before any
-sensor sees the payload.
+sensor sees the payload. Without registration (or the manual equivalent), built-in
+`Github.*` triggers never fire — `loopy doctor` flags exactly that gap.
 
 ## Secrets
 

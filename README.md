@@ -33,11 +33,13 @@ command with `uv run` from the repo (e.g. `uv run loopy compile`).
 (control-plane creds: keys like `DAYTONA_API_KEY`, plus the GitHub App entries that
 `loopy auth github` writes). All are gitignored. Run every command from the project directory so
 `loopy.env` and `--root` stay in sync; `loopy init` sets this up for you. `init` is
-interactive: it asks which repo(s) the agent should work on, offers to fill in credentials it
-finds in your environment (`ANTHROPIC_API_KEY`, `DAYTONA_API_KEY`), asks for the public base
-URL webhooks are delivered at (stored as `LOOPY_PUBLIC_URL`; each webhook sensor receives
-deliveries at that base plus its path, e.g. `<base>/hooks/github`), and finishes by running
-the same checks as `loopy doctor` so you know what's left before a first run.
+interactive: it asks for the public base URL webhooks are delivered at (stored as
+`LOOPY_PUBLIC_URL`; each webhook sensor receives deliveries at that base plus its path, e.g.
+`<base>/hooks/github`), asks which repo(s) the agent should work on, offers to fill in
+credentials it finds in your environment (`ANTHROPIC_API_KEY`, `DAYTONA_API_KEY`), offers to
+register GitHub webhooks when the URL, App, and repos are all in place (`loopy webhooks
+github` does the same any time later), and finishes by running the same checks as
+`loopy doctor` so you know what's left before a first run.
 
 ## Using Loopy with an AI agent
 
@@ -258,8 +260,11 @@ triggered by a `poll` or a `webhook`.
 > HTTP route and fans one path out to every sensor on it (GitHub posts every event type to a single
 > URL, so several sensors can share `/hooks/github`). A sensor's public delivery URL is one base
 > plus its path: set `LOOPY_PUBLIC_URL` in `loopy.env` (prompted for at `loopy init`) to your
-> deployed host or dev tunnel, and `loopy run` prints each full delivery URL
-> (e.g. `<base>/hooks/github`) at startup. Ingress can be signed: when
+> deployed host or dev tunnel; `loopy webhooks list` prints each full delivery URL
+> (e.g. `<base>/hooks/github`), and **`loopy webhooks github`** registers GitHub's side for you —
+> it creates a webhook on each repo in `registry.yml` via the App from `loopy auth github` and
+> lands the signing secret in `loopy.env` (`--check` reports without changing anything; built-in
+> `Github.*` triggers never fire until this or a manual registration exists). When
 > `GITHUB_WEBHOOK_SECRET` is set, `loopy run` verifies GitHub's `X-Hub-Signature-256` HMAC at the
 > edge before any sensor sees the payload. See
 > [`examples/incidents/sensors/sensors.py`](examples/incidents/sensors/sensors.py)

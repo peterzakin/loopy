@@ -49,6 +49,8 @@ def test_build_manifest_shape():
         "contents": "write",
         "pull_requests": "write",
         "metadata": "read",
+        # lets `loopy webhooks github` create the repo webhooks that deliver Github.* events
+        "repository_hooks": "write",
     }
 
 
@@ -251,7 +253,10 @@ def test_list_installation_repositories_paginates(monkeypatch):
     # Otherwise the doctor preflight flags reachable repos as "not selected".
     pages = {
         1: {"total_count": 150, "repositories": [{"full_name": f"me/r{i}"} for i in range(100)]},
-        2: {"total_count": 150, "repositories": [{"full_name": f"me/r{i}"} for i in range(100, 150)]},
+        2: {
+            "total_count": 150,
+            "repositories": [{"full_name": f"me/r{i}"} for i in range(100, 150)],
+        },
     }
     calls = []
 

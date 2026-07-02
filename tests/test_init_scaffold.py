@@ -200,18 +200,24 @@ def test_scaffold_still_refuses_dir_with_unrelated_file(tmp_path):
         scaffold_project(target, "demo")
 
 
-def test_init_offers_github_auth_before_prompting_repos(tmp_path, monkeypatch):
-    """The wizard authenticates first, then asks which repo(s) to work on — verified by the call
-    order of `_offer_github_auth` relative to `_prompt_for_repos`."""
+def test_init_wizard_step_order(tmp_path, monkeypatch):
+    """The wizard collects the public URL first (auth's webhook offer needs it recorded),
+    then authenticates, then asks which repo(s) to work on — and offers webhook
+    registration only after the scaffold exists (registration needs registry.yml)."""
     calls: list[str] = []
 
+    monkeypatch.setattr(
+        loopy_cli, "_offer_public_webhook_url", lambda target: calls.append("url")
+    )
     monkeypatch.setattr(loopy_cli, "_offer_github_auth", lambda target: calls.append("auth"))
     monkeypatch.setattr(loopy_cli, "_prompt_for_repos", lambda: (calls.append("repos"), [])[1])
+    monkeypatch.setattr(
+        loopy_cli, "offer_github_webhooks", lambda target: calls.append("webhooks")
+    )
     # Keep the rest of the interactive wizard quiet.
     monkeypatch.setattr(loopy_cli, "_offer_ambient_anthropic_key", lambda target: None)
     monkeypatch.setattr(loopy_cli, "_offer_ambient_daytona_creds", lambda target: None)
     monkeypatch.setattr(loopy_cli, "_offer_redis_bus", lambda target: None)
-    monkeypatch.setattr(loopy_cli, "_offer_public_webhook_url", lambda target: None)
     monkeypatch.setattr(loopy_cli, "_note_orchestrator_mode", lambda: None)
 
     class _Tty:  # force the interactive branch (CliRunner's stdin reports not-a-tty)
@@ -222,7 +228,9 @@ def test_init_offers_github_auth_before_prompting_repos(tmp_path, monkeypatch):
 
     loopy_cli.init("demo", directory=tmp_path, non_interactive=False)
 
-    assert calls == ["auth", "repos"]
+    assert calls == ["url", "auth", "repos", "webhooks"]
+    # The webhook-registration offer fires post-scaffold, so the registry it compiles exists.
+    assert (tmp_path / "demo" / "registry.yml").is_file()
 
 
 @pytest.mark.parametrize("bad", ["", "  ", ".", "..", "a/b", "a\\b", "-leading", "/abs"])
@@ -509,13 +517,13 @@ def test_public_url_stub_replaced_in_place(tmp_path, monkeypatch):
     ],
 )
 def test_normalize_public_url_accepts(raw, normalized):
-    assert loopy_cli._normalize_public_url(raw) == normalized
+    assert loopy_cli.webhooks.normalize_public_url(raw) == normalized
 
 
 @pytest.mark.parametrize("bad", ["ftp://x.example.com", "https://", "https://a b.com", "://"])
 def test_normalize_public_url_rejects(bad):
     with pytest.raises(ValueError):
-        loopy_cli._normalize_public_url(bad)
+        loopy_cli.webhooks.normalize_public_url(bad)
 
 
 def test_init_non_interactive_writes_placeholder_scaffold(tmp_path, monkeypatch):
