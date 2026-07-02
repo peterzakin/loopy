@@ -192,6 +192,13 @@ _LOOPY_ENV = """\
 # Set REDIS_URL to run on the networked Redis bus; `loopy run` picks it up automatically
 # (leave it unset for the single-process in-memory bus). `--bus` overrides this.
 # REDIS_URL=redis://localhost:6379
+
+# --- Public webhook base URL ---
+# Where external services deliver webhooks to this engine — a deployed host or a dev tunnel
+# (ngrok, cloudflared). Each webhook sensor is served at LOOPY_PUBLIC_URL + its path (the
+# built-in GitHub sensor: <base>/hooks/github); `loopy run` prints the full delivery URLs at
+# startup. Leave unset if nothing external delivers webhooks yet.
+# LOOPY_PUBLIC_URL=
 """
 
 _GITIGNORE = """\
@@ -520,6 +527,13 @@ _ORCH_LOOPY_ENV = """\
 # Set REDIS_URL to run on the networked Redis bus; `loopy run` picks it up automatically
 # (leave it unset for the single-process in-memory bus). `--bus` overrides this.
 # REDIS_URL=redis://localhost:6379
+
+# --- Public webhook base URL ---
+# Where external services deliver webhooks to this engine — a deployed host or a dev tunnel
+# (ngrok, cloudflared). Each webhook sensor is served at LOOPY_PUBLIC_URL + its path (the
+# built-in GitHub sensor: <base>/hooks/github); `loopy run` prints the full delivery URLs at
+# startup. Leave unset if nothing external delivers webhooks yet.
+# LOOPY_PUBLIC_URL=
 
 # Adding a repo later? `loopy auth github` writes GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY here.
 """
