@@ -423,7 +423,6 @@ straight from the platform's secret store, which the non-override semantics resp
 # loopy.env (project root; gitignored; for local dev — production uses the platform env)
 REDIS_URL=redis://localhost:6379
 DAYTONA_API_KEY=dt-...
-DAYTONA_API_URL=https://...
 ```
 
 #### Repo access — `loopy auth github`
