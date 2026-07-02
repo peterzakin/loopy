@@ -4,7 +4,7 @@ Three layers, all offline:
   * `ToolchainLayer.merge` + `compose_image` (pure): how a harness's additive toolchain
     composes onto a (harness-agnostic) user `image:` spec.
   * Each harness declares its CLI + runtime and the binaries to probe.
-  * The runtime's post-acquire probe (`_verify_toolchain`) fails fast when the live sandbox
+  * The runner's post-acquire probe (`_verify_toolchain`) fails fast when the live sandbox
     is missing a required tool.
 """
 
@@ -158,24 +158,26 @@ def _runtime(tools) -> InMemoryRuntime:
 
 def test_probe_passes_when_all_tools_present():
     rt = _runtime({"git", "claude"})
-    asyncio.run(rt._verify_toolchain(_ProbeSandbox(missing=()), _CLAUDE, "fixer", "default"))
+    asyncio.run(rt.runner._verify_toolchain(_ProbeSandbox(missing=()), _CLAUDE, "fixer", "default"))
 
 
 def test_probe_raises_listing_missing_tools():
     rt = _runtime({"git", "claude"})
     with pytest.raises(RuntimeError, match="missing tool.*claude"):
         asyncio.run(
-            rt._verify_toolchain(_ProbeSandbox(missing=("claude",)), _CLAUDE, "f", "default")
+            rt.runner._verify_toolchain(_ProbeSandbox(missing=("claude",)), _CLAUDE, "f", "default")
         )
 
 
 def test_probe_failure_treats_all_tools_as_missing():
     rt = _runtime({"git", "claude"})
     with pytest.raises(RuntimeError, match="missing tool"):
-        asyncio.run(rt._verify_toolchain(_ProbeSandbox(raises=True), _CLAUDE, "f", "default"))
+        asyncio.run(
+            rt.runner._verify_toolchain(_ProbeSandbox(raises=True), _CLAUDE, "f", "default")
+        )
 
 
 def test_probe_skipped_when_no_required_tools():
     rt = _runtime(set())
     # No exec needed; a sandbox that would raise on exec must never be called.
-    asyncio.run(rt._verify_toolchain(_ProbeSandbox(raises=True), _CLAUDE, "f", "default"))
+    asyncio.run(rt.runner._verify_toolchain(_ProbeSandbox(raises=True), _CLAUDE, "f", "default"))

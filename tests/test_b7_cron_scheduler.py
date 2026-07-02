@@ -145,13 +145,13 @@ def test_tick_event_carries_scheduled_at_and_cold_start_last_run():
     m = _cron_manifest()
     runtime = _runtime(m)
 
-    original = runtime._run_step
+    original = runtime.runner._run_step
 
     async def spy(step, ctx):  # capture the triggering event the runtime built
         captured.append(ctx.event)
         return await original(step, ctx)
 
-    runtime._run_step = spy  # type: ignore[method-assign]
+    runtime.runner._run_step = spy  # type: ignore[method-assign]
     sched_at = datetime(2026, 6, 19, 3, 0, tzinfo=UTC)
     asyncio.run(runtime.tick("upkeep/scan", sched_at))
 
@@ -172,13 +172,13 @@ def test_tick_advances_the_watermark_to_scheduled_at():
 def test_second_tick_uses_the_first_ticks_scheduled_at_as_last_run():
     captured: list = []
     runtime = _runtime(_cron_manifest())
-    original = runtime._run_step
+    original = runtime.runner._run_step
 
     async def spy(step, ctx):
         captured.append(ctx.event)
         return await original(step, ctx)
 
-    runtime._run_step = spy  # type: ignore[method-assign]
+    runtime.runner._run_step = spy  # type: ignore[method-assign]
     first = datetime(2026, 6, 19, 3, 0, tzinfo=UTC)
     second = datetime(2026, 6, 20, 3, 0, tzinfo=UTC)
     asyncio.run(runtime.tick("upkeep/scan", first))
