@@ -256,28 +256,35 @@ Not part of the built-in-integration PR, but the natural companion command — t
 `loopy auth github` (`loopy_cli/auth.py`). It scripts the Custom/Internal Integration setup so
 the user doesn't click through Sentry's Developer Settings by hand.
 
-### The assumption: a Sentry auth token is already in the environment
+### Which token generates the webhook: a User token, as a one-time bootstrap
 
 `loopy auth github` runs a browser **App manifest flow** because GitHub lets you create an app
 from nothing. Sentry has no such flow for internal integrations — creation is a plain
-`POST .../sentry-apps/` that needs an existing auth token. We assume that token is already
-present as **`SENTRY_AUTH_TOKEN`** in the environment (the same way the project env already
-carries `ANTHROPIC_API_KEY` / `DAYTONA_API_KEY`), so the command is **non-interactive**: no
-browser round-trip, no prompt, CI-friendly.
+`POST .../sentry-apps/` that needs `org:write` / `org:admin`. That scope requirement decides
+which token to use, and the intuitive choice (an org token) is the wrong one:
 
-**Scope caveat — read this first.** Sentry has two org-scoped token types and they are *not*
-interchangeable here:
+- **Organization Auth Token — cannot do it.** The natural "automation" credential, but its
+  scope set is **fixed to CI** (`org:ci`: releases, source maps, code mappings) and can't be
+  widened. It **403s** on integration creation. Not an option for auto-generating the webhook.
+- **User Auth Token (from an org owner/manager) — the default.** It can be minted with
+  `org:write` in one step, so it's what a fresh org can actually use. This is what
+  `loopy auth sentry` reads from `SENTRY_AUTH_TOKEN`.
+- **Provisioner internal-integration token — the person-independent alternative.** A team that
+  wants hands-off automation creates one admin internal integration by hand (`org:write`), then
+  uses *its* org-scoped token — not tied to any person — to provision others. Documented as the
+  advanced option; same env var.
 
-- **Organization Auth Tokens** (the ones literally labeled that) carry a **fixed,
-  non-editable scope set built for CI** (`org:ci`: releases, source maps, code mappings). They
-  **cannot create a Custom Integration** — the `sentry-apps` endpoint needs `org:write` /
-  `org:admin`, which these never include. A CI org token will **403** on create.
-- An **Internal Integration token** (Custom Integrations, with editable scopes) or a **User
-  Auth Token** from an org owner **can** include `org:write` / `org:admin` and will work.
+**Why a personal user token is acceptable here:** the integration is created **once** and its
+Client Secret is persisted to `loopy.env`; the auth token is a **one-time bootstrap** — used at
+setup, never stored, never read at run time. If it's later revoked, nothing breaks until you
+next re-provision. So the choice is "what can create it once," where the user token wins on
+availability; it is not the service's run-time identity.
 
-So `loopy auth sentry` assumes `SENTRY_AUTH_TOKEN` is a token with `org:write`. If create
-returns 403, it prints exactly this (which token types work) and points at `--manual` — a
-silent failure here would be the worst outcome, so it is an explicit, specific error.
+The command reads `SENTRY_AUTH_TOKEN` from the environment (the same way the project env carries
+`ANTHROPIC_API_KEY` / `DAYTONA_API_KEY`), so it is **non-interactive**: no browser round-trip,
+no prompt, CI-friendly. If create returns **403**, it prints exactly the above (org tokens
+can't; use a user or provisioner token) and points at `--manual` — a silent failure here would
+be the worst outcome, so it is an explicit, specific error.
 
 Two other differences from `loopy auth github` remain:
 
