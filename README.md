@@ -2,7 +2,7 @@
 
 **Open source (Apache-2.0) · Python 3.12+**
 
-Loopy is an **open-source, agent-neutral framework for authoring agent automations. Your
+Loopy is an *open-source*, *agent-neutral* framework for authoring agent automations. Your
 automations are *files in your repo* (workflows, skills, and sensors authored as Markdown and
 code), so they version, diff, and review like the rest of your codebase. There's no canvas to
 click together: `loopy compile` builds the workflow's DAG straight from those files. Each step's
