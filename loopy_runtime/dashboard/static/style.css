@@ -143,11 +143,52 @@ code { font-family: var(--mono); font-size: .92em; }
 .node {
   border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--panel);
   padding: 12px 14px; min-width: 180px; box-shadow: var(--elev);
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+  transition: border-color .12s, background .12s;
 }
+.node:hover { border-color: var(--ink); }
+.node.is-selected { border-color: var(--accent); background: var(--accent-sb); }
 .node.is-entry { border-color: var(--accent); border-style: dashed; }
+.node.is-entry.is-selected { border-style: solid; }
 .node .node-name { font-family: var(--mono); font-size: 13px; font-weight: 600; }
 .node .node-agent { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
 .node .node-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+
+/* ── step panel (right side, markdown body of the selected step) ────────── */
+.step-panel {
+  position: fixed; top: 60px; right: 0; bottom: 0; z-index: 18;
+  width: min(460px, calc(100vw - 24px));
+  background: var(--panel); border-left: 1px solid var(--line);
+  box-shadow: var(--elev-2);
+  display: flex; flex-direction: column;
+}
+.step-panel[hidden] { display: none; } /* keep the hidden attr effective despite display:flex */
+.step-panel-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 18px 22px 14px; border-bottom: 1px solid var(--line);
+}
+.step-panel-title h2 { font-family: var(--mono); font-size: 16px; margin-top: 2px; }
+.step-panel-close { font-size: 12px; padding: 4px 10px; flex: none; }
+.step-panel-body { padding: 18px 22px 32px; overflow-y: auto; }
+.step-facts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+
+/* rendered markdown */
+.step-md { font-size: 13.5px; line-height: 1.65; }
+.step-md h1, .step-md h2, .step-md h3, .step-md h4 {
+  font-size: 13px; font-weight: 600; color: var(--ink); margin: 18px 0 6px;
+}
+.step-md h1:first-child, .step-md h2:first-child,
+.step-md h3:first-child, .step-md h4:first-child, .step-md p:first-child { margin-top: 0; }
+.step-md p { margin: 10px 0; }
+.step-md ul, .step-md ol { margin: 10px 0; padding-left: 22px; }
+.step-md li { margin: 4px 0; }
+.step-md code { background: var(--code-bg); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; color: var(--accent-2); }
+.step-md pre.lui-code { margin: 12px 0; }
+.step-md a { color: var(--accent); text-decoration: underline; }
+.step-md .md-ref {
+  font-family: var(--mono); font-size: .92em; color: var(--accent-2);
+  background: var(--accent-sb); border-radius: 4px; padding: 1px 5px; white-space: nowrap;
+}
 
 /* ── sensors ────────────────────────────────────────────────────────────── */
 .sig { margin: 0 0 14px; color: var(--accent-2); font-size: 13px; white-space: pre-wrap; word-break: break-word; }
