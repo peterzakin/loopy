@@ -127,7 +127,9 @@ class JsonProtocolHarness:
                     raise ValueError(f"agent '{name}': {exc}") from exc
 
     def required_keys(self, agent: AgentSpec) -> set[str]:
-        return {required_model_key(agent.harness.runtime)}
+        # The model rides along for prefix-keyed runtimes (opencode), whose provider
+        # key derives from the model's `provider/` prefix.
+        return {required_model_key(agent.harness.runtime, agent.harness.model)}
 
     def missing_keys(self, agent: AgentSpec, env: Mapping[str, str]) -> set[str]:
         """Required keys not satisfiable for `agent` given the sandbox `env`. Default: those

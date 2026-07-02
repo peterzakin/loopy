@@ -8,8 +8,8 @@ code), so they version, diff, and review like the rest of your codebase. There's
 click together: `loopy compile` builds the workflow's DAG straight from those files.
 
 **Agent-neutral.** Loopy orchestrates the loop; it doesn't bind you to one vendor's agent. Every
-step names its runtime in `registry.yml` (`harness.runtime`): **Claude Code**
-and **OpenAI Codex** ship today, and the harness registry is built to
+step names its runtime in `registry.yml` (`harness.runtime`): **Claude Code**,
+**OpenAI Codex**, and **OpenCode** ship today, and the harness registry is built to
 take more. Mix them in one manifest: route a triage step to one runtime and a fixer to another,
 and swap a step's runtime or model without touching its prose.
 
@@ -126,8 +126,10 @@ more agents and events.)
 
 ```yaml
 # Defaults: every agent inherits these; override a field only when needed.
-# `harness.runtime` picks the agent runner: `claude-code` (Claude Code, claude-* models) or
-# `codex` (OpenAI Codex, gpt-*/o-series/codex-* models). Model must match the runtime.
+# `harness.runtime` picks the agent runner: `claude-code` (Claude Code, claude-* models),
+# `codex` (OpenAI Codex, gpt-*/o-series/codex-* models), or `opencode` (OpenCode, which
+# drives either family — write the bare model id; loopy expands it to opencode's
+# provider/model naming). Model must match the runtime.
 defaults:
   agent:
     sandbox: default
@@ -155,6 +157,7 @@ agents:
   Reviewer:     { skills: [rubrics/fix-quality] }                       # a judge, review-only skill
   Releaser:     { skills: [rollout] }
   Scout:        { harness: { runtime: codex, model: gpt-5 }, skills: [triage] }   # runs on OpenAI Codex
+  Sweeper:      { harness: { runtime: opencode, model: claude-sonnet-4-6 }, skills: [triage] }  # runs on OpenCode
 
 # Events: the bus contract. A step's `on:` may only name an event registered here.
 # Typed field maps.
@@ -172,11 +175,10 @@ events:
   GoalShipped:     { goal_id: str }                                    # terminal announcement
 ```
 
-> **Built-in agents.** Like the `Github.*` events (below), two agents ship with the platform:
-> `BaseClaude` (`claude-code`, `claude-sonnet-4-6`) and `BaseCodex` (`codex`, `gpt-5.5`). A step
-> may name either in `agent:` with **no** `registry.yml` entry; the compiler injects it, bound to
-> the project's `default` sandbox with no skills. Declaring your own agent under the same name
-> overrides the built-in.
+> **No built-in agents.** Every agent a step names must be declared in `registry.yml` — the
+> harness pairing is always explicit and visible, never injected. `loopy init` scaffolds one
+> agent per supported runtime (`claude-code`, `codex`, `opencode`) so the yaml for each is
+> there to point a step at or edit.
 
 Beyond a single step's `budget:`, the registry takes a top-level `limits:` block for wider spend
 caps: `cascade_spend: { usd: <n> }` caps the total spend of an entire event cascade, and

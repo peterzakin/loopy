@@ -2,8 +2,9 @@
 
 The runtime holds a single `AgentHarness`; the router *is* that one object, fanning
 `run`/`required_keys` out to the right per-runtime harness (`claude-code` → Claude Code,
-`codex` → Codex) based on the step's agent. It is also the single chokepoint that
-enforces, at startup, that every registered agent names a *supported* harness runtime —
+`codex` → Codex, `opencode` → OpenCode) based on the step's agent. It is also the single
+chokepoint that enforces, at startup, that every registered agent names a *supported*
+harness runtime —
 the per-harness model-eligibility rule is enforced inside each harness's constructor.
 
 One harness instance is built per runtime actually used; each is handed the full agents
@@ -18,6 +19,7 @@ from loopy_runtime.contract import Sandbox, StepContext, StepResult, ToolchainLa
 from loopy_runtime.harness.base import HarnessError, JsonProtocolHarness
 from loopy_runtime.harness.claude_code import ClaudeCodeHarness
 from loopy_runtime.harness.codex import CodexHarness
+from loopy_runtime.harness.opencode import OpenCodeHarness
 from loopy_runtime.manifest_model import AgentSpec, EventContract, StepSpec
 from loopy_runtime.render import TemplateRenderer
 
@@ -25,6 +27,7 @@ from loopy_runtime.render import TemplateRenderer
 BUILDERS: dict[str, type[JsonProtocolHarness]] = {
     ClaudeCodeHarness.RUNTIME: ClaudeCodeHarness,
     CodexHarness.RUNTIME: CodexHarness,
+    OpenCodeHarness.RUNTIME: OpenCodeHarness,
 }
 
 
