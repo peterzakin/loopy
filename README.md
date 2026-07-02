@@ -34,8 +34,10 @@ command with `uv run` from the repo (e.g. `uv run loopy compile`).
 `loopy auth github` writes). All are gitignored. Run every command from the project directory so
 `loopy.env` and `--root` stay in sync; `loopy init` sets this up for you. `init` is
 interactive: it asks which repo(s) the agent should work on, offers to fill in credentials it
-finds in your environment (`ANTHROPIC_API_KEY`, `DAYTONA_API_KEY`), and finishes by running the
-same checks as `loopy doctor` so you know what's left before a first run.
+finds in your environment (`ANTHROPIC_API_KEY`, `DAYTONA_API_KEY`), asks for the public base
+URL webhooks are delivered at (stored as `LOOPY_PUBLIC_URL`; each webhook sensor receives
+deliveries at that base plus its path, e.g. `<base>/hooks/github`), and finishes by running
+the same checks as `loopy doctor` so you know what's left before a first run.
 
 ## Using Loopy with an AI agent
 
@@ -254,7 +256,10 @@ triggered by a `poll` or a `webhook`.
 
 > **Both `poll` and `webhook` are supported.** `loopy run` hosts each `@sensor(webhook=...)` as an
 > HTTP route and fans one path out to every sensor on it (GitHub posts every event type to a single
-> URL, so several sensors can share `/hooks/github`). Ingress can be signed: when
+> URL, so several sensors can share `/hooks/github`). A sensor's public delivery URL is one base
+> plus its path: set `LOOPY_PUBLIC_URL` in `loopy.env` (prompted for at `loopy init`) to your
+> deployed host or dev tunnel, and `loopy run` prints each full delivery URL
+> (e.g. `<base>/hooks/github`) at startup. Ingress can be signed: when
 > `GITHUB_WEBHOOK_SECRET` is set, `loopy run` verifies GitHub's `X-Hub-Signature-256` HMAC at the
 > edge before any sensor sees the payload. See
 > [`examples/incidents/sensors/sensors.py`](examples/incidents/sensors/sensors.py)

@@ -366,9 +366,10 @@ def init(
 
     By default a short wizard offers to close the gaps the scaffold leaves on purpose —
     reusing an `ANTHROPIC_API_KEY` already in your environment, recording a Redis connection
-    string if you want the networked event bus, and wiring git auth — then reports whatever's
-    still missing (the same checks as `loopy doctor`). `--non-interactive` skips the prompts
-    entirely and just writes the placeholder scaffold.
+    string if you want the networked event bus, recording the public base URL webhooks are
+    delivered at, and wiring git auth — then reports whatever's still missing (the same checks
+    as `loopy doctor`). `--non-interactive` skips the prompts entirely and just writes the
+    placeholder scaffold.
     """
     from loopy_cli.scaffold import InvalidProjectName, scaffold_project, validate_project_name
 
@@ -420,6 +421,7 @@ def init(
         _offer_ambient_anthropic_key(target)
         _offer_ambient_daytona_creds(target)
         _offer_redis_bus(target)
+        _offer_public_webhook_url(target)
         # A repo-less scaffold is a complete orchestrator, not a half-finished setup — say so.
         if not repos:
             _note_orchestrator_mode()
@@ -573,6 +575,73 @@ def _offer_redis_bus(target: Path) -> None:
         "  "
         + typer.style("✓", fg=typer.colors.GREEN)
         + " wrote REDIS_URL to loopy.env — `loopy run` will use the Redis bus automatically"
+    )
+    typer.echo()
+
+
+def _normalize_public_url(raw: str) -> str:
+    """Validate and canonicalize a public webhook base URL.
+
+    Delivery URLs are built as `<base> + <sensor path>` (e.g. `<base>/hooks/github`), so the
+    base must be a bare http(s) origin (an optional path prefix is fine) with no trailing
+    slash. A scheme-less host is assumed https — the common case for a tunnel or deployed
+    hostname pasted without one. Raises ValueError with the reason on unusable input.
+    """
+    from urllib.parse import urlparse
+
+    candidate = raw.strip()
+    if any(ch.isspace() for ch in candidate):
+        raise ValueError("the URL must not contain whitespace")
+    if "://" not in candidate:
+        candidate = f"https://{candidate}"
+    parsed = urlparse(candidate)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"unsupported scheme '{parsed.scheme}' — use http:// or https://")
+    if not parsed.netloc:
+        raise ValueError("the URL needs a host, e.g. https://loopy.example.com")
+    return candidate.rstrip("/")
+
+
+def _offer_public_webhook_url(target: Path) -> None:
+    """Ask for the public base URL external services deliver webhooks to.
+
+    Webhook sensors bind locally (`loopy run --host/--port`), but the services that call them
+    (GitHub, Sentry, …) need a public URL — a deployed host or a dev tunnel (ngrok,
+    cloudflared). Recording it as `LOOPY_PUBLIC_URL` in `loopy.env` gives every webhook one
+    base: a sensor's delivery URL is `LOOPY_PUBLIC_URL + its path` (the built-in GitHub
+    sensor: `<base>/hooks/github`), and `loopy run` prints the full delivery URLs at startup
+    so they can be pasted into each source's webhook settings. Blank is a first-class answer
+    (nothing external delivers webhooks yet — sensors still serve locally); skips silently
+    when `loopy.env` already has one (e.g. re-init) so we never clobber it.
+    """
+    from loopy_runtime.secrets import load_control_plane_env, write_control_plane_env
+
+    # Already configured (e.g. re-init over an existing tree) — nothing to offer, don't clobber.
+    if load_control_plane_env(target).get("LOOPY_PUBLIC_URL"):
+        return
+
+    while True:
+        raw = typer.prompt(
+            "  Public base URL where webhooks are delivered? (e.g. https://loopy.example.com "
+            "or a tunnel URL; blank = none yet)",
+            default="",
+            show_default=False,
+        ).strip()
+        if not raw:
+            return
+        try:
+            url = _normalize_public_url(raw)
+        except ValueError as exc:
+            typer.echo("  " + typer.style(f"✗ {exc}", fg=typer.colors.RED))
+            continue
+        break
+
+    write_control_plane_env(target, {"LOOPY_PUBLIC_URL": url})
+    typer.echo(
+        "  "
+        + typer.style("✓", fg=typer.colors.GREEN)
+        + " wrote LOOPY_PUBLIC_URL to loopy.env — webhook sensors receive deliveries at "
+        f"{url}/hooks/<name> (GitHub: {url}/hooks/github)"
     )
     typer.echo()
 
@@ -1315,6 +1384,21 @@ def run(
             f"serving {len(sensor_runner.webhook_paths)} webhook(s) on {cfg.host}:{cfg.port}: "
             f"{', '.join(sensor_runner.webhook_paths)}"
         )
+        # With LOOPY_PUBLIC_URL set (loopy.env, prompted at `loopy init`), print the full
+        # delivery URL per sensor — the exact strings to paste into each source's webhook
+        # settings. Without it, point at the setting instead of leaving the user to guess
+        # how the local bind maps to a public endpoint.
+        public_base = os.environ.get("LOOPY_PUBLIC_URL", "").strip().rstrip("/")
+        if public_base:
+            typer.echo(
+                "public delivery URLs: "
+                + ", ".join(f"{public_base}{p}" for p in sensor_runner.webhook_paths)
+            )
+        else:
+            typer.echo(
+                "note: LOOPY_PUBLIC_URL not set — set it in loopy.env to print each "
+                "sensor's public delivery URL (base + path)"
+            )
     else:
         typer.echo("no webhook sensors; web server not started (poll/cron-only)")
     typer.echo(

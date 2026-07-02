@@ -211,6 +211,7 @@ def test_init_offers_github_auth_before_prompting_repos(tmp_path, monkeypatch):
     monkeypatch.setattr(loopy_cli, "_offer_ambient_anthropic_key", lambda target: None)
     monkeypatch.setattr(loopy_cli, "_offer_ambient_daytona_creds", lambda target: None)
     monkeypatch.setattr(loopy_cli, "_offer_redis_bus", lambda target: None)
+    monkeypatch.setattr(loopy_cli, "_offer_public_webhook_url", lambda target: None)
     monkeypatch.setattr(loopy_cli, "_note_orchestrator_mode", lambda: None)
 
     class _Tty:  # force the interactive branch (CliRunner's stdin reports not-a-tty)
@@ -417,6 +418,104 @@ def test_redis_offer_does_not_clobber_existing(tmp_path, monkeypatch):
     loopy_cli._offer_redis_bus(target)
 
     assert load_control_plane_env(target)["REDIS_URL"] == "redis://existing:6379"
+
+
+def test_public_url_offer_writes_url_when_provided(tmp_path, monkeypatch):
+    """A public base URL lands in loopy.env as LOOPY_PUBLIC_URL, trailing slash stripped —
+    delivery URLs are built as base + the sensor's own /hooks/... path."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo")
+
+    monkeypatch.setattr("typer.prompt", lambda *a, **k: "https://loopy.example.com/")
+    loopy_cli._offer_public_webhook_url(target)
+
+    assert load_control_plane_env(target)["LOOPY_PUBLIC_URL"] == "https://loopy.example.com"
+
+
+def test_public_url_offer_defaults_scheme_to_https(tmp_path, monkeypatch):
+    """A scheme-less host (a tunnel hostname pasted bare) is assumed https."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo")
+
+    monkeypatch.setattr("typer.prompt", lambda *a, **k: "abc123.ngrok.app")
+    loopy_cli._offer_public_webhook_url(target)
+
+    assert load_control_plane_env(target)["LOOPY_PUBLIC_URL"] == "https://abc123.ngrok.app"
+
+
+def test_public_url_offer_blank_skips(tmp_path, monkeypatch):
+    """Blank is a first-class answer — no LOOPY_PUBLIC_URL written, sensors still serve locally."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo")
+
+    monkeypatch.setattr("typer.prompt", lambda *a, **k: "")
+    loopy_cli._offer_public_webhook_url(target)
+
+    assert "LOOPY_PUBLIC_URL" not in load_control_plane_env(target)
+
+
+def test_public_url_offer_reprompts_on_invalid(tmp_path, monkeypatch):
+    """An unusable URL (bad scheme) is rejected with a reason and the prompt asked again."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo")
+
+    answers = iter(["ftp://loopy.example.com", "https://loopy.example.com"])
+    monkeypatch.setattr("typer.prompt", lambda *a, **k: next(answers))
+    loopy_cli._offer_public_webhook_url(target)
+
+    assert load_control_plane_env(target)["LOOPY_PUBLIC_URL"] == "https://loopy.example.com"
+
+
+def test_public_url_offer_does_not_clobber_existing(tmp_path, monkeypatch):
+    """An already-configured LOOPY_PUBLIC_URL in loopy.env is left untouched — no prompt."""
+    from loopy_runtime.secrets import write_control_plane_env
+
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo")
+    write_control_plane_env(target, {"LOOPY_PUBLIC_URL": "https://existing.example.com"})
+
+    def _boom(*a, **k):  # must not prompt when a URL is already configured
+        raise AssertionError("should not prompt when loopy.env already has LOOPY_PUBLIC_URL")
+
+    monkeypatch.setattr("typer.prompt", _boom)
+    loopy_cli._offer_public_webhook_url(target)
+
+    assert load_control_plane_env(target)["LOOPY_PUBLIC_URL"] == "https://existing.example.com"
+
+
+def test_public_url_stub_replaced_in_place(tmp_path, monkeypatch):
+    """The scaffold's commented `# LOOPY_PUBLIC_URL=` stub is replaced in place on write, so
+    no misleading stub lingers above the real value."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo")
+    assert "# LOOPY_PUBLIC_URL=" in (target / "loopy.env").read_text()
+
+    monkeypatch.setattr("typer.prompt", lambda *a, **k: "https://loopy.example.com")
+    loopy_cli._offer_public_webhook_url(target)
+
+    text = (target / "loopy.env").read_text()
+    assert "LOOPY_PUBLIC_URL=https://loopy.example.com" in text
+    assert "# LOOPY_PUBLIC_URL=" not in text
+
+
+@pytest.mark.parametrize(
+    ("raw", "normalized"),
+    [
+        ("https://loopy.example.com", "https://loopy.example.com"),
+        ("https://loopy.example.com/", "https://loopy.example.com"),
+        ("http://localhost:8000", "http://localhost:8000"),
+        ("loopy.example.com", "https://loopy.example.com"),
+        ("https://host.example.com/loopy/", "https://host.example.com/loopy"),
+    ],
+)
+def test_normalize_public_url_accepts(raw, normalized):
+    assert loopy_cli._normalize_public_url(raw) == normalized
+
+
+@pytest.mark.parametrize("bad", ["ftp://x.example.com", "https://", "https://a b.com", "://"])
+def test_normalize_public_url_rejects(bad):
+    with pytest.raises(ValueError):
+        loopy_cli._normalize_public_url(bad)
 
 
 def test_init_non_interactive_writes_placeholder_scaffold(tmp_path, monkeypatch):
