@@ -335,11 +335,20 @@ def init(
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
-    # Ask up front which repo(s) the agent works on so the scaffold lands the real value
-    # (a checkout to edit) instead of an unpushable placeholder. Blank is a first-class answer.
+    target = (directory / name).resolve()
+
+    # Wire git auth *before* asking which repo(s) the agent works on. `loopy auth github` creates
+    # the App and installs it on the repos it may touch, so it reads better to authenticate and
+    # install first, then name the repo(s) with that install fresh in mind — rather than naming
+    # repos into a registry before any auth exists. Auth writes loopy.env into `target`;
+    # `scaffold_project` (run below) preserves those creds under its own template.
+    if interactive:
+        _offer_github_auth(target)
+
+    # Which repo(s) the agent works on — this decides the coding vs orchestrator starter. Blank is
+    # a first-class answer (a repo-less orchestrator), so we never fall back to a placeholder repo.
     repos = _prompt_for_repos() if interactive else None
 
-    target = (directory / name).resolve()
     try:
         created = scaffold_project(target, name, repos=repos)
     except FileExistsError as exc:
@@ -355,16 +364,13 @@ def init(
         typer.echo("      " + typer.style(f"{name}/{rel.as_posix()}", fg=typer.colors.GREEN))
     typer.echo()
 
-    # Offer to close the gaps the scaffold leaves on purpose before reporting what's left.
+    # Offer to close the remaining gaps the scaffold leaves on purpose before reporting what's left.
     if interactive:
         _offer_ambient_anthropic_key(target)
         _offer_ambient_daytona_creds(target)
         _offer_redis_bus(target)
-        # Git auth only matters if the agent actually clones a repo. With none configured,
-        # creating a GitHub App would have nothing to install on — so skip it and say why.
-        if repos:
-            _offer_github_auth(target)
-        else:
+        # A repo-less scaffold is a complete orchestrator, not a half-finished setup — say so.
+        if not repos:
             _note_orchestrator_mode()
 
     # A clean compile is *not* a runnable project: the scaffold ships placeholders on purpose

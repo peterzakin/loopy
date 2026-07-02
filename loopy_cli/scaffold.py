@@ -24,6 +24,10 @@ _REPOS_LINE = "__REPOS_LINE__"
 # A project name doubles as the new directory name, so keep it a single safe path segment.
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
+# The only pre-existing entries `scaffold_project` tolerates in an otherwise-fresh target: the two
+# files `loopy init` may write via `loopy auth github` before it scaffolds (see `scaffold_project`).
+_PREEXISTING_OK = frozenset({"loopy.env", ".gitignore"})
+
 
 class InvalidProjectName(ValueError):
     """The requested project name isn't a usable single directory segment."""
@@ -458,9 +462,19 @@ def scaffold_project(
     open a PR). With none, you get a repo-less orchestrator (turn a Note into a summary) — useful
     on its own, and never an unpushable placeholder repo.
     """
+    from loopy_runtime.secrets import load_control_plane_env, write_control_plane_env
+
     target = Path(target)
-    if target.exists() and any(target.iterdir()):
+    # `loopy init` now offers `loopy auth github` *before* scaffolding, so a fresh target may
+    # already hold the two files that step writes — loopy.env (App creds) and .gitignore. Tolerate
+    # exactly those; any other pre-existing content is real work we refuse to clobber.
+    if target.exists() and any(p.name not in _PREEXISTING_OK for p in target.iterdir()):
         raise FileExistsError(f"{target} already exists and is not empty")
+
+    # Preserve any real control-plane creds a preceding `loopy auth github` wrote. The scaffold's
+    # loopy.env ships commented placeholders, so we write the template first, then merge the real
+    # values back on top — keeping both the explanatory comments and the creds.
+    preexisting_creds = load_control_plane_env(target)
 
     repos = repos or []
     files = _coding_files(repos) if repos else _orchestrator_files()
@@ -470,4 +484,6 @@ def scaffold_project(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(template.replace(_NAME, name))
         created.append(Path(rel))
+    if preexisting_creds:
+        write_control_plane_env(target, preexisting_creds)
     return sorted(created, key=lambda p: p.as_posix())
