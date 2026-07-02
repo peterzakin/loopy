@@ -1,6 +1,6 @@
 """Event ⇄ JSON codec — the wire format for networked EventBuses (B5).
 
-An `Event` is a JSON-serializable value type by design (ARCHITECTURE §3.4), so a broker
+An `Event` is a JSON-serializable value type by design, so a broker
 just needs a stable encoding. `fields` are already registry-validated to JSON-safe types
 (str/int/bool/enum/url); `emitted_at` is carried as ISO-8601. The decode side is untrusted
 input — the `EventReceiver`/registry re-validates the decoded event, this only reconstructs

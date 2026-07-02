@@ -1,4 +1,4 @@
-"""Typed view of the compiled manifest (FRONTEND §9) — the backend's only input.
+"""Typed view of the compiled manifest — the backend's only input.
 
 `load_manifest(path)` parses `manifest.json` into these models. CLI-stamped
 provenance fields (`compiled_at`/`loopy_version`) are tolerated but optional.

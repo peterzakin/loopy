@@ -1,4 +1,4 @@
-"""Workflow IR (FRONTEND §2): triggers, steps, refs, and the per-workflow DAG."""
+"""Workflow IR: triggers, steps, refs, and the per-workflow DAG."""
 
 from __future__ import annotations
 

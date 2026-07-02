@@ -1,4 +1,4 @@
-"""Sensor IR (FRONTEND §2, §7). Defined in M0, populated/validated in M4.
+"""Sensor IR. Defined in M0, populated/validated in M4.
 
 `emits` is *declared* (a registered event name), never inferred from a return type.
 `module` is a language-appropriate locator (dotted path for Python); a `lang`

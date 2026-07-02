@@ -1,4 +1,4 @@
-"""P9 — serialize a `Project` to the deterministic manifest (FRONTEND §9).
+"""P9 — serialize a `Project` to the deterministic manifest.
 
 Plain JSON-able dicts/lists; the CLI serializes with sorted keys so the document
 is byte-stable and content-hashable. `compiled_at`/`loopy_version` are stamped by

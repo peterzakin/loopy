@@ -1,7 +1,7 @@
 """P2 — the field-type desugarer (terse forms -> JSON Schema, draft 2020-12).
 
 We own no type semantics: terse forms are sugar over JSON Schema, and raw schema
-objects (dicts) pass through untouched (FRONTEND §3). Reused for step `output:`
+objects (dicts) pass through untouched. Reused for step `output:`
 maps in M2. Unknown bare shorthand -> E201.
 """
 

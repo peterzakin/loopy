@@ -1,4 +1,4 @@
-"""The backend contract (ARCHITECTURE §3.4): runtime value types + structural Protocols.
+"""The backend contract: runtime value types + structural Protocols.
 
 These are the seams every backend piece plugs into. Frozen against the manifest so
 durable/networked/Daytona/Codex variants drop in behind the same interfaces. The

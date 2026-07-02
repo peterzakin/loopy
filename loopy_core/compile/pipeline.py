@@ -1,4 +1,4 @@
-"""The compile pipeline: discover -> parse -> resolve -> validate -> emit (FRONTEND §1).
+"""The compile pipeline: discover -> parse -> resolve -> validate -> emit.
 
 Each pass accumulates diagnostics and never fails fast. M0 wires the P0–P9 skeleton
 as no-ops over the stage stubs; later milestones fill each stage in.

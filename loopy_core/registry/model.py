@@ -1,4 +1,4 @@
-"""Registry IR (FRONTEND §2). Field types are plain JSON Schema fragments (dicts);
+"""Registry IR. Field types are plain JSON Schema fragments (dicts);
 the type DSL desugars to them in `registry/types.py`."""
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ class Sandbox(BaseModel):
     # Path(s) to env file(s) supplying this sandbox's secrets. A *reference* only —
     # the compiler records it and never reads the file (values resolve at run time).
     env_file: list[str] = Field(default_factory=list)
-    # GitHub repos cloned into the workspace at acquire time (FRONTEND §2). Auth rides
+    # GitHub repos cloned into the workspace at acquire time. Auth rides
     # the credentials the runtime injects; egress must be allowed by `network`.
     repos: list[Repo] = Field(default_factory=list)
     span: Span
@@ -64,7 +64,7 @@ class WorkflowLimit(BaseModel):
 
 
 class Limits(BaseModel):
-    # Project-level controls (FRONTEND §2). `workflows` holds per-named-workflow caps (the
+    # Project-level controls. `workflows` holds per-named-workflow caps (the
     # cumulative USD a single workflow's steps spend within a drain) — the supported path.
     # `cascade_spend` caps the cumulative USD across a whole cascade (incl. cross-workflow
     # loop-backs); it is EXPERIMENTAL — the cost-reporting gate is

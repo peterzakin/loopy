@@ -1,4 +1,4 @@
-"""P8 — whole-IR cross-cutting checks (FRONTEND §8) + lineage (X5).
+"""P8 — whole-IR cross-cutting checks + lineage (X5).
 
 X2 binds step agents and agent sandbox/skills; X3 checks event registration on
 on:/emits:; X5 builds the typed lineage graph and warns on dead triggers (W501).
