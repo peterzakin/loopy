@@ -153,8 +153,8 @@ def build_registry(manifest: Manifest | None) -> dict[str, Any]:
     agents = [
         {
             "name": name,
-            "runtime": a.harness.runtime,
-            "model": a.harness.model,
+            "runtime": a.harness,
+            "model": a.model,
             "sandbox": a.sandbox,
             "skills": list(a.skills),
         }

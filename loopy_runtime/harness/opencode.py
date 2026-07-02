@@ -56,11 +56,11 @@ class OpenCodeHarness(JsonProtocolHarness):
 
     def build_argv(self, step: StepSpec, agent: AgentSpec, prompt: str) -> list[str]:
         # `run` is opencode's non-interactive mode; `--format json` emits one JSON
-        # event per line. The model is always present (construction rejects a None
-        # model for this runtime — auth derives from it) and is handed to the CLI in
-        # its canonical provider/model form (bare-id sugar expanded).
+        # event per line. The model is always present (agents name one mandatorily;
+        # construction rejects a missing one — auth derives from it) and is handed to
+        # the CLI in its canonical provider/model form (bare-id sugar expanded).
         argv = ["opencode", "run", prompt, "--format", "json"]
-        model = canonical_model(self.RUNTIME, agent.harness.model)
+        model = canonical_model(self.RUNTIME, agent.model)
         if model:
             argv += ["--model", model]
         # The loopy sandbox is the boundary, so approve opencode's own permission

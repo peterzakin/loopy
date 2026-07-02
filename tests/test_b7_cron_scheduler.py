@@ -86,7 +86,7 @@ def _cron_manifest(*, emits: list[str] | None = None) -> Manifest:
     events = {"WorkItem": {"fields": {}}} if emits else {}
     return Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "registry": {"sandboxes": {}, "agents": {}, "events": events},
             "workflows": {
                 "upkeep": {

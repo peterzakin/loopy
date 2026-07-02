@@ -23,7 +23,8 @@
 defaults:
   agent:
     sandbox: BaseSandbox
-    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
+    model: claude-sonnet-4-6
+    harness: claude-code
 
 # One sandbox for the whole project. These patterns are text-in/text-out, so the only
 # egress they need is the model API; no repo is cloned. (Swap in `daytona` for a cloud
@@ -41,8 +42,8 @@ agents:
   Writer:       {}                                                    # drafts / transforms text
   Classifier:   {}                                                    # the router's brain
   Reviewer:     {}                                                    # one of several parallel reviewers
-  Judge:        { harness: { model: claude-opus-4-8 }, skills: [grading-rubric] }
-  Orchestrator: { harness: { model: claude-opus-4-8 } }               # plans the subtasks
+  Judge:        { model: claude-opus-4-8, skills: [grading-rubric] }
+  Orchestrator: { model: claude-opus-4-8 }                            # plans the subtasks
   Worker:       {}                                                    # executes the plan
 
 # Events — the bus contract. One entry event per pattern; `ContentRequested` is special:

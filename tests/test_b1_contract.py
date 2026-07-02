@@ -21,14 +21,16 @@ GOLDEN = Path(__file__).resolve().parent / "golden" / "incidents.manifest.json"
 def test_loads_incidents_manifest_into_typed_model():
     m = load_manifest(GOLDEN)
     assert isinstance(m, Manifest)
-    assert m.schema_version == "1"
+    assert m.schema_version == "2"
     # workflows + steps typed
     assert "triage" in m.workflows
     assert m.workflows["triage"].entry == "investigate"
     # sandbox env_file carried through (the addendum)
     assert m.registry.sandboxes["default"].env_file == ["secrets/base.env"]
-    # agent harness runtime present (drives the provider-key requirement)
-    assert m.registry.agents["Investigator"].harness.runtime == "claude-code"
+    # agent model + harness present as flat keys (both mandatory; the harness drives
+    # the provider-key requirement)
+    assert m.registry.agents["Investigator"].model == "claude-sonnet-4-6"
+    assert m.registry.agents["Investigator"].harness == "claude-code"
     # sensors typed
     assert {s.name for s in m.sensors} == {"sentry_issues", "metric_watch"}
 
@@ -70,10 +72,11 @@ def test_model_eligibility_per_harness():
     # opencode also takes the bare ids the other runtimes use (sugar expands them).
     validate_model("opencode", "claude-opus-4-8")
     validate_model("opencode", "gpt-5-codex")
-    # A None model is allowed (falls back to the runtime default).
-    validate_model("codex", None)
-    # ... except for opencode, whose auth key derives from the model.
-    with pytest.raises(ValueError, match="requires an explicit model"):
+    # A missing model is always rejected — every agent names one; there is no
+    # fallback to a CLI's own default model.
+    with pytest.raises(ValueError, match="must name a model"):
+        validate_model("codex", None)
+    with pytest.raises(ValueError, match="must name a model"):
         validate_model("opencode", None)
     # Cross-provider pairings are rejected.
     with pytest.raises(ValueError):

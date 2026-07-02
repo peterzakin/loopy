@@ -182,7 +182,7 @@ def _manifest(*, limits=None):
         registry["limits"] = limits
     return Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "registry": registry,
             "workflows": {"wf": {"entry": "run", "steps": {}}},
             "sensors": [],

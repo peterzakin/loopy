@@ -23,9 +23,9 @@ from loopy_runtime.manifest_model import (
     AgentSpec,
     BudgetSpec,
     EventContract,
-    HarnessSpec,
     StepSpec,
 )
+from loopy_runtime.providers import validate_model
 
 
 class CaptureSandbox:
@@ -54,7 +54,7 @@ def _ctx():
     )
 
 
-AGENT = AgentSpec(harness=HarnessSpec(runtime="opencode", model="anthropic/claude-sonnet-4-6"))
+AGENT = AgentSpec(model="anthropic/claude-sonnet-4-6", harness="opencode")
 
 
 def _harness(events=None):
@@ -182,7 +182,7 @@ def test_run_errors_when_no_text_message():
 
 def test_required_key_derives_from_model_provider_prefix():
     assert _harness().required_keys(AGENT) == {"ANTHROPIC_API_KEY"}
-    openai_agent = AgentSpec(harness=HarnessSpec(runtime="opencode", model="openai/gpt-5.5"))
+    openai_agent = AgentSpec(model="openai/gpt-5.5", harness="opencode")
     assert OpenCodeHarness({"Coder": openai_agent}).required_keys(openai_agent) == {
         "OPENAI_API_KEY"
     }
@@ -192,14 +192,14 @@ def test_bare_model_id_sugars_to_provider_form():
     """An agent may write the bare id every other runtime uses; the harness expands it to
     opencode's provider/model naming in the argv, and the key derivation follows suit."""
     step = StepSpec(id="w/s", agent="Fixer", body="b")
-    bare = AgentSpec(harness=HarnessSpec(runtime="opencode", model="claude-sonnet-4-6"))
+    bare = AgentSpec(model="claude-sonnet-4-6", harness="opencode")
     harness = OpenCodeHarness({"Fixer": bare})
     argv = harness.build_argv(step, bare, "b")
     assert "anthropic/claude-sonnet-4-6" in argv
     assert "claude-sonnet-4-6" not in argv  # never the bare form
     assert harness.required_keys(bare) == {"ANTHROPIC_API_KEY"}
 
-    openai_bare = AgentSpec(harness=HarnessSpec(runtime="opencode", model="gpt-5.5"))
+    openai_bare = AgentSpec(model="gpt-5.5", harness="opencode")
     harness = OpenCodeHarness({"Fixer": openai_bare})
     assert "openai/gpt-5.5" in harness.build_argv(step, openai_bare, "b")
     assert harness.required_keys(openai_bare) == {"OPENAI_API_KEY"}
@@ -214,14 +214,13 @@ def test_run_raises_on_nonzero_exit():
 def test_construction_rejects_unknown_provider_model():
     # A model no recognized provider serves (and no sugar covers) has nothing to derive
     # eligibility or an auth key from.
-    bad = AgentSpec(harness=HarnessSpec(runtime="opencode", model="gemini-2.5-pro"))
+    bad = AgentSpec(model="gemini-2.5-pro", harness="opencode")
     with pytest.raises(ValueError, match="not eligible"):
         OpenCodeHarness({"Fixer": bad})
 
 
-def test_construction_rejects_missing_model():
-    # Other runtimes fall back to the CLI's default model; opencode can't — the provider
-    # key derives from the model's prefix.
-    bad = AgentSpec(harness=HarnessSpec(runtime="opencode", model=None))
-    with pytest.raises(ValueError, match="requires an explicit model"):
-        OpenCodeHarness({"Fixer": bad})
+def test_validate_model_rejects_missing_model():
+    # Every agent names its model mandatorily — no runtime falls back to a CLI default
+    # (and for opencode the provider key derives from the model's prefix).
+    with pytest.raises(ValueError, match="must name a model"):
+        validate_model("opencode", None)

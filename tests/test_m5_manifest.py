@@ -75,7 +75,7 @@ def test_manifest_is_order_independent():
 
 REGISTRY = (
     "sandboxes:\n  default:\n    provider: local\n"
-    "agents:\n  Worker: { sandbox: default }\n"
+    "agents:\n  Worker: { model: claude-sonnet-4-6, harness: claude-code, sandbox: default }\n"
     "events:\n  Incident:\n    issue_id: str\n"
 )
 
@@ -147,7 +147,7 @@ def test_dead_trigger_reports_w501(tmp_path):
 def test_golden_snapshot_is_committed():
     # Guards against an accidental missing/empty golden file.
     assert GOLDEN.is_file()
-    assert json.loads(GOLDEN.read_text())["schema_version"] == "1"
+    assert json.loads(GOLDEN.read_text())["schema_version"] == "2"
 
 
 def test_every_section14_code_has_a_fixture():

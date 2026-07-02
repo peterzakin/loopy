@@ -105,7 +105,7 @@ class HarnessError(Exception):
 class JsonProtocolHarness:
     """Base for CLI harnesses that speak the loopy JSON output protocol."""
 
-    RUNTIME: str  # the harness.runtime id this harness implements (set by subclass)
+    RUNTIME: str  # the agent `harness` id this harness implements (set by subclass)
 
     def __init__(
         self,
@@ -120,16 +120,16 @@ class JsonProtocolHarness:
         # runtime is eligible to drive. Agents bound to a *different* runtime are left to
         # their own harness (the router only ever dispatches our runtime's steps to us).
         for name, agent in self._agents.items():
-            if agent.harness.runtime == self.RUNTIME:
+            if agent.harness == self.RUNTIME:
                 try:
-                    validate_model(self.RUNTIME, agent.harness.model)
+                    validate_model(self.RUNTIME, agent.model)
                 except ValueError as exc:
                     raise ValueError(f"agent '{name}': {exc}") from exc
 
     def required_keys(self, agent: AgentSpec) -> set[str]:
         # The model rides along for prefix-keyed runtimes (opencode), whose provider
         # key derives from the model's `provider/` prefix.
-        return {required_model_key(agent.harness.runtime, agent.harness.model)}
+        return {required_model_key(agent.harness, agent.model)}
 
     def missing_keys(self, agent: AgentSpec, env: Mapping[str, str]) -> set[str]:
         """Required keys not satisfiable for `agent` given the sandbox `env`. Default: those

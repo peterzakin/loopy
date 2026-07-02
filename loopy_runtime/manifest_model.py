@@ -17,11 +17,6 @@ class _Model(BaseModel):
     model_config = ConfigDict(extra="ignore", protected_namespaces=())
 
 
-class HarnessSpec(_Model):
-    runtime: str | None = None
-    model: str | None = None
-
-
 class RepoSpec(_Model):
     url: str
     ref: str | None = None
@@ -38,7 +33,12 @@ class SandboxSpec(_Model):
 
 
 class AgentSpec(_Model):
-    harness: HarnessSpec = Field(default_factory=HarnessSpec)
+    # Flat and mandatory (schema v2): `model` names the model the agent runs on,
+    # `harness` the runner that drives it (`claude-code` | `codex` | `opencode`).
+    # Neither is ever inferred from the other; the compiler enforces presence (E507)
+    # and each harness enforces the model's eligibility for its runtime.
+    model: str
+    harness: str
     sandbox: str | None = None
     skills: list[str] = Field(default_factory=list)
 

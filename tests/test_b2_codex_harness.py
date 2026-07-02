@@ -19,7 +19,6 @@ from loopy_runtime.manifest_model import (
     AgentSpec,
     BudgetSpec,
     EventContract,
-    HarnessSpec,
     StepSpec,
 )
 
@@ -50,7 +49,7 @@ def _ctx():
     )
 
 
-AGENT = AgentSpec(harness=HarnessSpec(runtime="codex", model="gpt-5-codex"))
+AGENT = AgentSpec(model="gpt-5-codex", harness="codex")
 
 
 def _harness(events=None):
@@ -146,6 +145,6 @@ def test_run_raises_on_nonzero_exit():
 
 
 def test_construction_rejects_ineligible_model():
-    bad = AgentSpec(harness=HarnessSpec(runtime="codex", model="claude-opus-4-8"))
+    bad = AgentSpec(model="claude-opus-4-8", harness="codex")
     with pytest.raises(ValueError, match="not eligible"):
         CodexHarness({"Fixer": bad})

@@ -8,7 +8,7 @@ from tests.helpers import assert_code, write_project
 from tests.helpers import codes as result_codes
 
 REGISTRY = (
-    "defaults: { agent: { sandbox: default } }\n"
+    "defaults: { agent: { sandbox: default, model: claude-sonnet-4-6, harness: claude-code } }\n"
     "sandboxes: { default: { provider: local } }\n"
     "agents: { Investigator: {} }\n"
     "events:\n"

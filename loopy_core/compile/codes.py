@@ -49,6 +49,8 @@ E503 = "LOOPY-E503"  # an agent.skills[] entry doesn't resolve in skills/ (X2)
 E504 = "LOOPY-E504"  # on:/emits: names an unregistered event (X3)
 E505 = "LOOPY-E505"  # registry limits.workflows names a workflow that doesn't exist (X2)
 E506 = "LOOPY-E506"  # an agent declares no sandbox (every agent must name one) (X2)
+E507 = "LOOPY-E507"  # an agent declares no model/harness (both keys are mandatory) (X2)
+E508 = "LOOPY-E508"  # an agent's model/harness pairing is ineligible or the harness is unknown (X2)
 
 # W5xx — lineage warnings
 W501 = "LOOPY-W501"  # dead trigger — registered on: event with no producer (X5)
@@ -88,6 +90,8 @@ ALL_CODES: frozenset[str] = frozenset(
         E504,
         E505,
         E506,
+        E507,
+        E508,
         W501,
     }
 )

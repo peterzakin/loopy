@@ -27,28 +27,32 @@ def build_demo_manifest() -> Manifest:
     poll + webhook sensors."""
     return Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "compiled_at": _ago(minutes=20).isoformat(),
             "loopy_version": "0.1.0-demo",
             "registry": {
                 "agents": {
                     "Investigator": {
-                        "harness": {"runtime": "claude-code", "model": "claude-sonnet-4-6"},
+                        "model": "claude-sonnet-4-6",
+                        "harness": "claude-code",
                         "sandbox": "default",
                         "skills": ["triage", "repro-authoring"],
                     },
                     "Fixer": {
-                        "harness": {"runtime": "claude-code", "model": "claude-opus-4-8"},
+                        "model": "claude-opus-4-8",
+                        "harness": "claude-code",
                         "sandbox": "default",
                         "skills": ["testing"],
                     },
                     "Reviewer": {
-                        "harness": {"runtime": "codex", "model": "gpt-5-codex"},
+                        "model": "gpt-5-codex",
+                        "harness": "codex",
                         "sandbox": "default",
                         "skills": [],
                     },
                     "Releaser": {
-                        "harness": {"runtime": "claude-code", "model": "claude-haiku-4-5"},
+                        "model": "claude-haiku-4-5",
+                        "harness": "claude-code",
                         "sandbox": "default",
                         "skills": ["release"],
                     },

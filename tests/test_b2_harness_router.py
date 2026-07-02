@@ -13,13 +13,11 @@ from loopy_runtime.harness.claude_code import ClaudeCodeHarness
 from loopy_runtime.harness.codex import CodexHarness
 from loopy_runtime.harness.opencode import OpenCodeHarness
 from loopy_runtime.harness.router import HarnessError, HarnessRouter
-from loopy_runtime.manifest_model import AgentSpec, HarnessSpec, StepSpec
+from loopy_runtime.manifest_model import AgentSpec, StepSpec
 
-CLAUDE_AGENT = AgentSpec(harness=HarnessSpec(runtime="claude-code", model="claude-opus-4-8"))
-CODEX_AGENT = AgentSpec(harness=HarnessSpec(runtime="codex", model="gpt-5-codex"))
-OPENCODE_AGENT = AgentSpec(
-    harness=HarnessSpec(runtime="opencode", model="anthropic/claude-sonnet-4-6")
-)
+CLAUDE_AGENT = AgentSpec(model="claude-opus-4-8", harness="claude-code")
+CODEX_AGENT = AgentSpec(model="gpt-5-codex", harness="codex")
+OPENCODE_AGENT = AgentSpec(model="anthropic/claude-sonnet-4-6", harness="opencode")
 AGENTS = {"Fixer": CLAUDE_AGENT, "Coder": CODEX_AGENT, "Helper": OPENCODE_AGENT}
 
 
@@ -86,14 +84,14 @@ def test_run_dispatches_to_the_agents_harness():
     assert opencode_box.argv[:2] == ["opencode", "run"]
 
 
-def test_rejects_unsupported_runtime_at_construction():
-    agents = {"Mystery": AgentSpec(harness=HarnessSpec(runtime="gemini", model="gemini-2"))}
-    with pytest.raises(ValueError, match="unsupported harness runtime"):
+def test_rejects_unsupported_harness_at_construction():
+    agents = {"Mystery": AgentSpec(model="gemini-2", harness="gemini")}
+    with pytest.raises(ValueError, match="unsupported harness"):
         HarnessRouter(agents)
 
 
 def test_rejects_ineligible_model_at_construction():
-    agents = {"Coder": AgentSpec(harness=HarnessSpec(runtime="codex", model="claude-opus-4-8"))}
+    agents = {"Coder": AgentSpec(model="claude-opus-4-8", harness="codex")}
     with pytest.raises(ValueError, match="not eligible"):
         HarnessRouter(agents)
 

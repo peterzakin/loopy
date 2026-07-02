@@ -18,7 +18,8 @@
 defaults:
   agent:
     sandbox: Reading
-    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
+    model: claude-sonnet-4-6
+    harness: claude-code
 
 sandboxes:
   # Reading desk — reading, ideating, and writing. Needs the paper source and the model API,
@@ -45,7 +46,7 @@ sandboxes:
 
 agents:
   # The reasoning roles get Opus; the bigger model earns its keep on reading and ideation.
-  Researcher: { harness: { model: claude-opus-4-8 }, skills: [paper-reading] }
+  Researcher: { model: claude-opus-4-8, skills: [paper-reading] }
   Engineer:   { sandbox: Lab, skills: [experiment-hygiene] }
   Writer:     {}
 

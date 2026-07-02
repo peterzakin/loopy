@@ -12,7 +12,8 @@
 defaults:
   agent:
     sandbox: BaseSandbox
-    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
+    model: claude-sonnet-4-6
+    harness: claude-code
 
 # Sandbox — compute + egress. `gh` is on PATH so an agent can post review comments via the
 # injected GitHub token; egress is limited to github.com + the model API.

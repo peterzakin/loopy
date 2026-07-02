@@ -195,7 +195,7 @@ def test_runtime_persists_run_into_sqlite_for_the_dashboard(tmp_path):
     db = tmp_path / "state.db"
     manifest = Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "registry": {"sandboxes": {}, "agents": {}, "events": {"Ping": {"fields": {}}}},
             "workflows": {
                 "greet": {

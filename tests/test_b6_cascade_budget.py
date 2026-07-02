@@ -71,7 +71,7 @@ def _loop_manifest(emits: list[str], *, limits: dict | None = None) -> Manifest:
         registry["limits"] = limits
     return Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "registry": registry,
             "workflows": {"loop": {"entry": "tick", "steps": {"tick": _loop_step(emits)}}},
             "sensors": [],
@@ -202,16 +202,18 @@ def _agent_manifest(runtime: str, *, limits: dict | None = None) -> Manifest:
         "body": "go",
         "refs": [],
     }
+    # Any model eligible for the harness under test; the cost gate keys on the harness only.
+    model = {"codex": "gpt-5-codex"}.get(runtime, "claude-sonnet-4-6")
     registry = {
         "sandboxes": {},
-        "agents": {"Coder": {"harness": {"runtime": runtime}}},
+        "agents": {"Coder": {"model": model, "harness": runtime}},
         "events": {"Tick": {"fields": {}}},
     }
     if limits is not None:
         registry["limits"] = limits
     return Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "registry": registry,
             "workflows": {"loop": {"entry": "tick", "steps": {"tick": step}}},
             "sensors": [],
