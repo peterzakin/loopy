@@ -220,7 +220,9 @@ def test_init_wizard_step_order(tmp_path, monkeypatch):
     monkeypatch.setattr(
         loopy_cli, "_offer_public_webhook_url", lambda target: calls.append("url")
     )
-    monkeypatch.setattr(loopy_cli, "_offer_github_auth", lambda target: calls.append("auth"))
+    monkeypatch.setattr(
+        loopy_cli, "_offer_github_auth", lambda target: (calls.append("auth"), True)[1]
+    )
     monkeypatch.setattr(loopy_cli, "_prompt_for_repos", lambda: (calls.append("repos"), [])[1])
     monkeypatch.setattr(
         loopy_cli, "offer_github_webhooks", lambda target: calls.append("webhooks")
@@ -242,6 +244,42 @@ def test_init_wizard_step_order(tmp_path, monkeypatch):
     assert calls == ["url", "auth", "repos", "webhooks"]
     # The webhook-registration offer fires post-scaffold, so the registry it compiles exists.
     assert (tmp_path / "demo" / "registry.yml").is_file()
+
+
+def test_init_without_github_auth_scaffolds_minimal(tmp_path, monkeypatch):
+    """No git auth ⇒ the minimal registry (no workflow), and the repo prompt is skipped
+    entirely — naming repos a repo-less project can't reach would be misleading."""
+    monkeypatch.setattr(loopy_cli, "_offer_public_webhook_url", lambda target: None)
+    # Auth declined / not completed.
+    monkeypatch.setattr(loopy_cli, "_offer_github_auth", lambda target: False)
+
+    def _no_repo_prompt():
+        raise AssertionError("repo prompt must be skipped when git auth is not wired")
+
+    monkeypatch.setattr(loopy_cli, "_prompt_for_repos", _no_repo_prompt)
+    # Keep the rest of the wizard quiet.
+    for name in (
+        "offer_github_webhooks",
+        "_offer_ambient_anthropic_key",
+        "_offer_ambient_daytona_creds",
+        "_offer_redis_bus",
+        "_report_remaining_setup",
+    ):
+        monkeypatch.setattr(loopy_cli, name, lambda *a, **k: None)
+
+    class _Tty:  # force the interactive branch
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(loopy_cli.sys, "stdin", _Tty())
+
+    loopy_cli.init("demo", directory=tmp_path)
+
+    result = compile_project(tmp_path / "demo")
+    assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
+    # The minimal registry: no starter workflow, no declared repo.
+    assert not result.project.workflows
+    assert result.project.registry.sandboxes["BaseSandbox"].repos == []
 
 
 def test_prompt_for_repos_confirms_the_repoless_path(monkeypatch):
