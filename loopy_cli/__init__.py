@@ -370,7 +370,8 @@ def init(
         False,
         "--non-interactive",
         "-y",
-        help="Skip the setup prompts: write the placeholder scaffold verbatim (scripts/CI).",
+        help="Skip the setup prompts (scripts/CI). No repo can be named this way, so this "
+        "writes the minimal no-workflow scaffold.",
     ),
 ) -> None:
     """Scaffold a new Loopy project: registry, a runnable starter workflow, and an env file.
@@ -381,6 +382,10 @@ def init(
     your environment, and recording a Redis connection string if you want the networked
     event bus — then reports whatever's still missing (the same checks as `loopy doctor`).
     `--non-interactive` skips the prompts entirely and just writes the placeholder scaffold.
+
+    The starter workflow needs a repo: loopy is built around agents that work on code, so
+    proceeding without one (strongly discouraged, and confirmed explicitly) writes only a
+    trimmed-down registry.yml plus the env files — no workflow.
     """
     from loopy_cli.scaffold import InvalidProjectName, scaffold_project, validate_project_name
 
@@ -411,8 +416,9 @@ def init(
         _offer_public_webhook_url(target)
         _offer_github_auth(target)
 
-    # Which repo(s) the agent works on — this decides the coding vs orchestrator starter. Blank is
-    # a first-class answer (a repo-less orchestrator), so we never fall back to a placeholder repo.
+    # Which repo(s) the agent works on — this decides whether the starter workflow exists at all.
+    # Blank is allowed but strongly discouraged (it means a bare registry, no workflow), so it is
+    # confirmed explicitly — and we never fall back to a placeholder repo.
     repos = _prompt_for_repos() if interactive else None
 
     try:
@@ -439,9 +445,11 @@ def init(
         # yet); now the scaffold + repos are on disk, so offer it here when the pieces
         # (App creds, LOOPY_PUBLIC_URL, repos) are all present. Self-gating, never raises.
         offer_github_webhooks(target)
-        # A repo-less scaffold is a complete orchestrator, not a half-finished setup — say so.
-        if not repos:
-            _note_orchestrator_mode()
+
+    # A repo-less scaffold is deliberately bare — no starter workflow. Say so on every path
+    # (the non-interactive default is repo-less too), and point at the way out.
+    if not repos:
+        _note_minimal_mode()
 
     # A clean compile is *not* a runnable project: the scaffold ships placeholders on purpose
     # (a fake API key, maybe no git auth). Run the same checks as `loopy doctor` so the user
@@ -450,33 +458,51 @@ def init(
 
 
 def _prompt_for_repos() -> list[str]:
-    """Ask which repo(s) the agent should work on; an empty answer is a first-class choice.
+    """Ask which repo(s) the agent should work on, strongly discouraging the repo-less path.
 
-    A repo is what the starter `codefix` workflow clones to edit and open a PR against. But
-    loopy is still useful with none — you get a workflow orchestrator that just doesn't touch a
-    code repo — so blank means "no repo", not "unfinished", and we never fall back to an
-    unpushable placeholder.
+    A repo is what the starter `codefix` workflow clones to edit and open a PR against —
+    loopy is built around agents that work on code, so without one there is no starter
+    workflow to scaffold, just a trimmed-down registry. Blank is therefore never a silent
+    default: it takes an explicit confirmation (declining re-asks for repos), and we never
+    fall back to an unpushable placeholder.
     """
-    raw = typer.prompt(
-        "  Which repo(s) should the agent work on? (owner/repo, comma-separated; "
-        "blank = no repo)",
-        default="",
-        show_default=False,
-    )
-    return [r.strip() for r in raw.split(",") if r.strip()]
+    while True:
+        raw = typer.prompt(
+            "  Which repo(s) should the agent work on? (owner/repo, comma-separated)",
+            default="",
+            show_default=False,
+        )
+        repos = [r.strip() for r in raw.split(",") if r.strip()]
+        if repos:
+            return repos
+        typer.echo(
+            "  "
+            + typer.style("⚠", fg=typer.colors.YELLOW)
+            + " Loopy is built around agents that work on repos (clone, edit, open a PR)."
+        )
+        typer.echo(
+            typer.style(
+                "    Without one you get a bare registry.yml and no starter workflow — "
+                "there is nothing useful to run until GitHub access is wired.",
+                fg=typer.colors.BRIGHT_BLACK,
+            )
+        )
+        if typer.confirm("  Continue without a repo anyway?", default=False):
+            return []
 
 
-def _note_orchestrator_mode() -> None:
-    """Frame a repo-less scaffold as a real, runnable orchestrator — not a half-finished setup."""
+def _note_minimal_mode() -> None:
+    """A repo-less scaffold is deliberately bare — warn, and name the way out."""
     typer.echo(
         "  "
-        + typer.style("ⓘ", fg=typer.colors.BLUE)
-        + " No repo — scaffolded a workflow orchestrator: a Note → summary + action-items loop."
+        + typer.style("⚠", fg=typer.colors.YELLOW)
+        + " No repo — wrote a minimal scaffold: a trimmed-down registry.yml and env files, "
+        "no starter workflow."
     )
     typer.echo(
         typer.style(
-            "    Try it with `loopy trigger --event Note`. Want code edits instead? Add a repo "
-            "to sandboxes.BaseSandbox.repos and run `loopy auth github`.",
+            "    To make this project useful: run `loopy auth github`, add repo(s) to "
+            "sandboxes.BaseSandbox.repos, then add a workflow (`loopy docs` has the reference).",
             fg=typer.colors.BRIGHT_BLACK,
         )
     )

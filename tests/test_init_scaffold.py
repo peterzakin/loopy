@@ -40,24 +40,24 @@ def test_coding_scaffold_compiles_green(tmp_path):
     assert "codefix" in result.project.workflows
 
 
-def test_orchestrator_scaffold_compiles_green(tmp_path):
-    """No repo ⇒ the non-coding starter: a Note → summary loop that compiles and runs as-is."""
+def test_minimal_scaffold_compiles_green(tmp_path):
+    """No repo ⇒ the minimal scaffold: a trimmed registry with no workflow, valid as written."""
     target = tmp_path / "demo"
     scaffold_project(target, "demo")
 
     result = compile_project(target)
     assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
-    # A real, keepable workflow — not an empty shell or a placeholder to fix.
-    assert "summarize" in result.project.workflows
+    # Deliberately bare: no starter workflow at all — the registry points at wiring GitHub.
+    assert not result.project.workflows
     # No repo declared, and crucially never the old unpushable placeholder.
     assert result.project.registry.sandboxes["BaseSandbox"].repos == []
     assert "octocat" not in (target / "registry.yml").read_text().lower()
 
 
 def test_scaffold_declares_an_agent_per_harness(tmp_path):
-    """No built-in agents: both starters write the explicit yaml for all three harnesses,
+    """No built-in agents: both scaffolds write the explicit yaml for all three harnesses,
     so switching a step's harness is editing a visible declaration, never discovering one."""
-    for label, repos in (("coding", ["me/app"]), ("orch", None)):
+    for label, repos in (("coding", ["me/app"]), ("minimal", None)):
         target = tmp_path / label
         scaffold_project(target, "demo", repos=repos)
         result = compile_project(target)
@@ -105,30 +105,35 @@ def test_coding_scaffold_writes_canonical_layout(tmp_path):
     assert "# demo" in (target / "registry.yml").read_text()
 
 
-def test_orchestrator_scaffold_writes_summarize_layout(tmp_path):
+def test_minimal_scaffold_writes_trimmed_layout(tmp_path):
+    """The no-repo scaffold is just the registry + env files: no workflow, skill, or sensor."""
     target = tmp_path / "demo"
     created = scaffold_project(target, "demo")
 
     rels = {p.as_posix() for p in created}
     assert {
         "registry.yml",
-        "workflows/summarize/summarize.md",
-        "skills/summarize/SKILL.md",
-        "sensors/sensors.py",
         "secrets/base.env",
         "loopy.env",
         ".gitignore",
-    } <= rels
-    # No codefix/PR files leak into the non-coding starter.
-    assert not any("codefix" in r for r in rels)
+        "README.md",
+        "AGENTS.md",
+    } == rels
+    # No starter files leak into the minimal scaffold.
+    assert not (target / "workflows").exists()
+    assert not (target / "skills").exists()
+    assert not (target / "sensors").exists()
     assert "# demo" in (target / "registry.yml").read_text()
+    # Every entry file steers toward wiring GitHub access.
+    assert "loopy auth github" in (target / "registry.yml").read_text()
+    assert "loopy auth github" in (target / "README.md").read_text()
 
 
-def test_scaffold_writes_agents_md_for_both_starters(tmp_path):
-    """Both starters ship an AGENTS.md — the map a coding agent auto-discovers. It must carry
-    the verify loop, the runnability warning, and the starter's own trigger example so an
-    agent can drive the project without fetching docs."""
-    for label, repos, event in (("coding", ["me/app"], "CodeTask"), ("orch", None, "Note")):
+def test_scaffold_writes_agents_md_for_both_scaffolds(tmp_path):
+    """Both scaffolds ship an AGENTS.md — the map a coding agent auto-discovers. It must carry
+    the verify loop, the runnability warning, and a starter tail an agent can act on without
+    fetching docs."""
+    for label, repos in (("coding", ["me/app"]), ("minimal", None)):
         target = tmp_path / label
         scaffold_project(target, "demo", repos=repos)
         agents_md = (target / "AGENTS.md").read_text()
@@ -136,10 +141,16 @@ def test_scaffold_writes_agents_md_for_both_starters(tmp_path):
         assert "loopy compile --check ." in agents_md
         assert "loopy doctor" in agents_md
         assert "green compile is not a runnable project" in agents_md.lower()
-        # The starter-specific tail names this project's own entry event.
-        assert f"--event {event}" in agents_md
         # And the sentinel was actually replaced.
         assert "__STARTER_BLOCK__" not in agents_md
+
+    # The coding tail names the starter's own entry event; the minimal tail says there is no
+    # workflow yet and steers the agent to wire GitHub access before building.
+    coding_md = (tmp_path / "coding" / "AGENTS.md").read_text()
+    assert "--event CodeTask" in coding_md
+    minimal_md = (tmp_path / "minimal" / "AGENTS.md").read_text()
+    assert "without GitHub access" in minimal_md
+    assert "loopy auth github" in minimal_md
 
 
 def test_scaffolded_loopy_env_does_not_block_auth_github(tmp_path):
@@ -218,7 +229,7 @@ def test_init_wizard_step_order(tmp_path, monkeypatch):
     monkeypatch.setattr(loopy_cli, "_offer_ambient_anthropic_key", lambda target: None)
     monkeypatch.setattr(loopy_cli, "_offer_ambient_daytona_creds", lambda target: None)
     monkeypatch.setattr(loopy_cli, "_offer_redis_bus", lambda target: None)
-    monkeypatch.setattr(loopy_cli, "_note_orchestrator_mode", lambda: None)
+    monkeypatch.setattr(loopy_cli, "_note_minimal_mode", lambda: None)
 
     class _Tty:  # force the interactive branch (CliRunner's stdin reports not-a-tty)
         def isatty(self):
@@ -231,6 +242,28 @@ def test_init_wizard_step_order(tmp_path, monkeypatch):
     assert calls == ["url", "auth", "repos", "webhooks"]
     # The webhook-registration offer fires post-scaffold, so the registry it compiles exists.
     assert (tmp_path / "demo" / "registry.yml").is_file()
+
+
+def test_prompt_for_repos_confirms_the_repoless_path(monkeypatch):
+    """Blank is never a silent default: it warns and confirms, and declining re-asks."""
+    answers = iter(["", "me/app"])
+    monkeypatch.setattr("typer.prompt", lambda *a, **k: next(answers))
+    confirms: list[bool] = []
+
+    def _decline(*a, **k):
+        confirms.append(True)
+        return False
+
+    monkeypatch.setattr("typer.confirm", _decline)
+    assert loopy_cli._prompt_for_repos() == ["me/app"]
+    assert len(confirms) == 1  # the blank answer was challenged before the re-ask
+
+
+def test_prompt_for_repos_allows_repoless_only_after_confirm(monkeypatch):
+    """Confirming the warning is the only way to proceed repo-less."""
+    monkeypatch.setattr("typer.prompt", lambda *a, **k: "")
+    monkeypatch.setattr("typer.confirm", lambda *a, **k: True)
+    assert loopy_cli._prompt_for_repos() == []
 
 
 @pytest.mark.parametrize("bad", ["", "  ", ".", "..", "a/b", "a\\b", "-leading", "/abs"])
@@ -541,9 +574,10 @@ def test_init_non_interactive_writes_placeholder_scaffold(tmp_path, monkeypatch)
     assert "2 things left" in result.output
     assert "ANTHROPIC_API_KEY" in result.output
     assert "DAYTONA_API_KEY" in result.output
-    # No repo ⇒ the non-coding orchestrator starter, never an unpushable placeholder repo.
+    # No repo ⇒ the minimal scaffold: no workflow, and the output says so loudly.
+    assert "no starter workflow" in result.output
+    assert not (target / "workflows").exists()
     registry = (target / "registry.yml").read_text()
-    assert "summarize" in registry
     assert "octocat" not in registry.lower()
 
 
