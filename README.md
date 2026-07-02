@@ -37,6 +37,24 @@ interactive: it asks which repo(s) the agent should work on, offers to fill in c
 finds in your environment (`ANTHROPIC_API_KEY`, `DAYTONA_API_KEY`), and finishes by running the
 same checks as `loopy doctor` so you know what's left before a first run.
 
+## Using Loopy with an AI agent
+
+Most first drafts of a loop are written by a coding agent ("build me a loop that…"), so the
+toolchain is built to be driven headlessly:
+
+- `loopy init <name> --non-interactive` scaffolds without prompts (a missing TTY is
+  auto-detected too), and every scaffolded project ships an **`AGENTS.md`** — the one-page
+  map Claude Code, Codex, and OpenCode auto-discover: authoring rules, the verify loop, the
+  secrets model.
+- **`loopy docs`** prints the full authoring reference as markdown straight from the CLI
+  (version-matched to the install, works offline); `loopy docs errors` prints the stable
+  `LOOPY-E` diagnostic catalog.
+- The verify loop is exit-code-clean: `loopy compile --check` (valid?), `loopy doctor`
+  (runnable?), and `loopy trigger --json` (one run end-to-end, full record on stdout).
+- The one command that needs a human is `loopy auth github` (a browser flow). The headless
+  alternative is a `GITHUB_TOKEN` (`contents:write` + `pull_requests:write`) in the
+  sandbox's `env_file`.
+
 ## Workflows
 
 A **workflow** is a directory. Inside it:
