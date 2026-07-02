@@ -446,12 +446,13 @@ def _offer_ambient_anthropic_key(target: Path) -> None:
 def _offer_ambient_daytona_creds(target: Path) -> None:
     """If `DAYTONA_API_KEY` is in the environment, offer to write it into the control-plane env.
 
-    The default scaffold's sandbox is `provider: daytona`, which needs `DAYTONA_API_KEY` (and
-    optionally `DAYTONA_API_URL`) in `loopy.env` to run — the scaffold ships those as commented
-    placeholders. Most people trying loopy with Daytona already have the key exported, so reuse
-    it on the spot rather than making them hand-edit `loopy.env`. `DAYTONA_API_URL` is only
-    carried along when the key is present (a URL alone can't authenticate). Skips silently when
-    no key is in the environment, or when `loopy.env` already has one (don't clobber).
+    The default scaffold's sandbox is `provider: daytona`, which needs `DAYTONA_API_KEY` in
+    `loopy.env` to run — the scaffold ships it as a commented placeholder. Most people trying
+    loopy with Daytona already have the key exported, so reuse it on the spot rather than making
+    them hand-edit `loopy.env`. `DAYTONA_API_URL` (an override for non-prod Daytona deployments;
+    the SDK defaults to prod) is only carried along when the key is present (a URL alone can't
+    authenticate). Skips silently when no key is in the environment, or when `loopy.env` already
+    has one (don't clobber).
     """
     from loopy_runtime.secrets import load_control_plane_env, write_control_plane_env
 

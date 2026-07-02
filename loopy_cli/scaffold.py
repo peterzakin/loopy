@@ -169,7 +169,6 @@ _LOOPY_ENV = """\
 
 # --- Daytona (the default sandbox; required when a sandbox uses provider: daytona) ---
 # DAYTONA_API_KEY=
-# DAYTONA_API_URL=
 
 # --- Redis event bus ---
 # Set REDIS_URL to run on the networked Redis bus; `loopy run` picks it up automatically
@@ -349,7 +348,6 @@ _ORCH_LOOPY_ENV = """\
 
 # --- Daytona (the default sandbox; required when a sandbox uses provider: daytona) ---
 # DAYTONA_API_KEY=
-# DAYTONA_API_URL=
 
 # --- Redis event bus ---
 # Set REDIS_URL to run on the networked Redis bus; `loopy run` picks it up automatically
