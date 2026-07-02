@@ -237,7 +237,7 @@ def test_init_wizard_step_order(tmp_path, monkeypatch):
 
     monkeypatch.setattr(loopy_cli.sys, "stdin", _Tty())
 
-    loopy_cli.init("demo", directory=tmp_path, non_interactive=False)
+    loopy_cli.init("demo", directory=tmp_path)
 
     assert calls == ["url", "auth", "repos", "webhooks"]
     # The webhook-registration offer fires post-scaffold, so the registry it compiles exists.
@@ -559,29 +559,11 @@ def test_normalize_public_url_rejects(bad):
         loopy_cli.webhooks.normalize_public_url(bad)
 
 
-def test_init_non_interactive_writes_placeholder_scaffold(tmp_path, monkeypatch):
-    """`--non-interactive` skips every prompt and leaves the verbatim placeholder scaffold."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-realkey0123456789")  # would be offered if asked
+def test_init_refuses_without_a_terminal(tmp_path):
+    """There is no headless mode: init is a wizard, so a missing TTY is a hard error —
+    it never silently writes the discouraged repo-less scaffold."""
+    result = runner.invoke(app, ["init", "demo", "--dir", str(tmp_path)])
 
-    result = runner.invoke(app, ["init", "demo", "--dir", str(tmp_path), "--non-interactive"])
-
-    assert result.exit_code == 0, result.output
-    target = tmp_path / "demo"
-    assert _key_line(target) == f"ANTHROPIC_API_KEY={PLACEHOLDER_ANTHROPIC_KEY}"
-    # The doctor-backed summary replaces the old static checklist. With no repo (the
-    # non-interactive default), two gaps remain: the placeholder model key and the missing
-    # DAYTONA_API_KEY the scaffold's `provider: daytona` sandbox needs.
-    assert "2 things left" in result.output
-    assert "ANTHROPIC_API_KEY" in result.output
-    assert "DAYTONA_API_KEY" in result.output
-    # No repo ⇒ the minimal scaffold: no workflow, and the output says so loudly.
-    assert "no starter workflow" in result.output
-    assert not (target / "workflows").exists()
-    registry = (target / "registry.yml").read_text()
-    assert "octocat" not in registry.lower()
-
-
-def test_init_non_interactive_requires_name(tmp_path):
-    result = runner.invoke(app, ["init", "--dir", str(tmp_path), "--non-interactive"])
     assert result.exit_code == 1
-    assert "name is required" in result.output
+    assert "needs a terminal" in result.output
+    assert not (tmp_path / "demo").exists()  # nothing scaffolded on refusal

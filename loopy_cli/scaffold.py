@@ -364,10 +364,9 @@ gitignored — never commit them, and never write a secret into `registry.yml` o
 | `loopy webhooks github` | register GitHub repo webhooks (`loopy webhooks list` = delivery URLs) |
 | `loopy docs [topic]` | this reference in full; `loopy docs errors` = the diagnostic catalog |
 
-Headless notes: `loopy init <name> --non-interactive` scaffolds without prompts (a
-missing TTY is auto-detected too). `loopy auth github` needs a human and a browser — ask
-the user to run it, or put a `GITHUB_TOKEN` (contents:write + pull_requests:write) in
-`secrets/base.env` instead.
+Headless notes: `loopy init` and `loopy auth github` are interactive — both need a human
+on a terminal (auth also opens a browser), so ask the user to run them. For git auth a
+`GITHUB_TOKEN` (contents:write + pull_requests:write) in `secrets/base.env` works instead.
 
 ## This project's starter
 

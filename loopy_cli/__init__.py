@@ -366,22 +366,16 @@ def init(
     directory: Path = typer.Option(
         Path("."), "--dir", help="Parent directory to create the project under (default: cwd)."
     ),
-    non_interactive: bool = typer.Option(
-        False,
-        "--non-interactive",
-        "-y",
-        help="Skip the setup prompts (scripts/CI). No repo can be named this way, so this "
-        "writes the minimal no-workflow scaffold.",
-    ),
 ) -> None:
     """Scaffold a new Loopy project: registry, a runnable starter workflow, and an env file.
 
-    By default a short wizard offers to close the gaps the scaffold leaves on purpose —
-    recording the public base URL webhooks are delivered at, wiring git auth (and, with
-    both in place, registering GitHub webhooks), reusing an `ANTHROPIC_API_KEY` already in
-    your environment, and recording a Redis connection string if you want the networked
-    event bus — then reports whatever's still missing (the same checks as `loopy doctor`).
-    `--non-interactive` skips the prompts entirely and just writes the placeholder scaffold.
+    A short wizard drives the whole thing — it offers to close the gaps the scaffold leaves
+    on purpose: recording the public base URL webhooks are delivered at, wiring git auth
+    (and, with both in place, registering GitHub webhooks), reusing an `ANTHROPIC_API_KEY`
+    already in your environment, and recording a Redis connection string if you want the
+    networked event bus — then reports whatever's still missing (the same checks as
+    `loopy doctor`). There is no non-interactive mode: setup is a conversation with a human
+    (git auth alone needs a browser), so `init` requires a terminal.
 
     The starter workflow needs a repo: loopy is built around agents that work on code, so
     proceeding without one (strongly discouraged, and confirmed explicitly) writes only a
@@ -389,13 +383,17 @@ def init(
     """
     from loopy_cli.scaffold import InvalidProjectName, scaffold_project, validate_project_name
 
-    # Prompt only when we actually have a human on a terminal; `--non-interactive` forces off.
-    interactive = not non_interactive and sys.stdin.isatty()
+    # The wizard is the command — without a human on a terminal there's nobody to answer the
+    # repo question (and `loopy auth github` needs a browser), so refuse rather than guess.
+    if not sys.stdin.isatty():
+        typer.echo(
+            "error: loopy init is interactive and needs a terminal. "
+            "Ask a human to run it — there is no headless mode.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
 
     if not name:
-        if not interactive:
-            typer.echo("error: project name is required with --non-interactive", err=True)
-            raise typer.Exit(code=1)
         name = typer.prompt("Project name")
     try:
         name = validate_project_name(name)
@@ -412,14 +410,13 @@ def init(
     # auth ends by offering webhook registration, which needs the URL already recorded. Both
     # steps write loopy.env into `target`; `scaffold_project` (run below) preserves those
     # values under its own template.
-    if interactive:
-        _offer_public_webhook_url(target)
-        _offer_github_auth(target)
+    _offer_public_webhook_url(target)
+    _offer_github_auth(target)
 
     # Which repo(s) the agent works on — this decides whether the starter workflow exists at all.
     # Blank is allowed but strongly discouraged (it means a bare registry, no workflow), so it is
     # confirmed explicitly — and we never fall back to a placeholder repo.
-    repos = _prompt_for_repos() if interactive else None
+    repos = _prompt_for_repos()
 
     try:
         created = scaffold_project(target, name, repos=repos)
@@ -437,17 +434,16 @@ def init(
     typer.echo()
 
     # Offer to close the remaining gaps the scaffold leaves on purpose before reporting what's left.
-    if interactive:
-        _offer_ambient_anthropic_key(target)
-        _offer_ambient_daytona_creds(target)
-        _offer_redis_bus(target)
-        # Webhook registration couldn't be offered during auth above (no registry existed
-        # yet); now the scaffold + repos are on disk, so offer it here when the pieces
-        # (App creds, LOOPY_PUBLIC_URL, repos) are all present. Self-gating, never raises.
-        offer_github_webhooks(target)
+    _offer_ambient_anthropic_key(target)
+    _offer_ambient_daytona_creds(target)
+    _offer_redis_bus(target)
+    # Webhook registration couldn't be offered during auth above (no registry existed
+    # yet); now the scaffold + repos are on disk, so offer it here when the pieces
+    # (App creds, LOOPY_PUBLIC_URL, repos) are all present. Self-gating, never raises.
+    offer_github_webhooks(target)
 
-    # A repo-less scaffold is deliberately bare — no starter workflow. Say so on every path
-    # (the non-interactive default is repo-less too), and point at the way out.
+    # A repo-less scaffold is deliberately bare — no starter workflow. Repeat the warning the
+    # user already confirmed past, and point at the way out.
     if not repos:
         _note_minimal_mode()
 
