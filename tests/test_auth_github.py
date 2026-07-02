@@ -477,6 +477,118 @@ def test_run_github_auth_rejects_bad_public_url(monkeypatch, tmp_path):
     assert "webhook_url" not in captured  # never reached the browser dance
 
 
+# --- webhook retrofit: `loopy auth webhook` ----------------------------------
+
+
+def test_webhook_config_api_shapes(monkeypatch, rsa_keys):
+    # The three App-JWT calls the retrofit path rides: read the App, read the hook
+    # config, and PATCH it with url + secret.
+    private_pem, _ = rsa_keys
+    creds = github_app.AppCredentials(app_id="1", private_key_pem=private_pem)
+    calls: list[dict] = []
+
+    def fake(method, url, *, headers=None, payload=None):
+        calls.append({"method": method, "url": url, "headers": headers, "payload": payload})
+        return {}
+
+    monkeypatch.setattr(github_app, "_request_json", fake)
+    github_app.get_app(creds)
+    github_app.get_webhook_config(creds)
+    github_app.update_webhook_config(creds, url="https://x/hooks/github", secret="s3cr3t")
+
+    assert (calls[0]["method"], calls[1]["method"], calls[2]["method"]) == ("GET", "GET", "PATCH")
+    assert calls[0]["url"].endswith("/app")
+    assert calls[1]["url"].endswith("/app/hook/config")
+    assert calls[2]["url"].endswith("/app/hook/config")
+    assert calls[2]["payload"] == {
+        "url": "https://x/hooks/github",
+        "secret": "s3cr3t",
+        "content_type": "json",
+    }
+    assert all(c["headers"]["Authorization"].startswith("Bearer ") for c in calls)
+
+
+def test_app_settings_url_personal_vs_org():
+    personal = {"slug": "loopy-abcd", "owner": {"login": "me", "type": "User"}}
+    org = {"slug": "loopy-abcd", "owner": {"login": "acme", "type": "Organization"}}
+    assert auth.app_settings_url(personal) == "https://github.com/settings/apps/loopy-abcd"
+    assert (
+        auth.app_settings_url(org)
+        == "https://github.com/organizations/acme/settings/apps/loopy-abcd"
+    )
+
+
+def _stub_webhook_setup(monkeypatch, *, current_url=None, events=None):
+    """Stub the network edges of run_webhook_setup; returns the captured PATCH kwargs."""
+    monkeypatch.delenv("LOOPY_PUBLIC_URL", raising=False)
+    monkeypatch.setattr(auth, "_load_creds", lambda root: object())
+    monkeypatch.setattr(github_app, "get_webhook_config", lambda creds: {"url": current_url})
+    monkeypatch.setattr(
+        github_app,
+        "get_app",
+        lambda creds: {"slug": "loopy-abcd", "owner": {"type": "User"}, "events": events or []},
+    )
+    patched: dict = {}
+
+    def fake_update(creds, *, url, secret, content_type="json"):
+        patched.update(url=url, secret=secret)
+        return {}
+
+    monkeypatch.setattr(github_app, "update_webhook_config", fake_update)
+    return patched
+
+
+def test_webhook_setup_points_hook_and_stores_secret(monkeypatch, tmp_path):
+    # The retrofit path: App exists, URL came later. One command points the App's webhook
+    # at <public_url>/hooks/github and lands a locally-minted secret in loopy.env.
+    (tmp_path / "registry.yml").write_text("public_url: https://loopy.example.com\n")
+    patched = _stub_webhook_setup(monkeypatch, current_url=None)
+
+    auth.run_webhook_setup(root=tmp_path)
+
+    assert patched["url"] == "https://loopy.example.com/hooks/github"
+    env = load_control_plane_env(tmp_path)
+    assert env["GITHUB_WEBHOOK_SECRET"] == patched["secret"]  # both sides share one secret
+    assert len(patched["secret"]) >= 32
+    assert "loopy.env" in (tmp_path / ".gitignore").read_text()  # secret file gitignored
+
+
+def test_webhook_setup_is_idempotent_when_already_pointed(monkeypatch, tmp_path):
+    # Already pointing at the right URL with a stored secret → no PATCH, no secret churn
+    # (a rewrite would silently invalidate the secret GitHub already has).
+    (tmp_path / "registry.yml").write_text("public_url: https://loopy.example.com\n")
+    write_control_plane_env(tmp_path, {"GITHUB_WEBHOOK_SECRET": "existing"})
+    patched = _stub_webhook_setup(
+        monkeypatch, current_url="https://loopy.example.com/hooks/github"
+    )
+
+    auth.run_webhook_setup(root=tmp_path)
+
+    assert patched == {}  # nothing rewritten
+    assert load_control_plane_env(tmp_path)["GITHUB_WEBHOOK_SECRET"] == "existing"
+
+
+def test_webhook_setup_requires_a_public_url(monkeypatch, tmp_path):
+    import typer
+
+    monkeypatch.delenv("LOOPY_PUBLIC_URL", raising=False)
+    with pytest.raises(typer.Exit):
+        auth.run_webhook_setup(root=tmp_path)  # no registry.yml, no env, no flag
+
+
+def test_webhook_setup_requires_app_credentials(monkeypatch, tmp_path):
+    import typer
+
+    monkeypatch.delenv("LOOPY_PUBLIC_URL", raising=False)
+
+    def raise_missing(root):
+        raise github_app.MissingCredentials("GITHUB_APP_ID is not set")
+
+    monkeypatch.setattr(auth, "_load_creds", raise_missing)
+    with pytest.raises(typer.Exit):
+        auth.run_webhook_setup(root=tmp_path, public_url="https://loopy.example.com")
+
+
 def test_wait_for_installation_times_out(monkeypatch, tmp_path):
     # Never installed → the wait gives up at the deadline and returns None (the caller
     # then points the user at `loopy auth status`) rather than blocking forever.

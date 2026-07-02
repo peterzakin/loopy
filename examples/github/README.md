@@ -54,10 +54,15 @@ GitHub ──webhook(/hooks/github, X-Hub-Signature-256)──▶ loopy ingress
    lands in `loopy.env` — deliveries are signature-verified with no manual webhook setup.
    (Pass `--no-webhook` to skip that and keep the App a pure credential source.)
 
-   *Manual fallback* (App created before the URL existed, or a plain repo webhook): in the
-   App's (or repo's) webhook settings set Payload URL `<public_url>/hooks/github`, content
-   type `application/json`, a secret you generate (`openssl rand -hex 32`), and the events
-   you trigger on — then put that secret in `loopy.env` as `GITHUB_WEBHOOK_SECRET`.
+   *App created before the URL existed?* Run `loopy auth webhook` — it points the existing
+   App's webhook at `<public_url>/hooks/github`, generates a secret, and stores it in
+   `loopy.env` in one motion. GitHub has no API for the webhook's Active flag or the App's
+   event subscriptions, so the command links the settings page when those still need a click.
+
+   *Plain repo webhook instead of an App:* in the repo's webhook settings set Payload URL
+   `<public_url>/hooks/github`, content type `application/json`, a secret you generate
+   (`openssl rand -hex 32`, mirrored into `loopy.env` as `GITHUB_WEBHOOK_SECRET`), and the
+   events you trigger on.
 3. **Model + sandbox creds:** `cp base.env.example secrets/base.env` and fill it in.
 
 ## Run it

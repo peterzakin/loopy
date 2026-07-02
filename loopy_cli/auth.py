@@ -400,6 +400,26 @@ def _configured_public_url(root: str | Path) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+def _resolve_public_url(root: str | Path, explicit: str | None) -> str | None:
+    """Resolve and normalize the public base URL, or None when the project has none.
+
+    Precedence: an explicit value (a `--public-url` flag, or the init wizard's
+    just-collected answer) > the configured sources (`LOOPY_PUBLIC_URL` env,
+    registry.yml `public_url`). A malformed URL exits with an error rather than being
+    baked into a GitHub App, where it would surface as silent non-delivery much later.
+    """
+    from loopy_core.registry.loader import normalize_public_url
+
+    raw = explicit if explicit and explicit.strip() else _configured_public_url(root)
+    if not raw:
+        return None
+    try:
+        return normalize_public_url(raw)
+    except ValueError as exc:
+        typer.echo(f"error: invalid public URL: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
 def run_github_auth(
     *,
     org: str | None = None,
@@ -437,15 +457,9 @@ def run_github_auth(
 
     webhook_url: str | None = None
     if not no_webhook:
-        from loopy_core.registry.loader import normalize_public_url
-
-        raw = public_url if public_url and public_url.strip() else _configured_public_url(root)
-        if raw:
-            try:
-                webhook_url = normalize_public_url(raw) + GITHUB_WEBHOOK_PATH
-            except ValueError as exc:
-                typer.echo(f"error: invalid public URL: {exc}", err=True)
-                raise typer.Exit(code=1) from exc
+        base = _resolve_public_url(root, public_url)
+        if base:
+            webhook_url = base + GITHUB_WEBHOOK_PATH
 
     app_name = name or default_app_name(org)
     typer.echo(typer.style("\n  🔐  loopy auth github", fg=typer.colors.CYAN, bold=True))
@@ -478,8 +492,8 @@ def run_github_auth(
             )
         else:
             typer.echo(
-                "  ⓘ GitHub returned no webhook secret — set GITHUB_WEBHOOK_SECRET in "
-                "loopy.env to the App's webhook secret so deliveries are verified"
+                "  ⓘ GitHub returned no webhook secret — run `loopy auth webhook` to "
+                "re-point the webhook with a fresh secret"
             )
 
     slug = conversion.get("slug")
@@ -537,6 +551,125 @@ def github(
         public_url=public_url,
         no_webhook=no_webhook,
     )
+
+
+def app_settings_url(app_info: Mapping) -> str:
+    """The App's settings page — where the webhook's Active flag and event subscriptions live."""
+    slug = app_info.get("slug", "")
+    owner = app_info.get("owner") or {}
+    if owner.get("type") == "Organization":
+        return f"https://github.com/organizations/{owner.get('login')}/settings/apps/{slug}"
+    return f"https://github.com/settings/apps/{slug}"
+
+
+def run_webhook_setup(*, root: Path = Path("."), public_url: str | None = None) -> None:
+    """Point the already-created App's webhook at the project's public URL (the retrofit path).
+
+    `loopy auth github` registers the webhook at App *creation* when a public URL is already
+    known — the only moment GitHub mints the secret for us. This covers the other order: the
+    App exists, the URL came later. It generates a secret locally, PATCHes the App's webhook
+    config to `<public-url>/hooks/github` with it, and stores it in loopy.env — so URL and
+    secret need no hand-copying. What the API *can't* do is flip the webhook's Active flag or
+    subscribe the App to events (App-settings-only), so the command ends by pointing at the
+    exact settings page when those still need a click.
+    """
+    from loopy_runtime.scm import github_app
+    from loopy_runtime.secrets import (
+        CONTROL_PLANE_ENV_FILE,
+        load_control_plane_env,
+        write_control_plane_env,
+    )
+
+    base = _resolve_public_url(root, public_url)
+    if not base:
+        typer.echo(
+            "error: no public URL configured — set `public_url` in registry.yml (or "
+            "LOOPY_PUBLIC_URL / --public-url) so there's an address to register.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    desired = base + GITHUB_WEBHOOK_PATH
+
+    try:
+        creds = _load_creds(root)
+    except github_app.MissingCredentials as exc:
+        typer.echo(f"error: no GitHub App configured ({exc}) — run `loopy auth github` first.")
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(typer.style("\n  🔗  loopy auth webhook", fg=typer.colors.CYAN, bold=True))
+    typer.echo(typer.style("  " + "─" * 40, fg=typer.colors.BRIGHT_BLACK))
+
+    try:
+        current = github_app.get_webhook_config(creds)
+    except github_app.GitHubAppError as exc:
+        typer.echo(f"error: couldn't read the App's webhook config: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if current.get("url") == desired and load_control_plane_env(root).get(
+        "GITHUB_WEBHOOK_SECRET"
+    ):
+        typer.echo(
+            typer.style("  ✓", fg=typer.colors.GREEN)
+            + f" webhook already points at {desired} and a secret is stored — nothing to do"
+        )
+    else:
+        # GitHub only hands out a secret at App creation; on the retrofit path we mint our
+        # own and set both sides of it (the App's config and loopy.env) in one motion.
+        secret = secrets.token_hex(32)
+        try:
+            github_app.update_webhook_config(creds, url=desired, secret=secret)
+        except github_app.GitHubAppError as exc:
+            typer.echo(f"error: couldn't update the App's webhook config: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        env_path = write_control_plane_env(root, {"GITHUB_WEBHOOK_SECRET": secret})
+        _ensure_gitignored(Path(root), CONTROL_PLANE_ENV_FILE)
+        typer.echo(
+            typer.style("  ✓", fg=typer.colors.GREEN)
+            + f" webhook pointed at {desired} — new secret stored in {env_path} (gitignored)"
+        )
+
+    # The API stops here: Active + event subscriptions are settings-page-only. Check what
+    # we can see (the subscribed events ride the App record) and say exactly what's left.
+    try:
+        app_info = github_app.get_app(creds)
+    except github_app.GitHubAppError as exc:
+        typer.echo(f"  (couldn't verify event subscriptions: {exc})")
+        return
+    settings = app_settings_url(app_info)
+    events = app_info.get("events") or []
+    if events:
+        typer.echo(f"  subscribed events: {', '.join(sorted(events))}")
+        typer.echo(
+            typer.style(
+                f"  If deliveries don't arrive, confirm the webhook is Active: {settings}",
+                fg=typer.colors.BRIGHT_BLACK,
+            )
+        )
+    else:
+        typer.echo(
+            "  ⚠ the App subscribes to no events yet, so GitHub will deliver nothing."
+        )
+        typer.echo("    Finish in the App's settings (no API exists for these two):")
+        typer.echo(typer.style(f"    {settings}", fg=typer.colors.BLUE))
+        typer.echo(
+            "    → check 'Active' under Webhook, and pick events under 'Permissions & "
+            "events' (Pull requests, Issues, Issue comments, Pushes cover the built-ins)"
+        )
+    typer.echo()
+
+
+@auth_app.command()
+def webhook(
+    root: Path = typer.Option(Path("."), "--root", help="Project root (where loopy.env lives)."),
+    public_url: str | None = typer.Option(
+        None,
+        "--public-url",
+        help="Public base URL to register (default: LOOPY_PUBLIC_URL, else registry.yml "
+        "public_url).",
+    ),
+) -> None:
+    """Point the configured GitHub App's webhook at this project's public URL."""
+    run_webhook_setup(root=root, public_url=public_url)
 
 
 @auth_app.command()

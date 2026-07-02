@@ -1262,7 +1262,8 @@ def run(
             elif not warned_unverified:
                 typer.echo(
                     "warning: GITHUB_WEBHOOK_SECRET not set; /hooks/github signatures are "
-                    "unverified (dev only — set it before exposing this endpoint)",
+                    "unverified (dev only — run `loopy auth webhook` to register the webhook "
+                    "and store a secret before exposing this endpoint)",
                     err=True,
                 )
                 warned_unverified = True

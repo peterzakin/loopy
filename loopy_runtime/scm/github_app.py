@@ -156,6 +156,38 @@ def exchange_manifest_code(code: str, *, base_url: str = GITHUB_API) -> dict:
     return _request_json("POST", f"{base_url}/app-manifests/{code}/conversions")
 
 
+def get_app(creds: AppCredentials, *, base_url: str = GITHUB_API) -> dict:
+    """The authenticated App's own record — slug, owner, subscribed events (App-JWT auth)."""
+    return _request_json("GET", f"{base_url}/app", headers=_bearer(creds))
+
+
+def get_webhook_config(creds: AppCredentials, *, base_url: str = GITHUB_API) -> dict:
+    """The App's webhook configuration `{url, content_type, ...}` (App-JWT auth)."""
+    return _request_json("GET", f"{base_url}/app/hook/config", headers=_bearer(creds))
+
+
+def update_webhook_config(
+    creds: AppCredentials,
+    *,
+    url: str,
+    secret: str,
+    content_type: str = "json",
+    base_url: str = GITHUB_API,
+) -> dict:
+    """Point the App's webhook at `url`, signed with `secret` (App-JWT auth).
+
+    Mind the API's limits: this updates the webhook *config* only. The webhook's
+    Active flag and the App's event subscriptions live in App settings and have no
+    API — callers should point the user there for those.
+    """
+    return _request_json(
+        "PATCH",
+        f"{base_url}/app/hook/config",
+        headers=_bearer(creds),
+        payload={"url": url, "secret": secret, "content_type": content_type},
+    )
+
+
 def find_installation(
     creds: AppCredentials, owner: str, repo: str, *, base_url: str = GITHUB_API
 ) -> dict:
