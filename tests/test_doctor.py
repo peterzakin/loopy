@@ -12,6 +12,7 @@ import pytest
 
 from loopy_cli.doctor import (
     PLACEHOLDER_REPO,
+    _placeholder_reason,
     _repo_slug,
     check_repo_access,
     diagnose,
@@ -161,6 +162,66 @@ def test_non_daytona_provider_needs_no_daytona_key(tmp_path):
 )
 def test_repo_slug_normalizes_to_starter(url):
     assert _repo_slug(url) == PLACEHOLDER_REPO
+
+
+# --- the placeholder-value heuristic (warn, never error) --------------------
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "sk-ant-...",  # leftover scaffold stub
+        "ghp_abc123 # my prod token",  # inline comment folded into a literal dotenv value
+        "<your-key-here>",  # angle-bracket template
+        "changeme",
+        "your-token",
+        "REPLACE_ME",
+        "example.com",
+        "XXXXXXXX",
+    ],
+)
+def test_placeholder_reason_flags_placeholder_values(value):
+    assert _placeholder_reason(value) is not None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "sk-ant-real-key-9f3a2b",  # a plausible real key
+        "ghp_16charsofrealtoken",
+        "redis://localhost:6379",
+        "",  # empty is "unset", not a placeholder
+        "  ",
+    ],
+)
+def test_placeholder_reason_passes_real_values(value):
+    assert _placeholder_reason(value) is None
+
+
+def test_inline_comment_in_env_file_is_a_warning(tmp_path):
+    # A user pastes a real key but leaves an inline `# comment`; the literal dotenv value now
+    # carries the comment and breaks at run. doctor must warn (not error) on it.
+    root = tmp_path / "demo"
+    scaffold_project(root, "demo")
+    dev = root / "secrets/base.env"
+    dev.write_text(dev.read_text().replace("sk-ant-...", "sk-ant-real # prod key"))
+
+    findings = _diagnose(root)
+    hits = [f for f in findings if f.level == "warn" and "ANTHROPIC_API_KEY" in f.message]
+    assert len(hits) == 1
+    assert "#" in hits[0].message
+    # ...and it is a warn, not the hard error reserved for the exact scaffold stub.
+    assert not any(f.level == "error" and "ANTHROPIC_API_KEY" in f.message for f in findings)
+
+
+def test_real_key_produces_no_placeholder_warning(tmp_path):
+    # A genuine-looking value must not trip the heuristic (no false-positive warnings).
+    root = tmp_path / "demo"
+    scaffold_project(root, "demo")
+    _fix_key(root)  # writes sk-ant-real-key
+
+    findings = _diagnose(root, control_plane_env={"DAYTONA_API_KEY": "dtn-real"})
+    assert findings == [], [f.message for f in findings]
 
 
 # --- check_repo_access: the live install/repo-reachability preflight --------
