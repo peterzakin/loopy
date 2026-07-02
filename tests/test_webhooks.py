@@ -306,7 +306,7 @@ def test_cli_github_requires_public_url(tmp_path, monkeypatch):
 
 
 def test_cli_github_requires_repos(tmp_path, monkeypatch):
-    """The orchestrator starter has no repos — nothing to hang a repo webhook on."""
+    """The minimal no-repo scaffold has no repos — nothing to hang a repo webhook on."""
     target = tmp_path / "demo"
     scaffold_project(target, "demo")  # repo-less
     monkeypatch.delenv("LOOPY_PUBLIC_URL", raising=False)
@@ -361,7 +361,7 @@ def test_cli_list_without_url_points_at_the_setting(tmp_path, monkeypatch):
 
 def test_cli_list_with_no_webhook_sensors(tmp_path):
     target = tmp_path / "demo"
-    scaffold_project(target, "demo")  # poll-only starter
+    scaffold_project(target, "demo")  # minimal scaffold — no sensors at all
 
     result = runner.invoke(app, ["webhooks", "list", "--root", str(target)])
 

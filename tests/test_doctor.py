@@ -61,7 +61,7 @@ def test_starter_repo_scaffold_flags_all_three_gaps(tmp_path):
 
 
 def test_blank_repo_scaffold_flags_only_the_model_key(tmp_path):
-    # The default scaffold ships no repo: a valid workflow orchestrator. The only gap is the
+    # The no-repo scaffold is a minimal registry with no workflow. The only gap is the
     # placeholder model key — there's no repo to push to, so no repo gap and no git auth to wire.
     root = tmp_path / "demo"
     scaffold_project(root, "demo")
@@ -274,7 +274,7 @@ def test_check_repo_access_flags_uninstalled_app(tmp_path, monkeypatch):
 
 
 def test_check_repo_access_skips_when_no_repos(tmp_path, monkeypatch):
-    # An orchestrator project clones nothing, so there's nothing to verify — and no network call.
+    # A repo-less project clones nothing, so there's nothing to verify — and no network call.
     registry = _registry(tmp_path, [])
 
     def boom(*_a, **_k):
