@@ -256,81 +256,99 @@ Not part of the built-in-integration PR, but the natural companion command — t
 `loopy auth github` (`loopy_cli/auth.py`). It scripts the Custom/Internal Integration setup so
 the user doesn't click through Sentry's Developer Settings by hand.
 
-### How it necessarily differs from `loopy auth github`
+### The assumption: a Sentry auth token is already in the environment
 
-`loopy auth github` uses GitHub's **App manifest flow**: a browser round-trip that *creates an
-app from nothing* (no pre-existing credential) and hands back the App id + private key. Sentry
-has **no equivalent** for internal integrations, which drives three differences:
+`loopy auth github` runs a browser **App manifest flow** because GitHub lets you create an app
+from nothing. Sentry has no such flow for internal integrations — creation is a plain
+`POST .../sentry-apps/` that needs an existing auth token. We assume that token is already
+present as **`SENTRY_AUTH_TOKEN`** in the environment (the same way the project env already
+carries `ANTHROPIC_API_KEY` / `DAYTONA_API_KEY`), so the command is **non-interactive**: no
+browser round-trip, no prompt, CI-friendly.
 
-1. **A bootstrap auth token is required.** Creating a Custom Integration is a plain
-   `POST /api/0/organizations/{org}/sentry-apps/`, which needs an existing Sentry **auth token**
-   with org-write scope. The user makes that token once in the Sentry UI (User Settings → Auth
-   Tokens). There is no browser-create-without-credentials path to automate away, so this
-   command takes a token instead of running an OAuth dance.
-2. **The public webhook URL is an input.** The GitHub App deliberately has *no* webhook (it's a
-   credential source; events arrive via a separately-configured secret). A Sentry integration
-   *is* the event source, so `loopy auth sentry` must know the public URL `loopy run` serves at
-   (`https://<host>/hooks/sentry`) to register it.
-3. **No install step.** A GitHub App must be installed on repos after creation (hence the
-   `_wait_for_installation` poll). An internal Sentry integration is org-scoped and active on
-   creation, so there is no install wait.
+**Scope caveat — read this first.** Sentry has two org-scoped token types and they are *not*
+interchangeable here:
+
+- **Organization Auth Tokens** (the ones literally labeled that) carry a **fixed,
+  non-editable scope set built for CI** (`org:ci`: releases, source maps, code mappings). They
+  **cannot create a Custom Integration** — the `sentry-apps` endpoint needs `org:write` /
+  `org:admin`, which these never include. A CI org token will **403** on create.
+- An **Internal Integration token** (Custom Integrations, with editable scopes) or a **User
+  Auth Token** from an org owner **can** include `org:write` / `org:admin` and will work.
+
+So `loopy auth sentry` assumes `SENTRY_AUTH_TOKEN` is a token with `org:write`. If create
+returns 403, it prints exactly this (which token types work) and points at `--manual` — a
+silent failure here would be the worst outcome, so it is an explicit, specific error.
+
+Two other differences from `loopy auth github` remain:
+
+- **The public webhook URL is an input.** A Sentry integration *is* the event source (the
+  GitHub App has no webhook), so the command must register the public URL `loopy run` serves at
+  (`https://<host>/hooks/sentry`).
+- **No install step.** An internal integration is org-scoped and active on creation — no
+  `_wait_for_installation` poll like the GitHub App needs.
 
 ### Command surface
 
 ```
 loopy auth sentry
-  --org <slug>                     # required: Sentry org slug
-  --webhook-url <url>              # public https URL for /hooks/sentry (prompted if omitted)
+  --webhook-url <url>              # public https URL for /hooks/sentry (required)
+  [--org <slug>]                   # default: $SENTRY_ORG
   [--name loopy]                   # integration name (default: loopy[-org])
-  [--token <t>]                    # bootstrap auth token; else $SENTRY_AUTH_TOKEN, else prompt
-  [--sentry-url https://sentry.io] # base URL; override for self-hosted Sentry ($SENTRY_URL)
+  [--sentry-url https://sentry.io] # base URL; override for self-hosted ($SENTRY_URL)
   [--events issue]                 # resources to subscribe (v1: issue)
-  [--root .] [--force]
-  [--manual]                       # skip the API; just prompt for a Client Secret and store it
+  [--root .] [--force] [--manual]
 ```
 
-### Flow (API mode)
+The auth token is read from **`$SENTRY_AUTH_TOKEN`** — deliberately not a flag, so it never
+lands in shell history — and `--org` / `--sentry-url` fall back to `$SENTRY_ORG` / `$SENTRY_URL`.
+The common case is a single `loopy auth sentry --webhook-url https://<host>/hooks/sentry`.
 
-1. Resolve the bootstrap token (`--token` → `$SENTRY_AUTH_TOKEN` → secure prompt); error if
-   absent. Preflight `GET {sentry_url}/api/0/organizations/{org}/` to confirm it's valid.
-2. Idempotency guard: if `SENTRY_WEBHOOK_SECRET` is already in `loopy.env` and not `--force`,
-   error (mirrors the `GITHUB_APP_ID` guard in `run_github_auth`).
+### Flow (non-interactive)
+
+1. Read `SENTRY_AUTH_TOKEN` and the org (`--org` → `$SENTRY_ORG`); error clearly if either is
+   absent. Preflight `GET {sentry_url}/api/0/organizations/{org}/` to confirm the token is valid
+   for that org.
+2. Idempotency guard: `SENTRY_WEBHOOK_SECRET` already in `loopy.env` and no `--force` → error
+   (mirrors the `GITHUB_APP_ID` guard in `run_github_auth`).
 3. `POST {sentry_url}/api/0/organizations/{org}/sentry-apps/` with
    `{ name, isInternal: true, webhookUrl, scopes: ["event:read"], events: ["issue"] }`.
-   Handle a name collision by suffixing (as `default_app_name` does for GitHub).
-4. Capture `clientSecret` + `slug` from the response. Write `SENTRY_WEBHOOK_SECRET`
-   (and `SENTRY_INTEGRATION_SLUG`, so a later `--update` can `PUT` the URL) into `loopy.env`
-   via `write_control_plane_env`, and `_ensure_gitignored` — reuse the helpers already in
-   `auth.py`.
-5. Verify: `GET {sentry_url}/api/0/sentry-apps/{slug}/` and confirm `webhookUrl` matches; print
-   a ✓ with the integration slug.
-6. Print next steps: for the deferred `Sentry.AlertTriggered`, tell the user to add this
-   integration as an Alert Rule Action; for `issue` events nothing more is needed.
+   Suffix the name on collision (as `default_app_name` does for GitHub). **On 403, emit the
+   scope-caveat message above and stop.**
+4. Capture `clientSecret` + `slug`. Write `SENTRY_WEBHOOK_SECRET` + `SENTRY_INTEGRATION_SLUG`
+   (so a later `--update` can `PUT` the URL) into `loopy.env` via `write_control_plane_env`, and
+   `_ensure_gitignored` — reuse the helpers already in `auth.py`.
+5. Verify: `GET {sentry_url}/api/0/sentry-apps/{slug}/`, confirm `webhookUrl` matches, print a ✓
+   with the integration slug.
+6. Next steps: for the deferred `Sentry.AlertTriggered`, tell the user to add the integration as
+   an Alert Rule Action; `issue` events need nothing more.
 
-### What it does and doesn't persist
+### The token ≠ the signing secret
 
-- **Writes:** `SENTRY_WEBHOOK_SECRET` (the Client Secret — signs inbound webhooks, read by the
-  verifier) and `SENTRY_INTEGRATION_SLUG`.
-- **Does not persist the bootstrap token** by default — it's a powerful org credential and is
-  only needed at create/update time. (An internal integration also mints an *installation
-  token* for outbound API calls; capture it only when the write-back/action side is built —
-  don't store an unused secret now.)
+Worth stating plainly now that a token is assumed present: `SENTRY_AUTH_TOKEN` **creates** the
+integration; it does **not** authenticate inbound webhooks. Deliveries are signed with the
+integration's **Client Secret**, which only exists after create — that is what we persist as
+`SENTRY_WEBHOOK_SECRET` and what the verifier checks. The org token is **neither stored by this
+command nor read at run time** (an internal integration also mints an *installation token* for
+outbound API calls; capture that only when the write-back/action side is built — no unused
+secret now).
 
 ### `--manual` fallback
 
-For users who created the integration in the UI (or can't mint an org-write token):
-`loopy auth sentry --manual` skips the API entirely and just securely prompts for the Client
-Secret, writing `SENTRY_WEBHOOK_SECRET`. This is the thin-but-honest path when the API path
-isn't available.
+For a CI-only org token (or no token at all): `loopy auth sentry --manual` skips the API and
+securely prompts for a Client Secret from an integration created in the UI, writing
+`SENTRY_WEBHOOK_SECRET`. The honest path when the API create isn't available.
 
 ### Wiring
 
-- Add a `sentry` command to the existing `auth_app` Typer group in `loopy_cli/auth.py`; heavy
-  HTTP imports deferred into the body, matching the module's convention.
-- Extend `loopy auth status` to also report the Sentry integration (slug + whether
-  `SENTRY_WEBHOOK_SECRET` is set, best-effort `GET` to confirm the webhook URL).
-- Extend `loopy doctor` to flag a missing `SENTRY_WEBHOOK_SECRET` when a workflow triggers on a
-  `Sentry.*` event (runnability check, alongside the existing GitHub checks).
+- Add a `sentry` command to the existing `auth_app` Typer group in `loopy_cli/auth.py`; defer
+  heavy HTTP imports into the body, matching the module's convention.
+- `loopy init`: add `SENTRY_AUTH_TOKEN` to the environment credentials the wizard already
+  detects (alongside `ANTHROPIC_API_KEY` / `DAYTONA_API_KEY`) and offer to run `auth sentry`
+  when a workflow triggers on `Sentry.*`.
+- `loopy auth status`: report the Sentry integration (slug + whether `SENTRY_WEBHOOK_SECRET` is
+  set, best-effort `GET` to confirm the webhook URL).
+- `loopy doctor`: flag a missing `SENTRY_WEBHOOK_SECRET` when a workflow triggers on `Sentry.*`
+  (runnability check, alongside the existing GitHub checks).
 
 ## Effort
 
