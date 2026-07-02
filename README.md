@@ -5,8 +5,7 @@
 Loopy is an *open-source*, *agent-neutral* framework for authoring agent automations. Your
 automations are *files in your repo* (workflows, skills, and sensors authored as Markdown and
 code), so they version, diff, and review like the rest of your codebase. There's no canvas to
-click together: `loopy compile` builds the workflow's DAG straight from those files. Each step's
-agent is the **body** (prose); its config is light frontmatter; the DAG is built from one rule.
+click together: `loopy compile` builds the workflow's DAG straight from those files.
 
 **Agent-neutral.** Loopy orchestrates the loop; it doesn't bind you to one vendor's agent. Every
 step names its runtime in `registry.yml` (`harness.runtime`): **Claude Code** (`claude-*` models)
