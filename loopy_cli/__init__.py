@@ -7,6 +7,7 @@
     loopy admin     serve the read-only dashboard over the run-state DB `loopy run` writes
     loopy demo      serve the dashboard against in-memory fake data (dev-only; safe to delete)
     loopy help      show this overview, or help for one command (`loopy help run`)
+    loopy docs      print the authoring reference (or `loopy docs errors`) as markdown
 
 Heavy deps are imported lazily per command so `loopy compile` stays runtime-free.
 """
@@ -85,6 +86,56 @@ def help(  # noqa: A001 - the command is literally named `help`; shadowing the b
         cmd = sub
         path = f"{path} {token}"
     typer.echo(cmd.get_help(cmd_ctx))
+
+
+# The docs shipped inside the package, printed as plain markdown. This exists for coding
+# agents (and offline humans): docs that travel with the install are always version-matched
+# and need no URL — an agent can run `loopy docs` and get the whole authoring model as
+# context. Topics map to files in docs_md/, except `errors`, which renders the live
+# diagnostic catalog from loopy_core so it can never drift from the compiler.
+_DOCS_DIR = Path(__file__).resolve().parent / "docs_md"
+_DOCS_TOPICS = ("authoring", "errors")
+
+
+def _render_error_catalog() -> str:
+    """The LOOPY-Exxx/Wxxx catalog as markdown, straight from the compiler's own table."""
+    from loopy_core.compile.codes import DESCRIPTIONS
+
+    lines = [
+        "# Loopy diagnostic codes",
+        "",
+        "Emitted by `loopy compile` as `<severity> <code> <file>:<line>:<col>: <message>`,",
+        "often with a `hint:` line. Codes are stable and never renumbered.",
+        "",
+        "| Code | Meaning |",
+        "|---|---|",
+    ]
+    lines += [f"| `{code}` | {desc} |" for code, desc in sorted(DESCRIPTIONS.items())]
+    return "\n".join(lines)
+
+
+@app.command()
+def docs(
+    topic: str = typer.Argument(
+        "authoring", help="What to print: `authoring` (the full reference) or `errors`."
+    ),
+) -> None:
+    """Print loopy's documentation as markdown, for agents and offline reading.
+
+    `loopy docs` prints the full authoring reference (workflows, steps, registry, sensors,
+    secrets — everything needed to write a project); `loopy docs errors` prints the
+    diagnostic-code catalog. Output is plain markdown on stdout, so it pipes cleanly into
+    a pager, a file, or an agent's context.
+    """
+    if topic == "errors":
+        typer.echo(_render_error_catalog())
+        return
+    doc = _DOCS_DIR / f"{topic}.md"
+    if not doc.is_file():
+        known = ", ".join(_DOCS_TOPICS)
+        typer.echo(f"error: unknown docs topic '{topic}'. Topics: {known}.", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(doc.read_text())
 
 
 def _enable_progress_logging() -> None:
