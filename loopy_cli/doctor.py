@@ -64,11 +64,14 @@ def diagnose(
 ) -> list[Finding]:
     """Return the runnability problems in a compiled project (empty ⇒ ready to run).
 
-    Checks the three scaffold defaults that compile clean but break a real run:
+    Checks the scaffold defaults that compile clean but break a real run:
       1. a placeholder `ANTHROPIC_API_KEY` (or a referenced env_file that's missing),
       2. a sandbox still pointing `repos:` at the unpushable starter repo,
       3. no git auth wired (no GitHub App in `loopy.env`, no `GITHUB_TOKEN` in an env_file)
-         while sandboxes declare repos that need cloning/pushing.
+         while sandboxes declare repos that need cloning/pushing,
+      4. a `provider: daytona` sandbox with no `DAYTONA_API_KEY` at the control plane — the
+         Daytona client reads it from the process env (from `loopy.env`), so a naive presence
+         check on the env_file misses it and the run only dies when the sandbox is acquired.
     """
     findings: list[Finding] = []
 
@@ -135,6 +138,24 @@ def diagnose(
                 "no git auth configured — sandboxes clone repos but no GitHub App is set up "
                 "and no GITHUB_TOKEN is in an env_file",
                 "run `loopy auth github` (recommended), or add GITHUB_TOKEN to the env_file",
+            )
+        )
+
+    # 4. Daytona provider key — a sandbox on `provider: daytona` needs DAYTONA_API_KEY at the
+    #    control plane (loopy.env / the real env), NOT in its env_file. The runtime's preflight
+    #    only checks the harness's env_file keys, so a missing Daytona key slips through to the
+    #    first sandbox acquire mid-run; flag it here where the other first-run gaps are caught.
+    daytona_sandboxes = sorted(
+        name for name, sandbox in registry.sandboxes.items() if sandbox.provider == "daytona"
+    )
+    if daytona_sandboxes and not control_plane_env.get("DAYTONA_API_KEY"):
+        is_one = len(daytona_sandboxes) == 1
+        findings.append(
+            Finding(
+                "error",
+                f"sandbox '{', '.join(daytona_sandboxes)}' "
+                f"{'uses' if is_one else 'use'} provider: daytona but DAYTONA_API_KEY is not set",
+                "add DAYTONA_API_KEY to loopy.env (control-plane creds), or export it",
             )
         )
 

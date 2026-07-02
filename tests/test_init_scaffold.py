@@ -341,8 +341,11 @@ def test_init_non_interactive_writes_placeholder_scaffold(tmp_path, monkeypatch)
     target = tmp_path / "demo"
     assert _key_line(target) == f"ANTHROPIC_API_KEY={PLACEHOLDER_ANTHROPIC_KEY}"
     # The doctor-backed summary replaces the old static checklist. With no repo (the
-    # non-interactive default), the only gap is the placeholder model key.
-    assert "1 thing left" in result.output
+    # non-interactive default), two gaps remain: the placeholder model key and the missing
+    # DAYTONA_API_KEY the scaffold's `provider: daytona` sandbox needs.
+    assert "2 things left" in result.output
+    assert "ANTHROPIC_API_KEY" in result.output
+    assert "DAYTONA_API_KEY" in result.output
     # No repo ⇒ the non-coding orchestrator starter, never an unpushable placeholder repo.
     registry = (target / "registry.yml").read_text()
     assert "summarize" in registry

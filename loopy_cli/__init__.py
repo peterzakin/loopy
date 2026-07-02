@@ -1278,10 +1278,23 @@ def trigger(
     from loopy_runtime.bus.inproc import InProcessEventBus
     from loopy_runtime.contract import Event
     from loopy_runtime.manifest_model import load_manifest
+    from loopy_runtime.secrets import load_control_plane_env
 
     # Compile-on-demand, same as `run`: a project-dir target (or stale manifest beside source)
     # is compiled fresh; a prebuilt manifest is loaded as-is. A dir target also sets --root.
     manifest, root = _resolve_manifest(manifest, root)
+
+    # Control-plane infra creds (DAYTONA_API_KEY/URL, REDIS_URL) from `loopy.env`, merged with
+    # setdefault (real/platform env always wins). `run` does this too; `trigger` must as well or
+    # a `provider: daytona` sandbox dies with "DAYTONA_API_KEY is not set" even though it's in
+    # loopy.env — the Daytona client reads os.environ, which _make_token_provider (App creds only)
+    # never touches. Must land before build_runtime, which acquires the sandbox on trigger.
+    control_env = load_control_plane_env(root)
+    for key, value in control_env.items():
+        os.environ.setdefault(key, value)
+    if control_env:
+        typer.echo(f"loaded {len(control_env)} control-plane var(s) from {root}/loopy.env")
+
     m = load_manifest(manifest)
     triggering = Event(
         name=event,

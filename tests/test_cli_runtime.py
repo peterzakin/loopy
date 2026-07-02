@@ -10,6 +10,7 @@ simulated with a control-plane `loopy.env`; the provider is built, not exercised
 
 from __future__ import annotations
 
+import os
 import socket
 
 import pytest
@@ -23,6 +24,7 @@ from loopy_cli import (
     app,
     build_runtime,
 )
+from loopy_cli.scaffold import scaffold_project
 from loopy_runtime.bus.inproc import InProcessEventBus
 from loopy_runtime.contract import RunStatus, StepOutput
 from loopy_runtime.runtime.inmemory import InMemoryRuntime
@@ -121,6 +123,26 @@ def test_trigger_exposes_json_flag():
     result = runner.invoke(app, ["trigger", "--help"])
     assert result.exit_code == 0
     assert "--json" in result.stdout
+
+
+def test_trigger_loads_control_plane_env(tmp_path, monkeypatch):
+    # `trigger` must load loopy.env into the process env like `run` does — otherwise the
+    # Daytona client (which reads os.environ) never sees DAYTONA_API_KEY and a `provider:
+    # daytona` sandbox dies with "not set" even though the key is in loopy.env. Firing an
+    # unsubscribed event exits before any sandbox is acquired, so this stays offline.
+    monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
+    monkeypatch.delenv("GITHUB_APP_ID", raising=False)
+    root = tmp_path / "demo"
+    scaffold_project(root, "demo")
+    (root / "loopy.env").write_text("DAYTONA_API_KEY=dtn-real\n")
+    try:
+        result = runner.invoke(
+            app, ["trigger", str(root), "--event", "NopeNotReal", "--no-tokens"]
+        )
+        assert "loaded 1 control-plane var(s)" in result.output, result.output
+        assert os.environ.get("DAYTONA_API_KEY") == "dtn-real"
+    finally:
+        os.environ.pop("DAYTONA_API_KEY", None)  # setdefault leaks into the in-process env
 
 
 # --- run record (#9: surface step outputs) -----------------------------------

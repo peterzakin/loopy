@@ -76,8 +76,11 @@ def test_clean_project_has_no_findings(tmp_path):
     scaffold_project(root, "demo", repos=["me/my-fork"])
     _fix_key(root)
 
-    # A configured App (GITHUB_APP_ID present at the control plane) satisfies git auth.
-    findings = _diagnose(root, control_plane_env={"GITHUB_APP_ID": "123456"})
+    # A configured App (GITHUB_APP_ID present at the control plane) satisfies git auth, and the
+    # scaffold's `provider: daytona` sandbox needs DAYTONA_API_KEY at the control plane too.
+    findings = _diagnose(
+        root, control_plane_env={"GITHUB_APP_ID": "123456", "DAYTONA_API_KEY": "dtn-real"}
+    )
     assert findings == [], [f.message for f in findings]
 
 
@@ -107,8 +110,44 @@ def test_no_auth_warning_when_no_repos_declared(tmp_path):
     scaffold_project(root, "demo")
     _fix_key(root)
 
-    findings = _diagnose(root)
+    # Still needs the Daytona key: the default sandbox runs on provider: daytona.
+    findings = _diagnose(root, control_plane_env={"DAYTONA_API_KEY": "dtn-real"})
     assert findings == [], [f.message for f in findings]
+
+
+def test_missing_daytona_key_flags_error(tmp_path):
+    # The scaffold sandbox runs on provider: daytona but ships DAYTONA_API_KEY commented out —
+    # `run` dies mid-acquire with "DAYTONA_API_KEY is not set"; doctor must catch it up front.
+    root = tmp_path / "demo"
+    scaffold_project(root, "demo")
+    _fix_key(root)
+
+    findings = _diagnose(root)  # no DAYTONA_API_KEY anywhere
+    daytona = [f for f in findings if "DAYTONA_API_KEY" in f.message]
+    assert len(daytona) == 1
+    assert daytona[0].level == "error"
+    assert "provider: daytona" in daytona[0].message
+
+
+def test_daytona_key_present_clears_the_finding(tmp_path):
+    root = tmp_path / "demo"
+    scaffold_project(root, "demo")
+    _fix_key(root)
+
+    findings = _diagnose(root, control_plane_env={"DAYTONA_API_KEY": "dtn-real"})
+    assert not any("DAYTONA_API_KEY" in f.message for f in findings)
+
+
+def test_non_daytona_provider_needs_no_daytona_key(tmp_path):
+    # A sandbox on a different provider (docker/local) doesn't use Daytona, so its key is moot.
+    root = tmp_path / "demo"
+    scaffold_project(root, "demo")
+    _fix_key(root)
+    reg = root / "registry.yml"
+    reg.write_text(reg.read_text().replace("provider: daytona", "provider: docker"))
+
+    findings = _diagnose(root)  # no DAYTONA_API_KEY, but no daytona sandbox either
+    assert not any("DAYTONA_API_KEY" in f.message for f in findings)
 
 
 @pytest.mark.parametrize(
