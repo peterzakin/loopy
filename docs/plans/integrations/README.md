@@ -1,101 +1,37 @@
-# Built-in integrations beyond GitHub
+# Built-in Sentry integration
 
-Plans for shipping **Sentry**, **Slack**, **Linear**, and **Datadog** as first-class
-built-in integrations, the same way `Github.*` works today: a workflow names a
-`Provider.Event` in its `on:` and the compiler injects the event contract and a producing
-sensor with zero `registry.yml` and zero `sensors/` code.
+Plan for shipping **Sentry** as the second first-class built-in integration, the same way
+`Github.*` works today: a workflow names `on: Sentry.IssueCreated` and the compiler injects
+the event contract and a producing sensor with zero `registry.yml` and zero `sensors/` code.
 
-## How a built-in works today (GitHub)
+Sentry is the natural next integration: it drives the canonical `Incident` loop (error →
+triage → fix) and is already the hand-written example sensor in
+`examples/incidents/sensors/sensors.py`, so this promotes existing example code into the
+platform.
 
-A built-in is four coordinated pieces, plus tests and docs:
+**The plan:** [sentry.md](sentry.md). It is self-contained — it includes the minimal
+generalization of the GitHub-only machinery that Sentry needs (a second webhook path, mapper
+set, secret, and verifier), and defers a full multi-provider registry until a third provider
+actually lands.
+
+> Scope note: earlier drafts of this branch also planned Slack, Linear, and Datadog. Those are
+> removed so this PR does one thing well. They can return as their own PRs later; the Sentry
+> work deliberately leaves seams (see [sentry.md](sentry.md) "Minimal generalization") that a
+> third provider would generalize further.
+
+## How a built-in works today (GitHub), for reference
 
 | Piece | File | Role |
 |---|---|---|
 | Reserved namespace + event contracts | `loopy_core/builtins.py` (`GITHUB_PREFIX`, `GITHUB_EVENTS`) | Field maps the compiler injects; reserves the `Github.` prefix |
-| Compiler injection | `loopy_core/compile/builtins.py` | For each referenced `Github.*` event: register the contract, synthesize a webhook sensor on `/hooks/github`, guard the namespace (E215), report unknowns (E112) |
+| Compiler injection | `loopy_core/compile/builtins.py` | Register the contract, synthesize a webhook sensor on `/hooks/github`, guard the namespace (E215), report unknowns (E112) |
 | Payload → field mappers | `loopy_runtime/scm/github_builtins.py` (`BUILTIN_MAPPERS`) | One delivery → one event's fields, or `None` when the delivery isn't this event's concern |
 | Signature verification | `loopy_runtime/scm/github_webhook.py` | HMAC-SHA256 of the raw body (`X-Hub-Signature-256`) verified at the edge |
-| Wiring | `loopy_cli/__init__.py` (~L1195) | Reads `GITHUB_WEBHOOK_SECRET`, attaches the verifier to `/hooks/github`, registers built-in sensors |
-| Drift test | `tests/test_builtins.py` | Asserts every contract in `GITHUB_EVENTS` has a matching mapper (the two halves never drift) |
+| Wiring | `loopy_cli/__init__.py` (~L1195) | Reads `GITHUB_WEBHOOK_SECRET`, attaches the verifier, registers built-in sensors |
+| Drift test | `tests/test_builtins.py` | Asserts every contract has a matching mapper (the two halves never drift) |
 | Docs | `loopy-landing/docs/integrations.html` | The catalog users read |
 
-The design already anticipates more providers: `Sensor.provider` and `SensorSpec.provider`
-exist, `source="builtin"` is a discriminator, and the runner's `verify(body, headers)` seam
-is provider-agnostic. What is **not** yet generalized is the GitHub-specific hardcoding in the
-compiler (`_BUILTIN_PATH = "/hooks/github"`), the runtime mapper lookup
-(`from ...github_builtins import BUILTIN_MAPPERS`), and the CLI wiring
-(`GITHUB_WEBHOOK_SECRET`, `/hooks/github` string check).
-
-## Order of work
-
-1. **[00 — Provider framework](00-provider-framework.md)** (prerequisite). Generalize the
-   GitHub-only hardcoding into a provider registry so a new integration is *data*, not a
-   fork of the injection/wiring logic. Ships with GitHub as the first registry entry (no
-   behavior change) to prove the refactor.
-2. **[Sentry](sentry.md)** and **[Linear](linear.md)** next: both are clean HMAC-hex-over-raw-JSON
-   webhooks that discriminate by a header and/or a `type`+`action` in the body. They exercise
-   the framework with the least provider-specific plumbing.
-3. **[Slack](slack.md)**: the largest. Adds three things the runner doesn't do yet — a
-   timestamped signing scheme (`v0:{ts}:{body}`) with replay protection, a `url_verification`
-   challenge handshake, and form-encoded slash-command bodies alongside JSON events.
-4. **[Datadog](datadog.md)**: different in kind. Datadog webhooks carry a **user-defined**
-   payload template and are **not signed by default**, so the built-in ships a canonical
-   payload template and a shared-secret header check rather than a vendor HMAC.
-
-## The shape every provider plan follows
-
-Once [00](00-provider-framework.md) lands, each provider is the same five edits:
-
-- **Contract** — add a `ProviderSpec` entry (prefix, `/hooks/<provider>` path, `secret_env`,
-  event field maps) in `loopy_core/builtins.py`.
-- **Mappers** — add `loopy_runtime/scm/<provider>_builtins.py` with a `MAPPERS` dict and
-  register it in the runtime mapper registry.
-- **Verifier** — add the provider's signature check in `loopy_runtime/scm/<provider>_webhook.py`
-  and register its factory in the verifier registry.
-- **Tests** — the drift test iterates all providers automatically; add a compile happy-path
-  and a verifier unit test.
-- **Docs** — a section in `loopy-landing/docs/integrations.html` and a bump to the catalog on
-  the landing hero.
-
-## Credentials & setup (trigger side)
-
-These plans are **receive-only**: inbound webhooks authenticate with a **shared/signing
-secret**, not an OAuth token. This mirrors the split GitHub already uses in the codebase:
-inbound via a webhook secret (`scm/github_webhook.py`, `GITHUB_WEBHOOK_SECRET`), outbound via
-scoped GitHub App tokens (`scm/token_provider.py`, `loopy auth github`). Only the inbound half
-is in scope here.
-
-Loopy is **self-hosted / single-tenant** (automations are files in *your* repo, on *your*
-infra), so a user registers *their own* app/integration once and pastes a secret into their
-env file. **Loopy implements no OAuth flow** for any of these — there is no code exchange and
-no OAuth token held on the trigger path.
-
-| Provider | Register in the vendor | OAuth flow? | Secret env var |
-|---|---|---|---|
-| Sentry | Internal Integration (app-like, no OAuth grant) | No | `SENTRY_WEBHOOK_SECRET` (Client Secret) |
-| Linear | Workspace webhook (Settings → API); no app for one workspace | No | `LINEAR_WEBHOOK_SECRET` (signing secret) |
-| Datadog | Webhooks integration entry (URL + our template) | No | `DATADOG_WEBHOOK_SECRET` (a token you invent) |
-| Slack | A **Slack app**, installed to the workspace | Install is a one-click OAuth *grant*, but not a flow Loopy runs | `SLACK_SIGNING_SECRET` |
-
-Slack is the only one touching OAuth at all, and only as the workspace-install click on the
-user's own app; slash-command replies use the unauthenticated `response_url`, so the trigger
-path holds no Slack token.
-
-### Where OAuth *would* enter (out of scope)
-
-The **action/output** side — an agent resolving a Sentry issue, commenting on a Linear issue,
-posting to Slack — needs outbound, least-privilege, per-workspace credentials, and that is
-where OAuth or app tokens enter, exactly like GitHub's `token_provider`. Sketch for later:
-Slack post-back → bot token via OAuth install; Linear/Sentry write-back → OAuth app *or* a
-personal/integration API token (simpler for single-tenant); Datadog → API + app keys, no
-OAuth ever. None of that is in these four plans.
-
-## Non-negotiable design choices
-
-- **No new events on the bus without a contract.** Built-in contracts live in `builtins.py`
-  and are injected only when referenced (no catalog dump), exactly as GitHub does today.
-- **Verify at the edge, once.** Every provider path gets a verifier keyed by its own secret
-  env var; an unset secret degrades to an unverified dev mode with a loud warning (matching
-  the current GitHub behavior), never a silent pass in production.
-- **Keep the two halves in lockstep.** A contract field with no mapper (or vice versa) must
-  fail `tests/test_builtins.py`. This is what makes a built-in trustworthy.
+The data model already anticipates more providers: `Sensor.provider` /
+`SensorSpec.provider` exist and `source="builtin"` is a discriminator. What Sentry has to
+generalize is the GitHub *string* hardcoding in the compiler, the runtime mapper lookup, and
+the CLI wiring — kept minimal (see the plan).
