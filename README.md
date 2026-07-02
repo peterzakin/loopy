@@ -86,8 +86,7 @@ tight internals (`arbitrate → fix → review → ship`) pass **outputs** along
 
 Defined entities are **Capitalized types** (`WorkItem`, `Investigator`, `MetricThreshold`), and
 references point at them by that name (`on: WorkItem`, `agent: Investigator`). Filenames, step
-names, and event *fields* (`event.issue_id`) stay lowercase. (The built-in `default` sandbox is
-the one reserved lowercase name.)
+names, and event *fields* (`event.issue_id`) stay lowercase.
 
 ## A file
 
