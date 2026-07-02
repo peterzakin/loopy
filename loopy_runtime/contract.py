@@ -353,7 +353,9 @@ class RetryPolicy(Protocol):
         ...
 
 
-# ── Runtime ─ the engine: B1–B6 (B7/B10/B11 stubbed in v1) ───────────────────────────
+# ── Runtime ─ the engine's orchestration seam: B1–B6 (B7/B10/B11 stubbed in v1). ─────
+# Behind it, the per-run DAG-walk is WorkflowRunner (runtime/workflow_runner.py) — a
+# concrete class for now; it earns a protocol here when a second implementation exists.
 @runtime_checkable
 class Runtime(Protocol):
     async def trigger(self, event: Event) -> RunId | None: ...
