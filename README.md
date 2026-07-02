@@ -29,10 +29,9 @@ Every `loopy` command below assumes it's on your PATH. Prefer not to install? Pr
 command with `uv run` from the repo (e.g. `uv run loopy compile`).
 
 **Per-project convention.** A project is a directory, and its credentials live inside it:
-`secrets/base.env` (the sandbox's environment: `ANTHROPIC_API_KEY`), `loopy.env`
+`secrets/base.env` (sandbox env), `loopy.env`
 (control-plane creds: keys like `DAYTONA_API_KEY`, plus the GitHub App entries that
-`loopy auth github` writes), and an optional `sensors/.env` for
-sensor-layer keys. All are gitignored. Run every command from the project directory so
+`loopy auth github` writes). All are gitignored. Run every command from the project directory so
 `loopy.env` and `--root` stay in sync; `loopy init` sets this up for you. `init` is
 interactive: it asks which repo(s) the agent should work on, offers to fill in credentials it
 finds in your environment (`ANTHROPIC_API_KEY`, `DAYTONA_API_KEY`), and finishes by running the
