@@ -804,6 +804,43 @@ def _diagnose_runnability(root: Path, project):  # noqa: ANN001 - compile.model.
     return findings
 
 
+def _warn_placeholder_env(root: Path, manifest: Path) -> None:
+    """Emit non-blocking warnings for env_file values that look like unfilled placeholders.
+
+    The safety net for the user who skips `loopy doctor`: `run` still checks key *presence* via
+    `runtime.preflight()`, but a value like `sk-ant-...` or an inline-commented secret passes
+    that and only breaks once an agent runs. Warn-only by design — the heuristic can false-
+    positive on a real secret, so it must never block a run. Any load hiccup is swallowed: the
+    real run path re-loads the manifest right after and reports load errors properly.
+    """
+    from loopy_cli.doctor import placeholder_warnings
+    from loopy_runtime.manifest_model import load_manifest
+    from loopy_runtime.secrets import _parse_dotenv
+
+    try:
+        m = load_manifest(manifest)
+    except Exception:  # noqa: BLE001 - the main path re-loads and reports any load error
+        return
+
+    env_files: list[str] = []
+    for sandbox in m.registry.sandboxes.values():
+        for rel in sandbox.env_file:
+            if rel not in env_files:
+                env_files.append(rel)
+
+    def read_env(rel: str) -> dict[str, str] | None:
+        path = root / rel
+        return _parse_dotenv(path.read_text()) if path.is_file() else None
+
+    for finding in placeholder_warnings(read_env=read_env, env_files=env_files):
+        typer.echo(typer.style(f"warning: {finding.message}", fg=typer.colors.YELLOW), err=True)
+        if finding.hint:
+            typer.echo(
+                "         " + typer.style(f"→ {finding.hint}", fg=typer.colors.BRIGHT_BLACK),
+                err=True,
+            )
+
+
 def _render_findings(findings) -> bool:
     """Print doctor findings (error/warn) with their hints; return True if any are errors."""
     for finding in findings:
@@ -1065,6 +1102,11 @@ def run(
     # target also becomes the effective --root (env_file + sensors live there).
     manifest, root = _resolve_manifest(manifest, root)
 
+    # Non-blocking heads-up on env_file values that look like unfilled placeholders — the same
+    # thing `loopy doctor` reports, surfaced here for the user who skips it. Warn-only: presence
+    # checks still run in preflight; this never blocks a run (the heuristic can false-positive).
+    _warn_placeholder_env(root, manifest)
+
     # The default is the containerized single-node stack. `--in-process` opts into running the
     # engine in *this* process (and is also what the container itself runs internally, so the
     # stack doesn't recurse into launching Docker again). Short-circuit to docker before the
@@ -1283,6 +1325,9 @@ def trigger(
     # Compile-on-demand, same as `run`: a project-dir target (or stale manifest beside source)
     # is compiled fresh; a prebuilt manifest is loaded as-is. A dir target also sets --root.
     manifest, root = _resolve_manifest(manifest, root)
+
+    # Same non-blocking placeholder heads-up as `run` (see `_warn_placeholder_env`).
+    _warn_placeholder_env(root, manifest)
 
     # Control-plane infra creds (DAYTONA_API_KEY/URL, REDIS_URL) from `loopy.env`, merged with
     # setdefault (real/platform env always wins). `run` does this too; `trigger` must as well or

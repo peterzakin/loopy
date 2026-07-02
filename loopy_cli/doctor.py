@@ -23,6 +23,7 @@ installations" / a clone 403). It does network I/O, so it lives apart from pure 
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
@@ -30,6 +31,68 @@ from dataclasses import dataclass
 # runnable — these are the strings `doctor` exists to catch.
 PLACEHOLDER_ANTHROPIC_KEY = "sk-ant-..."
 PLACEHOLDER_REPO = "octocat/hello-world"  # compared case-insensitively
+
+# Words/tokens that mark a value as a not-yet-filled-in placeholder rather than a real secret.
+# Matched case-insensitively as a substring; see `_placeholder_reason` for the whole heuristic.
+_PLACEHOLDER_WORDS = re.compile(
+    r"change[-_ ]?me|placeholder|\byour[-_]|\bexample\b|x{4,}|\bto[-_ ]?do\b|"
+    r"fix[-_ ]?me|fill[-_ ]?me|replace[-_ ]?me|\bdummy\b|\bsample\b",
+    re.IGNORECASE,
+)
+
+
+def _placeholder_reason(value: str) -> tuple[str, str] | None:
+    """Heuristic: if `value` looks like an unfilled placeholder, return `(reason, hint)`, else None.
+
+    Deliberately a *heuristic* — a real secret can legitimately contain any of these — so every
+    caller reports its hits as `warn`, never `error`. It catches the values that pass a presence
+    check but break a real run: a leftover scaffold stub (`sk-ant-...`), an inline comment that a
+    literal-value dotenv folds into the value (`ghp_x # my key`), an `<angle-bracket>` template,
+    or a giveaway word like `changeme`/`your-token`/`example`.
+    """
+    v = value.strip()
+    if not v:
+        return None  # an empty value is "unset", not a placeholder — presence checks own that
+    # `#` first: dotenv values are literal (no inline-comment stripping), so a trailing comment
+    # silently becomes part of the value — the sneakiest of these, so give it its own hint.
+    if "#" in v:
+        return (
+            "contains '#' — dotenv values are literal, so an inline comment becomes part of "
+            "the value",
+            "put the comment on its own line, or drop it",
+        )
+    if "..." in v:
+        return ("contains '...' — looks like a leftover scaffold placeholder", "set a real value")
+    if "<" in v or ">" in v:
+        return ("contains '<'/'>' — looks like a <fill-me-in> placeholder", "set a real value")
+    if _PLACEHOLDER_WORDS.search(v):
+        return ("looks like a placeholder, not a real value", "set a real value")
+    return None
+
+
+def placeholder_warnings(
+    *, read_env: Callable[[str], dict[str, str] | None], env_files: list[str]
+) -> list[Finding]:
+    """Warn (never error) on env_file values that look like unfilled placeholders.
+
+    Shared by `diagnose` (so `loopy doctor` surfaces it with the other preflight gaps) and the
+    `loopy run` startup path (the safety net for a user who skips `doctor`). Scoped to sandbox
+    env_files — the dotenv a user hand-edits — not the whole process env, which would drown real
+    hits in system noise. Skips the exact `ANTHROPIC_API_KEY` scaffold stub: `diagnose` already
+    reports that as an error, so re-warning it would be double-reporting.
+    """
+    findings: list[Finding] = []
+    for rel in env_files:
+        env = read_env(rel)
+        if not env:
+            continue  # missing/empty env_file: diagnose reports the miss; nothing to scan here
+        for key, value in env.items():
+            if key == "ANTHROPIC_API_KEY" and value == PLACEHOLDER_ANTHROPIC_KEY:
+                continue  # already an error in diagnose — don't also warn
+            reason = _placeholder_reason(value)
+            if reason is not None:
+                findings.append(Finding("warn", f"{key} in {rel} {reason[0]}", reason[1]))
+    return findings
 
 
 @dataclass(frozen=True)
@@ -65,7 +128,8 @@ def diagnose(
     """Return the runnability problems in a compiled project (empty ⇒ ready to run).
 
     Checks the scaffold defaults that compile clean but break a real run:
-      1. a placeholder `ANTHROPIC_API_KEY` (or a referenced env_file that's missing),
+      1. a placeholder `ANTHROPIC_API_KEY` (or a referenced env_file that's missing); plus a
+         heuristic `warn` for any other env_file value that looks like an unfilled placeholder,
       2. a sandbox still pointing `repos:` at the unpushable starter repo,
       3. no git auth wired (no GitHub App in `loopy.env`, no `GITHUB_TOKEN` in an env_file)
          while sandboxes declare repos that need cloning/pushing,
@@ -109,6 +173,12 @@ def diagnose(
                 "set a real key, or rely on Claude Code OAuth reachable via the sandbox HOME",
             )
         )
+
+    # 1b. Any *other* env_file value that looks like an unfilled placeholder — a leftover stub,
+    #     an inline comment folded into the value, an <angle-bracket> template. Heuristic, so
+    #     these are warnings (a real secret could contain one of these), unlike the exact key
+    #     stub above which is a certain error.
+    findings.extend(placeholder_warnings(read_env=read_env, env_files=env_files))
 
     # 2. The unpushable starter repo.
     starter_sandboxes: list[str] = []
