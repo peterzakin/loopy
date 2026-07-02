@@ -121,10 +121,8 @@
 <p class="sub">The concrete pieces of a running Loopy, how they wire together, and what changes from laptop to production.</p>
 
 <div class="callout">
-  A companion to <strong>ARCHITECTURE.md</strong>. That doc explains the <em>design</em> — the
-  compile→manifest→runtime split, the swappable modules, the phased build. <strong>This one
-  explains a <em>deployment</em></strong>: the live pieces, the request path, and the
-  topologies — grounded in what <code>loopy run</code> actually stands up today.
+  <strong>This note explains a <em>deployment</em></strong>: the live pieces, the request path,
+  and the topologies — grounded in what <code>loopy run</code> actually stands up today.
 </div>
 
 <div class="callout warn">
@@ -136,7 +134,7 @@
   HMAC at the edge when <code>GITHUB_WEBHOOK_SECRET</code> is set (a path left without a secret runs
   unverified — dev only — and says so loudly). The remaining gap is <strong>durability</strong>, not the
   trigger type: the scheduler is in-process, so restart-survival and single-firing across workers are
-  still ahead (ARCHITECTURE B7/B8).
+  still ahead.
 </div>
 
 <h2>1. The two lifecycles</h2>
@@ -543,7 +541,7 @@ other, talking only through it. The <strong><code>Sandbox</code></strong> is the
 trust and egress are enforced. The manifest is the contract between author and <code>Runtime</code>; the
 <code>Sandbox</code> is the contract between agent and the outside world.</p>
 
-<footer>Loopy architecture note · deployment · companion to ARCHITECTURE.md</footer>
+<footer>Loopy architecture note · deployment</footer>
 
 </body>
 </html>

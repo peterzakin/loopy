@@ -201,8 +201,7 @@ into the `loopy.events` classes. The terse forms below are authoring sugar over 
 | `enum[a, b, c]` | one of a fixed set of strings | `{"type": "string", "enum": ["a", "b", "c"]}` |
 
 The same field types apply to a step's `output:` map. An unknown bare shorthand (not in the table
-above and not a valid schema object) is a compile-time error (`LOOPY-E201`). The authoritative
-reference is [`FRONTEND.md`](FRONTEND.md) §3.
+above and not a valid schema object) is a compile-time error (`LOOPY-E201`).
 
 ## `skills/`
 
@@ -265,8 +264,7 @@ def sentry_issues(req) -> Incident:                  # return type optional; myp
 Sensors are **Python-only today**: the compiler statically inspects every `.py` under `sensors/`
 (subdirectories included; organize them however you like) and nothing else. The design generalizes
 to other languages (a single statically-analyzable `sensorRegistry` literal for languages without
-free-function decorators, e.g. TypeScript, is specified in [`FRONTEND.md`](FRONTEND.md) §7), but
-that surface isn't implemented yet.
+free-function decorators, e.g. TypeScript), but that surface isn't implemented yet.
 
 **Poll intervals are plain durations.** `@sensor(poll="5m")` takes a whole number plus a unit
 (`s`, `m`, `h`, or `d`: `"30s"`, `"1h"`, `"2d"`); a malformed interval is a compile-time error
@@ -347,8 +345,8 @@ loopy admin                            # in another terminal → http://127.0.0.
 serves every view against in-memory sample data. (A bare `loopy run` brings up the containerized
 stack instead, a `redis` bus container plus the engine, which keeps its state in a Docker
 volume; the one-shot `loopy trigger` path is in-memory and isn't recorded.) The deployment knobs
-(`--bus inproc|redis`, `--state`, `--state-path`, `--host`/`--port`, `--detach`) and caveats are
-in [`DEPLOYMENT.md`](DEPLOYMENT.md).
+(`--bus inproc|redis`, `--state`, `--state-path`, `--host`/`--port`, `--detach`) are covered by
+`loopy run --help`.
 
 ## License
 
