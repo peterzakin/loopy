@@ -130,7 +130,9 @@ more agents and events.)
 # `harness` picks the agent runner: `claude-code` (Claude Code, claude-* models),
 # `codex` (OpenAI Codex, gpt-*/o-series/codex-* models), or `opencode` (OpenCode, which
 # drives either family — write the bare model id; loopy expands it to opencode's
-# provider/model naming). The model must be one its harness can drive; nothing is inferred.
+# provider/model naming). The model must be one its harness can drive; nothing is
+# inferred, and `loopy compile` rejects a cross-provider pairing (a gpt-* model on
+# claude-code, or vice versa) as a compile-time error (LOOPY-E508).
 defaults:
   agent:
     sandbox: default

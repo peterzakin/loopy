@@ -132,6 +132,43 @@ def test_agent_missing_model_or_harness_reports_e507(tmp_path):
     assert_code(compile_project(tmp_path / "nested"), codes.E507, file="registry.yml")
 
 
+def test_cross_provider_model_harness_pairing_reports_e508(tmp_path):
+    # Each harness only drives its own provider's model family; a cross pairing is a
+    # compile error, in both directions.
+    def registry(model: str, harness: str) -> str:
+        return (
+            "sandboxes:\n  default:\n    provider: local\n"
+            f"agents:\n  Worker: {{ model: {model}, harness: {harness}, sandbox: default }}\n"
+        )
+
+    write_project(tmp_path / "a", {"registry.yml": registry("gpt-5.5", "claude-code")})
+    assert_code(compile_project(tmp_path / "a"), codes.E508, file="registry.yml")
+
+    write_project(tmp_path / "b", {"registry.yml": registry("claude-opus-4-8", "codex")})
+    assert_code(compile_project(tmp_path / "b"), codes.E508, file="registry.yml")
+
+    # A model no recognized provider serves is rejected even on opencode.
+    write_project(tmp_path / "c", {"registry.yml": registry("gemini-2.5-pro", "opencode")})
+    assert_code(compile_project(tmp_path / "c"), codes.E508, file="registry.yml")
+
+    # An unknown harness is E508 too (the supported set is part of the same registry).
+    write_project(tmp_path / "d", {"registry.yml": registry("claude-sonnet-4-6", "gemini")})
+    assert_code(compile_project(tmp_path / "d"), codes.E508, file="registry.yml")
+
+    # Eligible pairings compile clean — including opencode driving either family.
+    for i, (model, harness) in enumerate(
+        [
+            ("claude-sonnet-4-6", "claude-code"),
+            ("gpt-5.5", "codex"),
+            ("claude-sonnet-4-6", "opencode"),
+            ("openai/gpt-5.5", "opencode"),
+        ]
+    ):
+        path = tmp_path / f"ok{i}"
+        write_project(path, {"registry.yml": registry(model, harness)})
+        assert compile_project(path).diagnostics.items == []
+
+
 def test_type_desugar_table(tmp_path):
     registry = (
         "events:\n"

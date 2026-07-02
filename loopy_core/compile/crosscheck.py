@@ -13,6 +13,7 @@ from loopy_core.compile import codes
 from loopy_core.compile.diagnostics import DiagnosticCollector
 from loopy_core.compile.model import EventLineage, Lineage, Project
 from loopy_core.discovery import Inventory
+from loopy_core.providers import validate_model
 from loopy_core.span import span_at
 
 
@@ -63,6 +64,14 @@ def cross_check(project: Project, inv: Inventory, diags: DiagnosticCollector) ->
                 f"(set harness: on the agent or defaults.agent.harness)",
                 span=agent.span,
             )
+        if agent.model is not None and agent.harness is not None:
+            # X2 — the harness must be a supported one, and the model must be in the
+            # family it can drive (a claude-* model on claude-code, an OpenAI model on
+            # codex, either on opencode). Same rule the harnesses re-enforce at startup.
+            try:
+                validate_model(agent.harness, agent.model)
+            except ValueError as exc:
+                diags.error(codes.E508, f"agent '{agent.name}': {exc}", span=agent.span)
         if agent.sandbox is None:
             # Where an agent runs is never inferred — it must name a sandbox (directly or via
             # `defaults.agent.sandbox`). Pairs with E214 (that sandbox must declare a provider).
