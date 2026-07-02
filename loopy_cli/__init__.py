@@ -377,9 +377,10 @@ def init(
     `loopy doctor`). There is no non-interactive mode: setup is a conversation with a human
     (git auth alone needs a browser), so `init` requires a terminal.
 
-    The starter workflow needs a repo: loopy is built around agents that work on code, so
-    proceeding without one (strongly discouraged, and confirmed explicitly) writes only a
-    trimmed-down registry.yml plus the env files — no workflow.
+    Git auth is the gate for the starter workflow: loopy is built around agents that work on
+    code, so without git auth wired (or, past that, without a repo to act on) there is nothing
+    runnable to scaffold — `init` writes only a trimmed-down registry.yml plus the env files,
+    no workflow, and points at wiring GitHub as the next step.
     """
     from loopy_cli.scaffold import InvalidProjectName, scaffold_project, validate_project_name
 
@@ -411,12 +412,15 @@ def init(
     # steps write loopy.env into `target`; `scaffold_project` (run below) preserves those
     # values under its own template.
     _offer_public_webhook_url(target)
-    _offer_github_auth(target)
+    github_authed = _offer_github_auth(target)
 
-    # Which repo(s) the agent works on — this decides whether the starter workflow exists at all.
-    # Blank is allowed but strongly discouraged (it means a bare registry, no workflow), so it is
-    # confirmed explicitly — and we never fall back to a placeholder repo.
-    repos = _prompt_for_repos()
+    # Git auth is the gate for the starter workflow. Loopy is built around agents that clone a
+    # checkout, edit it, and open a PR, so without git auth wired there is nothing runnable to
+    # scaffold — we skip straight to the minimal registry (no workflow) rather than ask which
+    # repo(s) to name into a project that can't reach them. With auth in place, ask which repo(s)
+    # the workflow should act on; blank is allowed but strongly discouraged, and confirmed
+    # explicitly, and we never fall back to a placeholder repo.
+    repos = _prompt_for_repos() if github_authed else []
 
     try:
         created = scaffold_project(target, name, repos=repos)
@@ -488,12 +492,11 @@ def _prompt_for_repos() -> list[str]:
 
 
 def _note_minimal_mode() -> None:
-    """A repo-less scaffold is deliberately bare — warn, and name the way out."""
+    """A minimal scaffold (no git auth, or no repo) is deliberately bare — warn, and name the way out."""
     typer.echo(
         "  "
         + typer.style("⚠", fg=typer.colors.YELLOW)
-        + " No repo — wrote a minimal scaffold: a trimmed-down registry.yml and env files, "
-        "no starter workflow."
+        + " Minimal scaffold — a trimmed-down registry.yml and env files, no starter workflow."
     )
     typer.echo(
         typer.style(
@@ -662,9 +665,11 @@ def _offer_public_webhook_url(target: Path) -> None:
     typer.echo()
 
 
-def _offer_github_auth(target: Path) -> None:
+def _offer_github_auth(target: Path) -> bool:
     """Offer to wire git auth now by running the `loopy auth github` manifest flow in-process.
 
+    Returns whether git auth is configured once the offer is done — the caller uses this to
+    decide between the coding starter (auth present) and the minimal registry (auth absent).
     Declining just leaves the step for later — `_report_remaining_setup` will flag it. A failed
     or aborted auth run is caught so it never takes the whole `init` down with it.
     """
@@ -672,13 +677,13 @@ def _offer_github_auth(target: Path) -> None:
 
     # Already configured (e.g. re-init over an existing tree) — nothing to offer.
     if load_control_plane_env(target).get("GITHUB_APP_ID"):
-        return
+        return True
 
     if not typer.confirm(
         "  Wire git auth now? Runs `loopy auth github` (creates a GitHub App, opens a browser)",
         default=True,
     ):
-        return
+        return False
 
     from loopy_cli.auth import run_github_auth
 
@@ -686,8 +691,13 @@ def _offer_github_auth(target: Path) -> None:
         run_github_auth(root=target)
     except typer.Exit:
         typer.echo("  (skipped — git auth not completed; run `loopy auth github` later)")
+        return False
     except Exception as exc:  # noqa: BLE001 - never let onboarding crash the scaffold
         typer.echo(f"  (git auth didn't complete: {exc} — run `loopy auth github` later)")
+        return False
+
+    # Confirm the App creds actually landed rather than assuming the flow succeeded.
+    return bool(load_control_plane_env(target).get("GITHUB_APP_ID"))
 
 
 def _report_remaining_setup(target: Path, name: str) -> None:
