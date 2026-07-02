@@ -64,8 +64,9 @@ def test_scaffold_declares_an_agent_per_runtime(tmp_path):
         assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
         agents = result.project.registry.agents
         assert {a.harness.runtime for a in agents.values()} == {"claude-code", "codex", "opencode"}
-        # The opencode agent's model carries the provider/ prefix its runtime requires.
-        assert agents["OpenCode"].harness.model == "anthropic/claude-sonnet-4-6"
+        # The opencode agent names the same bare id as the others; the harness sugars it
+        # into opencode's provider/model form at run time.
+        assert agents["OpenCode"].harness.model == "claude-sonnet-4-6"
 
 
 def test_scaffold_writes_named_repos(tmp_path):

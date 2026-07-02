@@ -9,10 +9,14 @@ Each harness `runtime` binds to a model provider and declares two things v1 enfo
   instead of shelling out to a CLI that would reject the model anyway.
 
 Single-provider runtimes (`claude-code`, `codex`) declare one static `model_key`.
-A model-agnostic runtime (`opencode`) names its models `provider/model`
-(e.g. `anthropic/claude-sonnet-4-6`), so the required key *derives from the model*:
-it declares `prefix_keys` instead, and the model becomes mandatory — with no model
-there is no provider prefix to derive auth or eligibility from.
+A model-agnostic runtime (`opencode`) authenticates per provider, so the required key
+*derives from the model*: it declares `prefix_keys` instead, and the model becomes
+mandatory — with no model there is no provider to derive auth or eligibility from.
+Its CLI names models `provider/model`, but agents may write the bare id every other
+runtime uses (`claude-sonnet-4-6`, `gpt-5.5`): `sugar` expands it to the namespaced
+form (`anthropic/claude-sonnet-4-6`) everywhere it matters — eligibility, key
+derivation, and the argv handed to the CLI (`canonical_model`). An explicit
+`provider/model` passes through untouched.
 
 `reports_cost` records whether the harness emits a USD cost we can budget on — Claude
 Code does (`total_cost_usd`), and OpenCode prices each step from its model catalog;
@@ -36,16 +40,36 @@ class RuntimeProvider:
     # model prefix -> env var, for runtimes whose key derives from the model's provider
     # prefix (`opencode`). Exactly one of `model_key` / `prefix_keys` is set.
     prefix_keys: tuple[tuple[str, str], ...] = ()
+    # bare-model-id prefixes -> the provider namespace they expand into, so an agent may
+    # write the same bare id every runtime uses and have it canonicalized to the
+    # runtime's own `provider/model` naming.
+    sugar: tuple[tuple[tuple[str, ...], str], ...] = ()
+
+    def canonical(self, model: str | None) -> str | None:
+        """`model` in the form this runtime's CLI expects: a bare id covered by `sugar`
+        gains its provider namespace; an already-namespaced (or unrecognized) id passes
+        through unchanged."""
+        if model is None or not self.sugar:
+            return model
+        if any(model.startswith(prefix) for prefix, _ in self.prefix_keys):
+            return model  # already provider/model
+        for prefixes, namespace in self.sugar:
+            if model.startswith(prefixes):
+                return f"{namespace}/{model}"
+        return model
 
     def is_eligible(self, model: str) -> bool:
+        model = self.canonical(model) or model
         return any(model.startswith(prefix) for prefix in self.model_prefixes)
 
     def key_for(self, model: str | None) -> str:
         """The env var this runtime needs for `model`. Static-key runtimes ignore the
-        model; prefix-keyed runtimes derive it, so they require one (`validate_model`
-        rejects a keyless pairing before this is ever reached with None)."""
+        model; prefix-keyed runtimes derive it (sugar expanded first), so they require
+        one (`validate_model` rejects a keyless pairing before this is ever reached
+        with None)."""
         if self.model_key is not None:
             return self.model_key
+        model = self.canonical(model)
         for prefix, key in self.prefix_keys:
             if model is not None and model.startswith(prefix):
                 return key
@@ -60,6 +84,12 @@ class RuntimeProvider:
         return static | frozenset(key for _, key in self.prefix_keys)
 
 
+# The bare model-id families each provider serves. Shared between the single-provider
+# runtimes' eligibility rules and opencode's sugar, so the two never drift.
+_ANTHROPIC_MODEL_PREFIXES = ("claude-",)
+# OpenAI coding models: the gpt-* family, the o-series reasoning models, the codex-* line.
+_OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4", "codex")
+
 # OpenCode provider prefix -> the env var its driver reads. The v1 set is the providers
 # whose keys loopy already recognizes; OpenCode itself supports more (openrouter, google,
 # local models) — extending this table is how they get admitted.
@@ -73,15 +103,13 @@ PROVIDERS: dict[str, RuntimeProvider] = {
     "claude-code": RuntimeProvider(
         runtime="claude-code",
         model_key="ANTHROPIC_API_KEY",
-        model_prefixes=("claude-",),
+        model_prefixes=_ANTHROPIC_MODEL_PREFIXES,
         reports_cost=True,  # `claude -p --output-format json` emits total_cost_usd
     ),
     "codex": RuntimeProvider(
         runtime="codex",
         model_key="OPENAI_API_KEY",
-        # OpenAI coding models codex can drive: the gpt-* family, the o-series
-        # reasoning models, and the codex-* line.
-        model_prefixes=("gpt-", "o1", "o3", "o4", "codex"),
+        model_prefixes=_OPENAI_MODEL_PREFIXES,
         reports_cost=False,  # `codex exec --json` emits token usage only, no USD cost
     ),
     "opencode": RuntimeProvider(
@@ -91,6 +119,12 @@ PROVIDERS: dict[str, RuntimeProvider] = {
         # from its model catalog — a client-side estimate, like claude's total_cost_usd.
         reports_cost=True,
         prefix_keys=_OPENCODE_PREFIX_KEYS,
+        # Bare ids from the single-provider runtimes work here too: `claude-sonnet-4-6`
+        # expands to `anthropic/claude-sonnet-4-6`, `gpt-5.5` to `openai/gpt-5.5`.
+        sugar=(
+            (_ANTHROPIC_MODEL_PREFIXES, "anthropic"),
+            (_OPENAI_MODEL_PREFIXES, "openai"),
+        ),
     ),
 }
 
@@ -122,6 +156,13 @@ def required_model_key(runtime: str | None, model: str | None = None) -> str:
     return provider(runtime).key_for(model)
 
 
+def canonical_model(runtime: str | None, model: str | None) -> str | None:
+    """`model` as the `runtime`'s CLI expects it — opencode sugar expanded
+    (`claude-sonnet-4-6` -> `anthropic/claude-sonnet-4-6`), everything else unchanged.
+    Harnesses call this when building the argv."""
+    return provider(runtime).canonical(model)
+
+
 def validate_model(runtime: str | None, model: str | None) -> None:
     """Enforce per-harness model eligibility: `model` (when named) must be one the
     `runtime` is allowed to drive. Raises ValueError on an unknown runtime or an
@@ -130,14 +171,15 @@ def validate_model(runtime: str | None, model: str | None) -> None:
     A `None` model is permitted for statically-keyed runtimes — the harness then falls
     back to the runtime's own default model (e.g. whatever `claude`/`codex` picks). A
     prefix-keyed runtime (`opencode`) must name a model: its provider key and
-    eligibility both derive from the model's provider prefix."""
+    eligibility both derive from it (a bare id like `claude-sonnet-4-6` or an explicit
+    `provider/model` both work)."""
     prov = provider(runtime)
     if model is None:
         if prov.model_key is None:
             raise ValueError(
-                f"the {runtime!r} harness requires an explicit model in provider/model "
-                f"form (e.g. {prov.model_prefixes[0]}...): its provider key derives "
-                "from the model's prefix"
+                f"the {runtime!r} harness requires an explicit model — a bare id "
+                "(e.g. claude-sonnet-4-6) or provider/model form: its provider key "
+                "derives from the model"
             )
         return
     if not prov.is_eligible(model):

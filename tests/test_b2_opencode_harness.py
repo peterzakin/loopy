@@ -188,16 +188,33 @@ def test_required_key_derives_from_model_provider_prefix():
     }
 
 
+def test_bare_model_id_sugars_to_provider_form():
+    """An agent may write the bare id every other runtime uses; the harness expands it to
+    opencode's provider/model naming in the argv, and the key derivation follows suit."""
+    step = StepSpec(id="w/s", agent="Fixer", body="b")
+    bare = AgentSpec(harness=HarnessSpec(runtime="opencode", model="claude-sonnet-4-6"))
+    harness = OpenCodeHarness({"Fixer": bare})
+    argv = harness.build_argv(step, bare, "b")
+    assert "anthropic/claude-sonnet-4-6" in argv
+    assert "claude-sonnet-4-6" not in argv  # never the bare form
+    assert harness.required_keys(bare) == {"ANTHROPIC_API_KEY"}
+
+    openai_bare = AgentSpec(harness=HarnessSpec(runtime="opencode", model="gpt-5.5"))
+    harness = OpenCodeHarness({"Fixer": openai_bare})
+    assert "openai/gpt-5.5" in harness.build_argv(step, openai_bare, "b")
+    assert harness.required_keys(openai_bare) == {"OPENAI_API_KEY"}
+
+
 def test_run_raises_on_nonzero_exit():
     step = StepSpec(id="w/s", agent="Fixer", body="b")
     with pytest.raises(HarnessError):
         asyncio.run(_harness().run(step, _ctx(), CaptureSandbox("", exit_code=1)))
 
 
-def test_construction_rejects_unprefixed_model():
-    # OpenCode models are `provider/model`; a bare model id has no provider to derive
+def test_construction_rejects_unknown_provider_model():
+    # A model no recognized provider serves (and no sugar covers) has nothing to derive
     # eligibility or an auth key from.
-    bad = AgentSpec(harness=HarnessSpec(runtime="opencode", model="claude-opus-4-8"))
+    bad = AgentSpec(harness=HarnessSpec(runtime="opencode", model="gemini-2.5-pro"))
     with pytest.raises(ValueError, match="not eligible"):
         OpenCodeHarness({"Fixer": bad})
 

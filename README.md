@@ -127,8 +127,9 @@ more agents and events.)
 ```yaml
 # Defaults: every agent inherits these; override a field only when needed.
 # `harness.runtime` picks the agent runner: `claude-code` (Claude Code, claude-* models),
-# `codex` (OpenAI Codex, gpt-*/o-series/codex-* models), or `opencode` (OpenCode, models
-# named provider/model, e.g. anthropic/claude-sonnet-4-6). Model must match the runtime.
+# `codex` (OpenAI Codex, gpt-*/o-series/codex-* models), or `opencode` (OpenCode, which
+# drives either family — write the bare model id; loopy expands it to opencode's
+# provider/model naming). Model must match the runtime.
 defaults:
   agent:
     sandbox: default
@@ -156,7 +157,7 @@ agents:
   Reviewer:     { skills: [rubrics/fix-quality] }                       # a judge, review-only skill
   Releaser:     { skills: [rollout] }
   Scout:        { harness: { runtime: codex, model: gpt-5 }, skills: [triage] }   # runs on OpenAI Codex
-  Sweeper:      { harness: { runtime: opencode, model: anthropic/claude-sonnet-4-6 }, skills: [triage] }  # runs on OpenCode
+  Sweeper:      { harness: { runtime: opencode, model: claude-sonnet-4-6 }, skills: [triage] }  # runs on OpenCode
 
 # Events: the bus contract. A step's `on:` may only name an event registered here.
 # Typed field maps.

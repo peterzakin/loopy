@@ -5,13 +5,14 @@ Mirrors ClaudeCodeHarness/CodexHarness behind the same `AgentHarness` protocol: 
 `--format json` event stream, and feeds it through the shared JSON output protocol
 (`JsonProtocolHarness`).
 
-OpenCode is model-agnostic — its models are named `provider/model` (e.g.
-`anthropic/claude-sonnet-4-6`, `openai/gpt-5.5`) and it authenticates each provider
-from that provider's own env var. Both harness rules therefore derive from the model's
-provider prefix (see `providers.py`): eligibility admits the prefixes loopy recognizes,
-and `required_keys` resolves per agent (an `anthropic/*` agent needs ANTHROPIC_API_KEY,
-an `openai/*` agent OPENAI_API_KEY). A model is mandatory — with no `provider/` prefix
-there is nothing to derive auth from.
+OpenCode is model-agnostic — its CLI names models `provider/model` and authenticates
+each provider from that provider's own env var. An agent writes the same bare model id
+every other runtime uses (`claude-sonnet-4-6`, `gpt-5.5`); `providers.py` sugar expands
+it to the namespaced form for eligibility, key derivation, and the `--model` argv
+(an explicit `anthropic/...`/`openai/...` passes through). `required_keys` therefore
+resolves per agent (a claude-* agent needs ANTHROPIC_API_KEY, an OpenAI-model agent
+OPENAI_API_KEY), and a model is mandatory — with no model there is nothing to derive
+auth from.
 
 `opencode run --format json` emits one JSON event per line on stdout, each
 `{"type": ..., "timestamp": ..., "sessionID": ..., ...}`:
@@ -34,6 +35,7 @@ import json
 from loopy_runtime.contract import ToolchainLayer, Usage
 from loopy_runtime.harness.base import HarnessError, JsonProtocolHarness
 from loopy_runtime.manifest_model import AgentSpec, StepSpec
+from loopy_runtime.providers import canonical_model
 
 __all__ = ["OpenCodeHarness", "HarnessError"]
 
@@ -55,10 +57,12 @@ class OpenCodeHarness(JsonProtocolHarness):
     def build_argv(self, step: StepSpec, agent: AgentSpec, prompt: str) -> list[str]:
         # `run` is opencode's non-interactive mode; `--format json` emits one JSON
         # event per line. The model is always present (construction rejects a None
-        # model for this runtime — auth derives from its provider prefix).
+        # model for this runtime — auth derives from it) and is handed to the CLI in
+        # its canonical provider/model form (bare-id sugar expanded).
         argv = ["opencode", "run", prompt, "--format", "json"]
-        if agent.harness.model:
-            argv += ["--model", agent.harness.model]
+        model = canonical_model(self.RUNTIME, agent.harness.model)
+        if model:
+            argv += ["--model", model]
         # The loopy sandbox is the boundary, so approve opencode's own permission
         # requests — headless `run` auto-REJECTS them otherwise, silently crippling
         # the agent. The analogue of claude's `bypassPermissions`.
