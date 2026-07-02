@@ -156,6 +156,7 @@ agents:
   Reviewer:     { skills: [rubrics/fix-quality] }                       # a judge, review-only skill
   Releaser:     { skills: [rollout] }
   Scout:        { harness: { runtime: codex, model: gpt-5 }, skills: [triage] }   # runs on OpenAI Codex
+  Sweeper:      { harness: { runtime: opencode, model: anthropic/claude-sonnet-4-6 }, skills: [triage] }  # runs on OpenCode
 
 # Events: the bus contract. A step's `on:` may only name an event registered here.
 # Typed field maps.
@@ -173,12 +174,10 @@ events:
   GoalShipped:     { goal_id: str }                                    # terminal announcement
 ```
 
-> **Built-in agents.** Like the `Github.*` events (below), three agents ship with the platform:
-> `BaseClaude` (`claude-code`, `claude-sonnet-4-6`), `BaseCodex` (`codex`, `gpt-5.5`), and
-> `BaseOpenCode` (`opencode`, `anthropic/claude-sonnet-4-6`). A step may name any of them in
-> `agent:` with **no** `registry.yml` entry; the compiler injects it, bound to the project's
-> `default` sandbox with no skills. Declaring your own agent under the same name overrides
-> the built-in.
+> **No built-in agents.** Every agent a step names must be declared in `registry.yml` — the
+> harness pairing is always explicit and visible, never injected. `loopy init` scaffolds one
+> agent per supported runtime (`claude-code`, `codex`, `opencode`) so the yaml for each is
+> there to point a step at or edit.
 
 Beyond a single step's `budget:`, the registry takes a top-level `limits:` block for wider spend
 caps: `cascade_spend: { usd: <n> }` caps the total spend of an entire event cascade, and

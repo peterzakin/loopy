@@ -52,7 +52,6 @@ _REGISTRY_YML = """\
 defaults:
   agent:
     sandbox: Dev
-    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
 
 # Sandbox — compute + egress. `daytona` runs each agent in an isolated cloud sandbox built
 # from the `image:` spec below (set DAYTONA_API_KEY in loopy.env). Swap `provider:` to `docker`
@@ -63,13 +62,22 @@ sandboxes:
   Dev:
     provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
-    network: [github.com, api.anthropic.com]   # git over https + the model API
+    # git over https + the model API. Switching a step to Codex (or OpenCode on an
+    # openai/* model)? Add api.openai.com here.
+    network: [github.com, api.anthropic.com]
     env_file: secrets/base.env                  # gitignored; resolved at run time
     __REPOS_LINE__
 
 # Agents — capability comes from the sandbox, skills, injected git creds, and budget.
+# One agent per supported runtime, declared explicitly; the starter workflow points at
+# Claude. To run a step on another runtime, change its `agent:` — and give the sandbox
+# that provider's key (secrets/base.env) plus its API host (`network:` above).
 agents:
-  Coder: { skills: [codefix] }
+  Claude:   { harness: { runtime: claude-code, model: claude-sonnet-4-6 }, skills: [codefix] }
+  Codex:    { harness: { runtime: codex, model: gpt-5.5 }, skills: [codefix] }
+  OpenCode:                       # opencode models are named provider/model
+    harness: { runtime: opencode, model: anthropic/claude-sonnet-4-6 }
+    skills: [codefix]
 
 # Events — the bus contract. A step's `on:` may only name an event registered here.
 events:
@@ -86,7 +94,7 @@ events:
 _OPEN_PR_MD = """\
 ---
 on: CodeTask
-agent: Coder
+agent: Claude
 output:
   pr_url: url
   summary: str
@@ -140,9 +148,12 @@ _DEV_ENV = """\
 # Secrets for the `Dev` sandbox, injected as environment variables at run time. Gitignored —
 # never commit this file. Lines are KEY=VALUE; values are literal (no ${VAR} interpolation).
 
-# --- model auth (claude-code) ---
-# Required for the daytona/docker providers (the built image carries no creds).
+# --- model auth ---
+# Required for the daytona/docker providers (the built image carries no creds). The Claude
+# agent (claude-code) and the OpenCode agent's anthropic/* model authenticate with this key.
 ANTHROPIC_API_KEY=sk-ant-...
+# The Codex agent (and an OpenCode agent on an openai/* model) uses this one instead.
+# OPENAI_API_KEY=sk-...
 
 # --- git auth ---
 # Only needed if you are NOT using a GitHub App. `loopy auth github` injects a scoped token
@@ -246,24 +257,32 @@ _ORCH_REGISTRY_YML = """\
 defaults:
   agent:
     sandbox: Dev
-    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
 
 # Sandbox — compute + egress. `daytona` runs each agent in an isolated cloud sandbox built
 # from the `image:` spec below (set DAYTONA_API_KEY in loopy.env). Swap `provider:` to `docker`
 # for a fully local, hermetic run — both build from the same `image:` spec.
-#   • no repos: this loop only talks to the model, so egress is just api.anthropic.com
+#   • no repos: this loop only talks to the model, so egress is just the model API
 #   • want an agent that edits code? add a repo (and run `loopy auth github`) and a PR workflow
 #   • `env_file:` is the gitignored dotenv injected as the sandbox's environment
 sandboxes:
   Dev:
     provider: daytona
     image: { debian_slim: "3.12", workdir: /home/loopy, user: loopy }
-    network: [api.anthropic.com]               # just the model API — no git, no repos
+    # just the model API — no git, no repos. Switching a step to Codex (or OpenCode on an
+    # openai/* model)? Add api.openai.com here.
+    network: [api.anthropic.com]
     env_file: secrets/base.env                  # gitignored; resolved at run time
 
 # Agents — capability comes from the sandbox, skills, and budget.
+# One agent per supported runtime, declared explicitly; the starter workflow points at
+# Claude. To run a step on another runtime, change its `agent:` — and give the sandbox
+# that provider's key (secrets/base.env) plus its API host (`network:` above).
 agents:
-  Summarizer: { skills: [summarize] }
+  Claude:   { harness: { runtime: claude-code, model: claude-sonnet-4-6 }, skills: [summarize] }
+  Codex:    { harness: { runtime: codex, model: gpt-5.5 }, skills: [summarize] }
+  OpenCode:                       # opencode models are named provider/model
+    harness: { runtime: opencode, model: anthropic/claude-sonnet-4-6 }
+    skills: [summarize]
 
 # Events — the bus contract. A step's `on:` may only name an event registered here.
 events:
@@ -279,7 +298,7 @@ events:
 _ORCH_WORKFLOW_MD = """\
 ---
 on: Note
-agent: Summarizer
+agent: Claude
 output:
   summary: str
   action_items: str
@@ -331,9 +350,12 @@ _ORCH_DEV_ENV = """\
 # Secrets for the `Dev` sandbox, injected as environment variables at run time. Gitignored —
 # never commit this file. Lines are KEY=VALUE; values are literal (no ${VAR} interpolation).
 
-# --- model auth (claude-code) ---
-# Required for the daytona/docker providers (the built image carries no creds).
+# --- model auth ---
+# Required for the daytona/docker providers (the built image carries no creds). The Claude
+# agent (claude-code) and the OpenCode agent's anthropic/* model authenticate with this key.
 ANTHROPIC_API_KEY=sk-ant-...
+# The Codex agent (and an OpenCode agent on an openai/* model) uses this one instead.
+# OPENAI_API_KEY=sk-...
 
 # --- only for the `local` provider (a bare subprocess inherits nothing from your shell) ---
 # With the daytona/docker providers these come from the built image; leave them out.

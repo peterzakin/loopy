@@ -54,6 +54,20 @@ def test_orchestrator_scaffold_compiles_green(tmp_path):
     assert "octocat" not in (target / "registry.yml").read_text().lower()
 
 
+def test_scaffold_declares_an_agent_per_runtime(tmp_path):
+    """No built-in agents: both starters write the explicit yaml for all three runtimes,
+    so switching a step's runtime is editing a visible declaration, never discovering one."""
+    for label, repos in (("coding", ["me/app"]), ("orch", None)):
+        target = tmp_path / label
+        scaffold_project(target, "demo", repos=repos)
+        result = compile_project(target)
+        assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
+        agents = result.project.registry.agents
+        assert {a.harness.runtime for a in agents.values()} == {"claude-code", "codex", "opencode"}
+        # The opencode agent's model carries the provider/ prefix its runtime requires.
+        assert agents["OpenCode"].harness.model == "anthropic/claude-sonnet-4-6"
+
+
 def test_scaffold_writes_named_repos(tmp_path):
     """Repos named at init land verbatim in the Dev sandbox's `repos:` and compile green."""
     target = tmp_path / "demo"
