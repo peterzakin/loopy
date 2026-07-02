@@ -1,4 +1,4 @@
-"""Stable diagnostic codes (FRONTEND §14) — the test contract.
+"""Stable diagnostic codes — the test contract.
 
 One named constant per code; the golden-negative suite is one fixture per code.
 Codes are never renumbered once shipped. NOTE: there is intentionally no E108/E109.

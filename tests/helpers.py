@@ -2,7 +2,7 @@
 
 `write_project` materializes an in-memory project for inline negative fixtures;
 `compile_fixture` runs the pipeline; `assert_code` asserts an exact diagnostic code
-(optionally at a file:line) — the golden-negative contract (FRONTEND §12)."""
+(optionally at a file:line) — the golden-negative contract."""
 
 from __future__ import annotations
 

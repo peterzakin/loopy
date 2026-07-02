@@ -2,7 +2,7 @@
 
 Pure inventory (no diagnostics): a missing/unreadable `registry.yml` surfaces as
 E001 in the registry loader (P1). File lists are sorted so compilation is
-order-independent (a determinism requirement of the manifest, FRONTEND §12).
+order-independent (a determinism requirement of the manifest).
 """
 
 from __future__ import annotations

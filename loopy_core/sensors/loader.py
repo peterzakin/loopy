@@ -1,4 +1,4 @@
-"""P7 — Python AST sensor inspector (FRONTEND §7).
+"""P7 — Python AST sensor inspector.
 
 Never imports or executes sensor modules: parses each `sensors/**/*.py` to an AST
 and reads each `@sensor(...)`-decorated function's *declared* `emits` + trigger.
