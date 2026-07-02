@@ -124,6 +124,24 @@ def test_orchestrator_scaffold_writes_summarize_layout(tmp_path):
     assert "# demo" in (target / "registry.yml").read_text()
 
 
+def test_scaffold_writes_agents_md_for_both_starters(tmp_path):
+    """Both starters ship an AGENTS.md — the map a coding agent auto-discovers. It must carry
+    the verify loop, the runnability warning, and the starter's own trigger example so an
+    agent can drive the project without fetching docs."""
+    for label, repos, event in (("coding", ["me/app"], "CodeTask"), ("orch", None, "Note")):
+        target = tmp_path / label
+        scaffold_project(target, "demo", repos=repos)
+        agents_md = (target / "AGENTS.md").read_text()
+        # The shared reference: verify loop + the compile-is-not-runnable warning.
+        assert "loopy compile --check ." in agents_md
+        assert "loopy doctor" in agents_md
+        assert "green compile is not a runnable project" in agents_md.lower()
+        # The starter-specific tail names this project's own entry event.
+        assert f"--event {event}" in agents_md
+        # And the sentinel was actually replaced.
+        assert "__STARTER_BLOCK__" not in agents_md
+
+
 def test_scaffolded_loopy_env_does_not_block_auth_github(tmp_path):
     """The coding control-plane template must leave GitHub App vars commented out — an uncommented
     GITHUB_APP_ID would make `loopy auth github` think an App is already configured."""
