@@ -63,8 +63,8 @@ cp examples/codefix/base.env.example examples/codefix/secrets/base.env
 
 What the `env_file` must supply, by the sandbox's `provider:` (set in `registry.yml`):
 
-| Var | `provider: docker` (default) | `provider: local` (no Docker) |
-|-----|------------------------------|-------------------------------|
+| Var | `provider: daytona` (default) | `provider: local` (no sandbox) |
+|-----|-------------------------------|--------------------------------|
 | `ANTHROPIC_API_KEY` | **required** (the image has no creds) | required, unless Claude OAuth creds are reachable via `HOME` — see below |
 | `GITHUB_TOKEN` | required *unless* a GitHub App is configured (see below) | same |
 | `PATH` | not needed — comes from the image | **required** — else `claude`/`git` aren't found |
@@ -72,9 +72,10 @@ What the `env_file` must supply, by the sandbox's `provider:` (set in `registry.
 
 > **Why `PATH`/`HOME` for `local`?** The `local` provider runs the agent as a bare subprocess
 > with *only* the `env_file` as its environment — your shell's `PATH`/`HOME` are not inherited
-> (this was the #1 papercut for the first real run). The `docker` provider avoids it entirely:
-> the toolchain, `PATH`, and `HOME` come from the image, so isolation matches Daytona while
-> needing only a local Docker daemon. **Prefer `provider: docker`.**
+> (this was the #1 papercut for the first real run). The `daytona` provider (and `docker`, its
+> local-only sibling) avoids it entirely: the toolchain, `PATH`, and `HOME` come from the built
+> image. **Prefer `provider: daytona`** (set `DAYTONA_API_KEY` in `loopy.env`); use `docker`
+> when you want the same hermetic image to run against a local Docker daemon instead.
 
 > **OAuth instead of an API key (`local`):** if you use Claude Code via a subscription, point
 > `HOME` at a directory containing `~/.claude/.credentials.json` and you can omit
@@ -105,7 +106,7 @@ loopy trigger manifest.json \
   --root examples/codefix
 ```
 
-The sandbox runs on whatever `registry.yml`'s `provider:` names (here, `docker`).
+The sandbox runs on whatever `registry.yml`'s `provider:` names (here, `daytona`).
 
 It fires the event, runs the single step to completion, and prints the step order, the emitted
 `PROpened` event, and the step's outputs — including the `pr_url`. Add `--json` for the full

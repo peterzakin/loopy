@@ -19,7 +19,7 @@ defaults:
 # injected GitHub token; egress is limited to github.com + the model API.
 sandboxes:
   BaseSandbox:
-    provider: docker
+    provider: daytona
     image: { debian_slim: "3.12", apt: [git, gh], workdir: /home/loopy, user: loopy }
     network: [github.com, api.anthropic.com]
     env_file: secrets/base.env          # gitignored; resolved by the backend at run time
