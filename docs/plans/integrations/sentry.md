@@ -297,7 +297,7 @@ Two other differences from `loopy auth github` remain:
 
 ```
 loopy auth sentry
-  [--webhook-url <url>]            # public https URL for /hooks/sentry (prompted if omitted)
+  [--webhook-url <url>]            # public base URL; default $SENTRY_PUBLIC_URL, else prompted
   [--org <slug>]                   # default: $SENTRY_ORG, else auto-detected from the token
   [--name loopy]                   # integration name (default: loopy[-org])
   [--sentry-url https://sentry.io] # base URL; override for self-hosted ($SENTRY_URL)
@@ -323,8 +323,12 @@ is a bare `loopy auth sentry`.
 ### The hosted URL
 
 Sentry must reach the webhook over **public HTTPS**, and `loopy run` binds `127.0.0.1:8000` —
-so the URL cannot be inferred; the user supplies it (`--webhook-url`, or an interactive prompt).
-Three cases the prompt text must handle:
+so the URL cannot be inferred; the user supplies it. It resolves `--webhook-url` →
+**`$SENTRY_PUBLIC_URL`** → interactive prompt. `SENTRY_PUBLIC_URL` is the project's public base
+URL (the command appends `/hooks/sentry` if the path is absent); putting it in the environment
+or `loopy.env` makes `auth sentry` and a later `--update` fully non-interactive, and fits the
+existing convention of env-carried config (`SENTRY_ORG`, `SENTRY_URL`). Three cases the prompt
+text must handle:
 
 - **Deployed:** the user knows their host; suggest the shape `https://<host>/hooks/sentry`.
 - **Local dev:** no public URL exists. Reject localhost/http answers with the fix spelled out:
@@ -345,7 +349,8 @@ checks the secret side.
    `GET {sentry_url}/api/0/organizations/{org}/` to confirm it's valid for the org.
 2. Idempotency guard: `SENTRY_WEBHOOK_SECRET` already in `loopy.env` and no `--force` → error
    (mirrors the `GITHUB_APP_ID` guard in `run_github_auth`).
-3. Resolve the webhook URL (flag → prompt, with the tunnel guidance above).
+3. Resolve the webhook URL (`--webhook-url` → `$SENTRY_PUBLIC_URL` → prompt, with the tunnel
+   guidance above).
 4. `POST {sentry_url}/api/0/organizations/{org}/sentry-apps/` with
    `{ name, isInternal: true, webhookUrl, scopes: ["event:read"], events: ["issue"] }`.
    Suffix the name on collision (as `default_app_name` does for GitHub). **On 403, emit the
