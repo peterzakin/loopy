@@ -8,8 +8,8 @@ code), so they version, diff, and review like the rest of your codebase. There's
 click together: `loopy compile` builds the workflow's DAG straight from those files.
 
 **Agent-neutral.** Loopy orchestrates the loop; it doesn't bind you to one vendor's agent. Every
-step names its runtime in `registry.yml` (`harness.runtime`): **Claude Code** (`claude-*` models)
-and **OpenAI Codex** (`gpt-*`/o-series/`codex-*`) ship today, and the harness registry is built to
+step names its runtime in `registry.yml` (`harness.runtime`): **Claude Code**
+and **OpenAI Codex** ship today, and the harness registry is built to
 take more. Mix them in one manifest: route a triage step to one runtime and a fixer to another,
 and swap a step's runtime or model without touching its prose.
 
