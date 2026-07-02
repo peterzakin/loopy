@@ -1,4 +1,4 @@
-"""Built-in agents (Option A): zero-config `BaseClaude` / `BaseCodex`.
+"""Built-in agents (Option A): zero-config `BaseClaude` / `BaseCodex` / `BaseOpenCode`.
 
 A step may name a platform-shipped agent in its `agent:` without a `registry.yml` entry;
 the compiler injects the referenced one (a fixed harness on the reserved `default` sandbox,
@@ -58,6 +58,22 @@ def test_base_codex_resolves_with_no_registry_entry(tmp_path):
     agent = result.project.registry.agents["BaseCodex"]
     assert agent.harness.runtime == "codex"
     assert agent.harness.model == "gpt-5.5"
+
+
+def test_base_opencode_resolves_with_no_registry_entry(tmp_path):
+    """The OpenCode built-in binds the opencode runtime, with a provider-prefixed model."""
+    write_project(
+        tmp_path,
+        {
+            "registry.yml": REGISTRY,
+            "workflows/review/r.md": md("on: Github.PullRequestOpened\nagent: BaseOpenCode"),
+        },
+    )
+    result = compile_project(tmp_path)
+    assert not result.diagnostics.has_errors(), result_codes(result)
+    agent = result.project.registry.agents["BaseOpenCode"]
+    assert agent.harness.runtime == "opencode"
+    assert agent.harness.model == "anthropic/claude-sonnet-4-6"
 
 
 def test_builtin_agent_survives_to_manifest(tmp_path):
@@ -139,7 +155,7 @@ def test_unknown_agent_still_reports_e501(tmp_path):
     assert "BaseGemini" not in result.project.registry.agents
 
 
-def test_catalog_covers_both_runtimes():
-    """The two shipped built-ins name distinct runtimes — the single guard on the catalog shape."""
+def test_catalog_covers_all_runtimes():
+    """Each shipped built-in names a distinct runtime — the single guard on the catalog shape."""
     runtimes = {spec["runtime"] for spec in BUILTIN_AGENTS.values()}
-    assert runtimes == {"claude-code", "codex"}
+    assert runtimes == {"claude-code", "codex", "opencode"}

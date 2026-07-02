@@ -45,6 +45,12 @@ def test_workflow_for_event_resolves_entry():
 def test_provider_registry_resolves_v1_runtimes():
     assert required_model_key("claude-code") == "ANTHROPIC_API_KEY"
     assert required_model_key("codex") == "OPENAI_API_KEY"  # codex harness is wired now
+    # opencode's key derives from the model's provider prefix, so the model is required.
+    assert required_model_key("opencode", "anthropic/claude-sonnet-4-6") == "ANTHROPIC_API_KEY"
+    assert required_model_key("opencode", "openai/gpt-5.5") == "OPENAI_API_KEY"
+    with pytest.raises(ValueError):
+        required_model_key("opencode")  # no model -> no prefix to derive the key from
+    # REQUIRED_MODEL_KEY covers only the statically-keyed runtimes.
     assert set(REQUIRED_MODEL_KEY) == {"claude-code", "codex"}
     with pytest.raises(ValueError):
         required_model_key("unknown-runtime")
@@ -55,13 +61,20 @@ def test_model_eligibility_per_harness():
     validate_model("claude-code", "claude-opus-4-8")
     validate_model("codex", "gpt-5-codex")
     validate_model("codex", "o3")
+    validate_model("opencode", "anthropic/claude-sonnet-4-6")
+    validate_model("opencode", "openai/gpt-5.5")
     # A None model is allowed (falls back to the runtime default).
     validate_model("codex", None)
+    # ... except for opencode, whose auth key derives from the model's provider prefix.
+    with pytest.raises(ValueError, match="requires an explicit model"):
+        validate_model("opencode", None)
     # Cross-provider pairings are rejected.
     with pytest.raises(ValueError):
         validate_model("claude-code", "gpt-5-codex")
     with pytest.raises(ValueError):
         validate_model("codex", "claude-opus-4-8")
+    with pytest.raises(ValueError):
+        validate_model("opencode", "claude-opus-4-8")  # bare model id, no provider prefix
 
 
 def test_protocols_are_runtime_checkable():

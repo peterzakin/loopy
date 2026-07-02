@@ -18,6 +18,7 @@ from loopy_runtime.bus.inproc import InProcessEventBus
 from loopy_runtime.contract import ExecResult, ToolchainLayer
 from loopy_runtime.harness.claude_code import ClaudeCodeHarness
 from loopy_runtime.harness.codex import CodexHarness
+from loopy_runtime.harness.opencode import OpenCodeHarness
 from loopy_runtime.harness.router import HarnessRouter
 from loopy_runtime.manifest_model import AgentSpec, HarnessSpec, Manifest
 from loopy_runtime.runtime.inmemory import InMemoryRuntime
@@ -79,6 +80,7 @@ def test_compose_empty_layer_is_noop():
 
 _CLAUDE = AgentSpec(harness=HarnessSpec(runtime="claude-code", model="claude-sonnet-4-6"))
 _CODEX = AgentSpec(harness=HarnessSpec(runtime="codex", model="gpt-5-codex"))
+_OPENCODE = AgentSpec(harness=HarnessSpec(runtime="opencode", model="anthropic/claude-sonnet-4-6"))
 
 
 def test_claude_toolchain_has_substrate_plus_cli():
@@ -93,6 +95,13 @@ def test_codex_toolchain_has_substrate_plus_cli():
     assert "git" in layer.apt and "nodejs" in layer.apt
     assert any("codex" in c for c in layer.run)
     assert set(layer.probe) == {"git", "codex"}
+
+
+def test_opencode_toolchain_has_substrate_plus_cli():
+    layer = OpenCodeHarness({"a": _OPENCODE}).toolchain(_OPENCODE)
+    assert "git" in layer.apt and "nodejs" in layer.apt
+    assert any("opencode-ai" in c for c in layer.run)
+    assert set(layer.probe) == {"git", "opencode"}
 
 
 def test_required_tools_is_the_probe():

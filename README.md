@@ -8,8 +8,8 @@ code), so they version, diff, and review like the rest of your codebase. There's
 click together: `loopy compile` builds the workflow's DAG straight from those files.
 
 **Agent-neutral.** Loopy orchestrates the loop; it doesn't bind you to one vendor's agent. Every
-step names its runtime in `registry.yml` (`harness.runtime`): **Claude Code**
-and **OpenAI Codex** ship today, and the harness registry is built to
+step names its runtime in `registry.yml` (`harness.runtime`): **Claude Code**,
+**OpenAI Codex**, and **OpenCode** ship today, and the harness registry is built to
 take more. Mix them in one manifest: route a triage step to one runtime and a fixer to another,
 and swap a step's runtime or model without touching its prose.
 
@@ -126,8 +126,9 @@ more agents and events.)
 
 ```yaml
 # Defaults: every agent inherits these; override a field only when needed.
-# `harness.runtime` picks the agent runner: `claude-code` (Claude Code, claude-* models) or
-# `codex` (OpenAI Codex, gpt-*/o-series/codex-* models). Model must match the runtime.
+# `harness.runtime` picks the agent runner: `claude-code` (Claude Code, claude-* models),
+# `codex` (OpenAI Codex, gpt-*/o-series/codex-* models), or `opencode` (OpenCode, models
+# named provider/model, e.g. anthropic/claude-sonnet-4-6). Model must match the runtime.
 defaults:
   agent:
     sandbox: default
@@ -172,11 +173,12 @@ events:
   GoalShipped:     { goal_id: str }                                    # terminal announcement
 ```
 
-> **Built-in agents.** Like the `Github.*` events (below), two agents ship with the platform:
-> `BaseClaude` (`claude-code`, `claude-sonnet-4-6`) and `BaseCodex` (`codex`, `gpt-5.5`). A step
-> may name either in `agent:` with **no** `registry.yml` entry; the compiler injects it, bound to
-> the project's `default` sandbox with no skills. Declaring your own agent under the same name
-> overrides the built-in.
+> **Built-in agents.** Like the `Github.*` events (below), three agents ship with the platform:
+> `BaseClaude` (`claude-code`, `claude-sonnet-4-6`), `BaseCodex` (`codex`, `gpt-5.5`), and
+> `BaseOpenCode` (`opencode`, `anthropic/claude-sonnet-4-6`). A step may name any of them in
+> `agent:` with **no** `registry.yml` entry; the compiler injects it, bound to the project's
+> `default` sandbox with no skills. Declaring your own agent under the same name overrides
+> the built-in.
 
 Beyond a single step's `budget:`, the registry takes a top-level `limits:` block for wider spend
 caps: `cascade_spend: { usd: <n> }` caps the total spend of an entire event cascade, and

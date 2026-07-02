@@ -11,8 +11,9 @@ are loaded and *before* `resolve_refs` and `cross_check` — does:
      `{{ event.field }}` refs resolve and the runtime can validate it) and synthesizes
      a built-in `Sensor` on `/hooks/github` (so the event has a producer — no W501).
   3. Reports an unknown `Github.*` trigger (E112) with the catalog of known names.
-  4. For each built-in agent (`BaseClaude`/`BaseCodex`) a step names and the project didn't
-     declare, registers it so `cross_check`'s X2 resolves it like any registered agent.
+  4. For each built-in agent (`BaseClaude`/`BaseCodex`/`BaseOpenCode`) a step names and the
+     project didn't declare, registers it so `cross_check`'s X2 resolves it like any
+     registered agent.
 
 Validation of the reserved namespace lives entirely here; `cross_check` skips its
 E504 registration check for reserved-prefix events (this pass owns them).
@@ -86,9 +87,10 @@ def inject_builtins(
 
 
 def _inject_agents(registry: Registry, workflows: dict[str, Workflow]) -> None:
-    """Register each built-in agent (`BaseClaude`/`BaseCodex`) a step names but the project didn't
-    declare. A user agent of the same name wins (we only fill the gap), so `agent: BaseClaude`
-    resolves in X2 with zero registry config. Unknown agents still fall through to E501."""
+    """Register each built-in agent (`BaseClaude`/`BaseCodex`/`BaseOpenCode`) a step names
+    but the project didn't declare. A user agent of the same name wins (we only fill the
+    gap), so `agent: BaseClaude` resolves in X2 with zero registry config. Unknown agents
+    still fall through to E501."""
     for workflow in workflows.values():
         for step in workflow.steps.values():
             name = step.agent
