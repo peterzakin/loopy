@@ -151,6 +151,61 @@ def test_scaffold_into_empty_existing_dir_is_ok(tmp_path):
     assert (target / "registry.yml").is_file()
 
 
+def test_scaffold_preserves_creds_from_prior_auth(tmp_path):
+    """`loopy init` runs `loopy auth github` before scaffolding, so a target may already hold a
+    loopy.env with real App creds. Scaffolding must keep those creds (merged under its template's
+    comments), not clobber them with the commented placeholder."""
+    from loopy_runtime.secrets import write_control_plane_env
+
+    target = tmp_path / "demo"
+    # Stand in for what `loopy auth github` writes before the scaffold runs.
+    write_control_plane_env(target, {"GITHUB_APP_ID": "42", "GITHUB_APP_PRIVATE_KEY": "pem-here"})
+
+    scaffold_project(target, "demo", repos=["me/app"])
+
+    env = load_control_plane_env(target)
+    assert env["GITHUB_APP_ID"] == "42"
+    assert env["GITHUB_APP_PRIVATE_KEY"] == "pem-here"
+    # The template's explanatory comments still land alongside the preserved creds.
+    assert "Control-plane credentials" in (target / "loopy.env").read_text()
+
+
+def test_scaffold_still_refuses_dir_with_unrelated_file(tmp_path):
+    """The pre-existing-file tolerance is scoped to loopy's own auth artifacts — any other content
+    (e.g. a stray loopy.env alongside real work) still refuses so we never clobber it."""
+    from loopy_runtime.secrets import write_control_plane_env
+
+    target = tmp_path / "demo"
+    write_control_plane_env(target, {"GITHUB_APP_ID": "42"})
+    (target / "keep.txt").write_text("mine")
+    with pytest.raises(FileExistsError):
+        scaffold_project(target, "demo")
+
+
+def test_init_offers_github_auth_before_prompting_repos(tmp_path, monkeypatch):
+    """The wizard authenticates first, then asks which repo(s) to work on — verified by the call
+    order of `_offer_github_auth` relative to `_prompt_for_repos`."""
+    calls: list[str] = []
+
+    monkeypatch.setattr(loopy_cli, "_offer_github_auth", lambda target: calls.append("auth"))
+    monkeypatch.setattr(loopy_cli, "_prompt_for_repos", lambda: (calls.append("repos"), [])[1])
+    # Keep the rest of the interactive wizard quiet.
+    monkeypatch.setattr(loopy_cli, "_offer_ambient_anthropic_key", lambda target: None)
+    monkeypatch.setattr(loopy_cli, "_offer_ambient_daytona_creds", lambda target: None)
+    monkeypatch.setattr(loopy_cli, "_offer_redis_bus", lambda target: None)
+    monkeypatch.setattr(loopy_cli, "_note_orchestrator_mode", lambda: None)
+
+    class _Tty:  # force the interactive branch (CliRunner's stdin reports not-a-tty)
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(loopy_cli.sys, "stdin", _Tty())
+
+    loopy_cli.init("demo", directory=tmp_path, non_interactive=False)
+
+    assert calls == ["auth", "repos"]
+
+
 @pytest.mark.parametrize("bad", ["", "  ", ".", "..", "a/b", "a\\b", "-leading", "/abs"])
 def test_invalid_project_names_rejected(bad):
     with pytest.raises(InvalidProjectName):
