@@ -182,11 +182,12 @@ def test_scaffold_still_refuses_dir_with_unrelated_file(tmp_path):
         scaffold_project(target, "demo")
 
 
-def test_init_offers_github_auth_before_prompting_repos(tmp_path, monkeypatch):
-    """The wizard authenticates first, then asks which repo(s) to work on — verified by the call
-    order of `_offer_github_auth` relative to `_prompt_for_repos`."""
+def test_init_offers_public_url_then_github_auth_then_repos(tmp_path, monkeypatch):
+    """The wizard asks for the hosted URL first (the App manifest bakes the webhook URL in at
+    creation), then authenticates, then asks which repo(s) to work on — verified by call order."""
     calls: list[str] = []
 
+    monkeypatch.setattr(loopy_cli, "_offer_public_url", lambda target: calls.append("url"))
     monkeypatch.setattr(loopy_cli, "_offer_github_auth", lambda target: calls.append("auth"))
     monkeypatch.setattr(loopy_cli, "_prompt_for_repos", lambda: (calls.append("repos"), [])[1])
     # Keep the rest of the interactive wizard quiet.
@@ -203,7 +204,7 @@ def test_init_offers_github_auth_before_prompting_repos(tmp_path, monkeypatch):
 
     loopy_cli.init("demo", directory=tmp_path, non_interactive=False)
 
-    assert calls == ["auth", "repos"]
+    assert calls == ["url", "auth", "repos"]
 
 
 @pytest.mark.parametrize("bad", ["", "  ", ".", "..", "a/b", "a\\b", "-leading", "/abs"])
@@ -339,6 +340,58 @@ def test_ambient_daytona_offer_does_not_clobber_existing(tmp_path, monkeypatch):
     loopy_cli._offer_ambient_daytona_creds(target)
 
     assert load_control_plane_env(target)["DAYTONA_API_KEY"] == "dtn_already_set"
+
+
+def test_public_url_offer_writes_normalized_url(tmp_path, monkeypatch):
+    """A hosted URL given at init lands in loopy.env as LOOPY_PUBLIC_URL, normalized (https
+    assumed for a bare host, trailing slash stripped) so the webhook URL built from it is clean."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo", repos=["me/app"])
+
+    monkeypatch.setattr("typer.prompt", lambda *a, **k: "loopy.example.com/")
+    loopy_cli._offer_public_url(target)
+
+    assert load_control_plane_env(target)["LOOPY_PUBLIC_URL"] == "https://loopy.example.com"
+
+
+def test_public_url_offer_blank_skips(tmp_path, monkeypatch):
+    """Blank is a first-class answer — no URL recorded, the App stays webhook-less."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo", repos=["me/app"])
+
+    monkeypatch.setattr("typer.prompt", lambda *a, **k: "")
+    loopy_cli._offer_public_url(target)
+
+    assert "LOOPY_PUBLIC_URL" not in load_control_plane_env(target)
+
+
+def test_public_url_offer_rejects_unusable_url(tmp_path, monkeypatch):
+    """An unusable answer is dropped with a pointer, never written — a bad URL baked into a
+    GitHub App's webhook would fail far from here."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo", repos=["me/app"])
+
+    monkeypatch.setattr("typer.prompt", lambda *a, **k: "ftp://loopy internal")
+    loopy_cli._offer_public_url(target)
+
+    assert "LOOPY_PUBLIC_URL" not in load_control_plane_env(target)
+
+
+def test_public_url_offer_does_not_clobber_existing(tmp_path, monkeypatch):
+    """An already-configured LOOPY_PUBLIC_URL in loopy.env is left untouched — no prompt."""
+    from loopy_runtime.secrets import write_control_plane_env
+
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo", repos=["me/app"])
+    write_control_plane_env(target, {"LOOPY_PUBLIC_URL": "https://already.example.com"})
+
+    def _boom(*a, **k):  # must not prompt when a URL is already configured
+        raise AssertionError("should not prompt when loopy.env already has LOOPY_PUBLIC_URL")
+
+    monkeypatch.setattr("typer.prompt", _boom)
+    loopy_cli._offer_public_url(target)
+
+    assert load_control_plane_env(target)["LOOPY_PUBLIC_URL"] == "https://already.example.com"
 
 
 def test_redis_offer_writes_url_when_confirmed(tmp_path, monkeypatch):

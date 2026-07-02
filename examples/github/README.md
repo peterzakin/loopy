@@ -38,20 +38,24 @@ GitHub ──webhook(/hooks/github, X-Hub-Signature-256)──▶ loopy ingress
 
 ## Setup
 
-1. **GitHub App for repo access** (recommended): `loopy auth github`, then install the App on
-   the repo in `sandboxes.BaseSandbox.repos`. (Or drop a `GITHUB_TOKEN` PAT in `secrets/base.env`.)
-2. **Webhook secret** — generate one and put it in the control-plane env so the ingress can
-   verify deliveries:
+1. **Public URL** — put the base URL where this loopy server is reachable in the control-plane
+   env (or answer the hosted-URL prompt in `loopy init`, which writes the same key):
    ```
-   echo "GITHUB_WEBHOOK_SECRET=$(openssl rand -hex 32)" >> loopy.env
+   echo "LOOPY_PUBLIC_URL=https://<your-host>" >> loopy.env
    ```
-3. **Point GitHub at the endpoint.** In the App's (or repo's) webhook settings:
-   - Payload URL: `https://<your-host>/hooks/github`
-   - Content type: `application/json`
-   - Secret: the value from step 2
-   - Events: **Pull requests** (subscribe to Issues / Pushes too if you trigger on those)
-   (For local dev, expose `http://127.0.0.1:8000` with a tunnel, e.g. `cloudflared`/`ngrok`.)
-4. **Model + sandbox creds:** `cp base.env.example secrets/base.env` and fill it in.
+   (For local dev, expose `http://127.0.0.1:8000` with a tunnel, e.g. `cloudflared`/`ngrok`,
+   and use the tunnel URL.)
+2. **GitHub App** (repo access + webhook): `loopy auth github`, then install the App on the
+   repo in `sandboxes.BaseSandbox.repos`. With `LOOPY_PUBLIC_URL` set, the App is created with
+   its webhook already pointing at `<url>/hooks/github`, subscribed to pull requests / issues /
+   issue comments / pushes, and the GitHub-minted `GITHUB_WEBHOOK_SECRET` lands in `loopy.env`
+   — deliveries are signature-verified with no manual webhook setup.
+
+   *Manual fallback* (App created before the URL existed, or a plain repo webhook): in the
+   App's (or repo's) webhook settings set Payload URL `https://<your-host>/hooks/github`,
+   content type `application/json`, a secret you generate (`openssl rand -hex 32`), and the
+   events you trigger on — then put that secret in `loopy.env` as `GITHUB_WEBHOOK_SECRET`.
+3. **Model + sandbox creds:** `cp base.env.example secrets/base.env` and fill it in.
 
 ## Run it
 

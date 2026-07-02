@@ -181,6 +181,14 @@ _LOOPY_ENV = """\
 # GITHUB_APP_ID=
 # GITHUB_APP_PRIVATE_KEY=
 
+# --- Webhook hosting ---
+# The public base URL where this loopy server is reachable (e.g. https://loopy.example.com).
+# When set before `loopy auth github`, the GitHub App is created with its webhook pointing at
+# <url>/hooks/github and GITHUB_WEBHOOK_SECRET lands here automatically, so deliveries are
+# signature-verified with no manual webhook setup.
+# LOOPY_PUBLIC_URL=
+# GITHUB_WEBHOOK_SECRET=
+
 # --- Daytona (the default sandbox; required when a sandbox uses provider: daytona) ---
 # DAYTONA_API_KEY=
 
@@ -379,6 +387,9 @@ _ORCH_LOOPY_ENV = """\
 # REDIS_URL=redis://localhost:6379
 
 # Adding a repo later? `loopy auth github` writes GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY here.
+# Set LOOPY_PUBLIC_URL first (the public base URL of this server) and it also registers the
+# App's webhook at <url>/hooks/github, landing GITHUB_WEBHOOK_SECRET here automatically.
+# LOOPY_PUBLIC_URL=
 """
 
 _ORCH_README_MD = """\

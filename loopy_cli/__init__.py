@@ -342,7 +342,10 @@ def init(
     # install first, then name the repo(s) with that install fresh in mind — rather than naming
     # repos into a registry before any auth exists. Auth writes loopy.env into `target`;
     # `scaffold_project` (run below) preserves those creds under its own template.
+    # The hosted-URL question comes first: the App manifest bakes the webhook URL in at
+    # creation time, so the URL must be in loopy.env before the auth flow reads it.
     if interactive:
+        _offer_public_url(target)
         _offer_github_auth(target)
 
     # Which repo(s) the agent works on — this decides the coding vs orchestrator starter. Blank is
@@ -522,6 +525,46 @@ def _offer_redis_bus(target: Path) -> None:
         "  "
         + typer.style("✓", fg=typer.colors.GREEN)
         + " wrote REDIS_URL to loopy.env — `loopy run` will use the Redis bus automatically"
+    )
+    typer.echo()
+
+
+def _offer_public_url(target: Path) -> None:
+    """Ask where this loopy server will be publicly reachable, and record it in loopy.env.
+
+    The URL (`LOOPY_PUBLIC_URL`) is what lets the GitHub auth step that follows register the
+    App's webhook at creation time — GitHub delivers events to `<url>/hooks/github` and the
+    minted webhook secret lands in loopy.env, so webhooks work with zero manual setup. Blank
+    is a first-class answer: no URL means the App is created webhook-less (the serverless
+    mode), and `loopy auth github` can be re-run once the server has a home. Skips silently
+    when loopy.env already has a URL (e.g. re-init) so we never clobber one.
+    """
+    from loopy_cli.auth import normalize_public_url
+    from loopy_runtime.secrets import load_control_plane_env, write_control_plane_env
+
+    # Already configured (e.g. re-init over an existing tree) — nothing to offer, don't clobber.
+    if load_control_plane_env(target).get("LOOPY_PUBLIC_URL"):
+        return
+
+    raw = typer.prompt(
+        "  Public URL where this loopy server will be hosted? Used to register the GitHub "
+        "webhook (blank = skip, no webhook)",
+        default="",
+        show_default=False,
+    ).strip()
+    if not raw:
+        return
+    try:
+        url = normalize_public_url(raw)
+    except ValueError as exc:
+        typer.echo(f"  (skipped: {exc} — set LOOPY_PUBLIC_URL in loopy.env later)")
+        return
+
+    write_control_plane_env(target, {"LOOPY_PUBLIC_URL": url})
+    typer.echo(
+        "  "
+        + typer.style("✓", fg=typer.colors.GREEN)
+        + f" wrote LOOPY_PUBLIC_URL to loopy.env — webhooks will be served at {url}/hooks/github"
     )
     typer.echo()
 
