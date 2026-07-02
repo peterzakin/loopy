@@ -207,7 +207,7 @@ class InMemoryRuntime:
             sections.append(
                 "sandbox(es) cannot supply the harness's required provider key(s):\n  "
                 + "\n  ".join(problems)
-                + "\n  → add the missing key(s) to the sandbox's env_file (see ARCHITECTURE.md §6)."
+                + "\n  → add the missing key(s) to the sandbox's env_file."
             )
         github_problem = self._github_preflight_problem(github_sandboxes)
         if github_problem:

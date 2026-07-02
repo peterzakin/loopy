@@ -1,7 +1,7 @@
 """GitHub App credential mechanics — JWT, installation discovery, token minting.
 
-The bring-your-own GitHub App model (see plans/future/repo-access): each
-deployment registers its *own* App. Minting installation tokens is pure
+The bring-your-own GitHub App model: each deployment registers its *own*
+App. Minting installation tokens is pure
 client-side — App private key → RS256 JWT → installation token via
 `api.github.com` — so loopy needs no central app and no persistent server.
 

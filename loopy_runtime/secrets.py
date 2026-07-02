@@ -9,7 +9,7 @@ Three surfaces, one parser:
   * **Control-plane env** — infra creds the *engine itself* needs (`REDIS_URL`,
     `DAYTONA_API_KEY`/`DAYTONA_API_URL`) in `loopy.env` at the project root
     (`load_control_plane_env`). A local-dev convenience; in production these come from the
-    platform's process env. See ARCHITECTURE.md §6.
+    platform's process env.
 """
 
 from __future__ import annotations
