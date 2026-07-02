@@ -31,6 +31,30 @@ from loopy_core.span import Span, span_at
 _yaml = YAML()  # round-trip mode preserves line/col info
 
 
+def normalize_public_url(raw: str) -> str:
+    """Clean a public base URL: assume https for a bare host, strip the trailing slash.
+
+    The single normalizer for `public_url` everywhere it's taken in — the registry loader
+    and the `loopy init` prompt — so a hand-edited registry.yml and a wizard answer land
+    in the same canonical form. Raises `ValueError` on anything that isn't a usable
+    http(s) base URL.
+    """
+    from urllib.parse import urlsplit
+
+    url = raw.strip()
+    if not url:
+        raise ValueError("public URL is empty")
+    if "://" not in url:
+        url = f"https://{url}"
+    url = url.rstrip("/")  # after the scheme check, so a bare "https://" can't survive it
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.netloc or " " in url:
+        raise ValueError(
+            f"{raw!r} is not an http(s) base URL (expected e.g. https://loopy.example.com)"
+        )
+    return url
+
+
 def _line_of(node: object, key: object) -> int:
     """1-based line of `key` within a ruamel CommentedMap, or 0 if unavailable."""
     try:
@@ -94,10 +118,40 @@ def load_registry(inv: Inventory, diags: DiagnosticCollector) -> Registry:
     agents = _load_agents(data.get("agents") or {}, default_agent, file)
     events = _load_events(data.get("events") or {}, file, diags)
     limits = _load_limits(data.get("limits"), file, _line_of(data, "limits"), diags)
+    public_url = _load_public_url(
+        data.get("public_url"), file, _line_of(data, "public_url"), diags
+    )
 
     _check_naming(sandboxes, agents, events, diags)
 
-    return Registry(sandboxes=sandboxes, agents=agents, events=events, limits=limits)
+    return Registry(
+        sandboxes=sandboxes, agents=agents, events=events, limits=limits, public_url=public_url
+    )
+
+
+def _load_public_url(
+    value: object, file: str, line: int, diags: DiagnosticCollector
+) -> str | None:
+    """Parse the top-level `public_url:` — where this loopy server is publicly reachable.
+
+    Absent/None is fine (the project isn't hosted yet). Anything present must normalize to a
+    usable http(s) base URL, else E216: a typo here would surface as silent webhook
+    non-delivery, far from the registry line that caused it.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        diags.error(
+            codes.E216,
+            "registry 'public_url' must be a URL string (e.g. https://loopy.example.com)",
+            span=span_at(file, line),
+        )
+        return None
+    try:
+        return normalize_public_url(value)
+    except ValueError as exc:
+        diags.error(codes.E216, f"registry 'public_url': {exc}", span=span_at(file, line))
+        return None
 
 
 def _spend_usd(raw: object) -> float | None:

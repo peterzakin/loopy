@@ -43,6 +43,8 @@ def _registry(registry: Registry) -> dict:
                 name: {"spend": wl.spend} for name, wl in registry.limits.workflows.items()
             },
         }
+    if registry.public_url is not None:
+        out["public_url"] = registry.public_url
     return out
 
 

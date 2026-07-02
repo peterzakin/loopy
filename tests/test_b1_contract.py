@@ -33,6 +33,15 @@ def test_loads_incidents_manifest_into_typed_model():
     assert m.registry.agents["Investigator"].harness == "claude-code"
     # sensors typed
     assert {s.name for s in m.sensors} == {"sentry_issues", "metric_watch"}
+    # public_url is optional and absent in the golden example — defaults to None
+    assert m.registry.public_url is None
+
+
+def test_registry_spec_carries_public_url():
+    from loopy_runtime.manifest_model import RegistrySpec
+
+    spec = RegistrySpec.model_validate({"public_url": "https://loopy.example.com"})
+    assert spec.public_url == "https://loopy.example.com"
 
 
 def test_workflow_for_event_resolves_entry():

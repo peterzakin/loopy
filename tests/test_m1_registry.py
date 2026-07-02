@@ -33,6 +33,42 @@ def test_unparseable_registry_reports_e001(tmp_path):
     assert_code(result, codes.E001, file="registry.yml")
 
 
+def test_public_url_parses_and_normalizes(tmp_path):
+    # The trailing slash is stripped so `<public_url> + <webhook path>` composes cleanly.
+    write_project(
+        tmp_path, {"registry.yml": MINIMAL + "public_url: https://loopy.example.com/\n"}
+    )
+    result = compile_project(tmp_path)
+    assert result.diagnostics.items == []
+    assert result.project.registry.public_url == "https://loopy.example.com"
+
+
+def test_public_url_bare_host_assumes_https(tmp_path):
+    write_project(tmp_path, {"registry.yml": MINIMAL + "public_url: loopy.example.com\n"})
+    result = compile_project(tmp_path)
+    assert result.diagnostics.items == []
+    assert result.project.registry.public_url == "https://loopy.example.com"
+
+
+def test_public_url_absent_is_none(tmp_path):
+    write_project(tmp_path, {"registry.yml": MINIMAL})
+    result = compile_project(tmp_path)
+    assert result.project.registry.public_url is None
+
+
+def test_public_url_non_http_reports_e216(tmp_path):
+    # A typo'd URL would otherwise surface as silent webhook non-delivery, far from here.
+    write_project(tmp_path, {"registry.yml": MINIMAL + "public_url: ftp://loopy.example.com\n"})
+    result = compile_project(tmp_path)
+    assert_code(result, codes.E216, file="registry.yml", line=6)  # the public_url: line
+
+
+def test_public_url_non_string_reports_e216(tmp_path):
+    write_project(tmp_path, {"registry.yml": MINIMAL + "public_url: [not, a, url]\n"})
+    result = compile_project(tmp_path)
+    assert_code(result, codes.E216, file="registry.yml")
+
+
 def test_registry_limits_cascade_spend_parses(tmp_path):
     write_project(tmp_path, {"registry.yml": MINIMAL + "limits:\n  cascade_spend:\n    usd: 50\n"})
     result = compile_project(tmp_path)

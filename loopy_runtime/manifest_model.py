@@ -61,6 +61,9 @@ class RegistrySpec(_Model):
     agents: dict[str, AgentSpec] = Field(default_factory=dict)
     events: dict[str, EventContract] = Field(default_factory=dict)
     limits: LimitsSpec | None = None
+    # Public base URL of this loopy server (registry.yml `public_url`); webhook senders
+    # deliver to <public_url><webhook path>. None when the project isn't hosted.
+    public_url: str | None = None
 
 
 class TriggerSpec(_Model):

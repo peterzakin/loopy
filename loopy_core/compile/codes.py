@@ -29,6 +29,7 @@ E212 = "LOOPY-E212"  # malformed sandbox repos: entry (not owner/name string nor
 E213 = "LOOPY-E213"  # malformed registry limits: (e.g. cascade_spend without a numeric usd)
 E214 = "LOOPY-E214"  # a sandbox definition is missing its required provider: (X1)
 E215 = "LOOPY-E215"  # a user event/sensor uses a reserved built-in namespace (e.g. Github.*)
+E216 = "LOOPY-E216"  # malformed registry public_url: (not a usable http(s) base URL)
 
 # E3xx — templates
 E301 = "LOOPY-E301"  # illegal template: control flow / filters / dotted path
@@ -76,6 +77,7 @@ ALL_CODES: frozenset[str] = frozenset(
         E213,
         E214,
         E215,
+        E216,
         E301,
         E302,
         E303,

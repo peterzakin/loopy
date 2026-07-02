@@ -21,6 +21,10 @@ _NAME = "__PROJECT_NAME__"
 # `init` time (or an empty list). Same `.replace` rationale as `_NAME`.
 _REPOS_LINE = "__REPOS_LINE__"
 
+# Sentinel for the top-level `public_url:` line — rendered from the hosted URL the user names at
+# `init` time, or left as a commented stub to fill in later. Same `.replace` rationale as `_NAME`.
+_PUBLIC_URL_LINE = "__PUBLIC_URL_LINE__"
+
 # A project name doubles as the new directory name, so keep it a single safe path segment.
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -51,6 +55,10 @@ def validate_project_name(name: str) -> str:
 _REGISTRY_YML = """\
 # __PROJECT_NAME__ — a starter Loopy project. One CodeTask event drives a claude-code agent
 # that edits a checkout and opens a PR. Edit freely; `loopy compile .` validates the result.
+
+# Where this loopy server is reachable from the internet — webhook senders (e.g. GitHub)
+# deliver to <public_url>/hooks/<provider>. Edit any time; leave commented while unhosted.
+__PUBLIC_URL_LINE__
 
 # Defaults — every agent inherits these; override a field only when needed.
 defaults:
@@ -181,12 +189,10 @@ _LOOPY_ENV = """\
 # GITHUB_APP_ID=
 # GITHUB_APP_PRIVATE_KEY=
 
-# --- Webhook hosting ---
-# The public base URL where this loopy server is reachable (e.g. https://loopy.example.com).
-# When set before `loopy auth github`, the GitHub App is created with its webhook pointing at
-# <url>/hooks/github and GITHUB_WEBHOOK_SECRET lands here automatically, so deliveries are
-# signature-verified with no manual webhook setup.
-# LOOPY_PUBLIC_URL=
+# --- GitHub webhook ingress ---
+# Verifies X-Hub-Signature-256 on /hooks/github deliveries. Generate a secret
+# (openssl rand -hex 32), set it here, and give GitHub the same value in the webhook
+# settings; the payload URL is registry.yml's public_url + /hooks/github.
 # GITHUB_WEBHOOK_SECRET=
 
 # --- Daytona (the default sandbox; required when a sandbox uses provider: daytona) ---
@@ -263,6 +269,10 @@ _ORCH_REGISTRY_YML = """\
 # __PROJECT_NAME__ — a starter Loopy project. One Note event drives a claude agent that distills
 # it into a short summary + action items. No repo, no git — a pure workflow orchestrator. Edit
 # freely; `loopy compile .` validates the result.
+
+# Where this loopy server is reachable from the internet — webhook senders deliver to
+# <public_url>/hooks/<path>. Edit any time; leave commented while unhosted.
+__PUBLIC_URL_LINE__
 
 # Defaults — every agent inherits these; override a field only when needed.
 defaults:
@@ -387,9 +397,6 @@ _ORCH_LOOPY_ENV = """\
 # REDIS_URL=redis://localhost:6379
 
 # Adding a repo later? `loopy auth github` writes GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY here.
-# Set LOOPY_PUBLIC_URL first (the public base URL of this server) and it also registers the
-# App's webhook at <url>/hooks/github, landing GITHUB_WEBHOOK_SECRET here automatically.
-# LOOPY_PUBLIC_URL=
 """
 
 _ORCH_README_MD = """\
@@ -434,10 +441,24 @@ def _render_repos_line(repos: list[str]) -> str:
     return f"repos: [{', '.join(repos)}]   # cloned at acquire time (git auth injected)"
 
 
-def _coding_files(repos: list[str]) -> dict[str, str]:
+def _render_public_url_line(public_url: str | None) -> str:
+    """Render the top-level `public_url:` line — a real value, or a commented stub to fill in.
+
+    The stub keeps the field visible in every fresh registry.yml, so "where is this hosted?"
+    is always an edit away rather than a key the user has to discover.
+    """
+    if public_url:
+        return f"public_url: {public_url}"
+    return "# public_url: https://loopy.example.com"
+
+
+def _coding_files(repos: list[str], public_url: str | None) -> dict[str, str]:
     """The repo-backed starter: a CodeTask → edit-a-checkout → open-a-PR loop."""
+    registry = _REGISTRY_YML.replace(_REPOS_LINE, _render_repos_line(repos)).replace(
+        _PUBLIC_URL_LINE, _render_public_url_line(public_url)
+    )
     return {
-        "registry.yml": _REGISTRY_YML.replace(_REPOS_LINE, _render_repos_line(repos)),
+        "registry.yml": registry,
         "workflows/codefix/open-pr.md": _OPEN_PR_MD,
         "skills/codefix/SKILL.md": _SKILL_MD,
         "sensors/sensors.py": _SENSORS_PY,
@@ -448,10 +469,11 @@ def _coding_files(repos: list[str]) -> dict[str, str]:
     }
 
 
-def _orchestrator_files() -> dict[str, str]:
+def _orchestrator_files(public_url: str | None) -> dict[str, str]:
     """The repo-less starter: a Note → summary + action-items loop (no git, no checkout)."""
+    registry = _ORCH_REGISTRY_YML.replace(_PUBLIC_URL_LINE, _render_public_url_line(public_url))
     return {
-        "registry.yml": _ORCH_REGISTRY_YML,
+        "registry.yml": registry,
         "workflows/summarize/summarize.md": _ORCH_WORKFLOW_MD,
         "skills/summarize/SKILL.md": _ORCH_SKILL_MD,
         "sensors/sensors.py": _ORCH_SENSORS_PY,
@@ -463,7 +485,7 @@ def _orchestrator_files() -> dict[str, str]:
 
 
 def scaffold_project(
-    target: Path, name: str, *, repos: list[str] | None = None
+    target: Path, name: str, *, repos: list[str] | None = None, public_url: str | None = None
 ) -> list[Path]:
     """Write the starter project into `target`, returning the created files (relative paths).
 
@@ -490,7 +512,7 @@ def scaffold_project(
     preexisting_creds = load_control_plane_env(target)
 
     repos = repos or []
-    files = _coding_files(repos) if repos else _orchestrator_files()
+    files = _coding_files(repos, public_url) if repos else _orchestrator_files(public_url)
     created: list[Path] = []
     for rel, template in files.items():
         path = target / rel

@@ -84,6 +84,23 @@ def md(frontmatter: str, body: str = "Do the work.") -> str:
     return f"---\n{frontmatter}\n---\n{body}\n"
 
 
+def test_manifest_carries_public_url_when_set(tmp_path):
+    """`public_url` rides the manifest's registry section — and only when set, so projects
+    without one (like the golden example) keep a byte-identical manifest."""
+    write_project(
+        tmp_path,
+        {
+            "registry.yml": REGISTRY + "public_url: https://loopy.example.com\n",
+            "workflows/w/a.md": md("on: Incident\nagent: Worker"),
+        },
+    )
+    result = compile_project(tmp_path)
+    assert not result.diagnostics.has_errors(), [d.render() for d in result.diagnostics.items]
+    manifest = to_manifest(result.project)
+    assert manifest["registry"]["public_url"] == "https://loopy.example.com"
+    jsonschema.validate(manifest, json.loads(SCHEMA.read_text()))
+
+
 def test_unregistered_step_agent_reports_e501(tmp_path):
     write_project(
         tmp_path,

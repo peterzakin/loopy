@@ -78,3 +78,7 @@ class Registry(BaseModel):
     agents: dict[str, Agent] = Field(default_factory=dict)
     events: dict[str, Event] = Field(default_factory=dict)
     limits: Limits | None = None
+    # The public base URL where this project's loopy server is reachable (e.g.
+    # https://loopy.example.com) — webhook senders deliver to <public_url>/hooks/<provider>.
+    # Plain project config, edited in registry.yml; None when the project isn't hosted (yet).
+    public_url: str | None = None
