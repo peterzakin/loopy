@@ -22,14 +22,14 @@
 
 defaults:
   agent:
-    sandbox: Dev
+    sandbox: BaseSandbox
     harness: { runtime: claude-code, model: claude-sonnet-4-6 }
 
 # One sandbox for the whole project. These patterns are text-in/text-out, so the only
 # egress they need is the model API; no repo is cloned. (Swap in `daytona` for a cloud
 # sandbox, or add tools to `apt:`/`network:` if a worker needs to run code.)
 sandboxes:
-  Dev:
+  BaseSandbox:
     provider: docker
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
     network: [api.anthropic.com]

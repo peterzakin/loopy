@@ -118,7 +118,7 @@ def test_builtin_agent_without_default_sandbox_reports_e502(tmp_path):
         tmp_path,
         {
             # A sandbox exists, but not one named `default`.
-            "registry.yml": "sandboxes: { Dev: { provider: local } }\n",
+            "registry.yml": "sandboxes: { BaseSandbox: { provider: local } }\n",
             "workflows/review/r.md": md("on: Github.PullRequestOpened\nagent: BaseClaude"),
         },
     )
