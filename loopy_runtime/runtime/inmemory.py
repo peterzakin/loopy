@@ -43,7 +43,7 @@ def _agent_reports_cost(agent) -> bool:  # noqa: ANN001 - AgentSpec
     dollar cap. Static, from the agent→harness→provider map; an unknown runtime can't report
     cost (and is a compile-time error anyway)."""
     try:
-        return provider(agent.harness.runtime).reports_cost
+        return provider(agent.harness).reports_cost
     except ValueError:
         return False
 

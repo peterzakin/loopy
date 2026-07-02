@@ -63,9 +63,11 @@ class ClaudeCodeHarness(JsonProtocolHarness):
         return missing
 
     def build_argv(self, step: StepSpec, agent: AgentSpec, prompt: str) -> list[str]:
+        # The model is always present (agents name one mandatorily; construction
+        # rejects a missing/ineligible one), so the CLI never falls back to its own
+        # default model.
         argv = ["claude", "-p", prompt, "--output-format", "json"]
-        if agent.harness.model:
-            argv += ["--model", agent.harness.model]
+        argv += ["--model", agent.model]
         # No `--allowed-tools`: that flag is an allowlist over Claude's *built-in* tools
         # (Bash/Edit/Write/…), not loopy's capability vocabulary, so narrowing it here would
         # strip the agent's default toolset. The sandbox is the capability boundary; the agent

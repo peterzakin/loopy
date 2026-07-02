@@ -69,13 +69,14 @@ sandboxes:
     __REPOS_LINE__
 
 # Agents — capability comes from the sandbox, skills, injected git creds, and budget.
-# One agent per supported runtime, declared explicitly; the starter workflow points at
-# Claude. To run a step on another runtime, change its `agent:` — and give the sandbox
+# Every agent names both keys explicitly: `model` (what it runs on) and `harness` (the
+# runner that drives it). One agent per supported harness; the starter workflow points at
+# Claude. To run a step on another harness, change its `agent:` — and give the sandbox
 # that provider's key (secrets/base.env) plus its API host (`network:` above).
 agents:
-  Claude:   { harness: { runtime: claude-code, model: claude-sonnet-4-6 }, skills: [codefix] }
-  Codex:    { harness: { runtime: codex, model: gpt-5.5 }, skills: [codefix] }
-  OpenCode: { harness: { runtime: opencode, model: claude-sonnet-4-6 }, skills: [codefix] }
+  Claude:   { model: claude-sonnet-4-6, harness: claude-code, skills: [codefix] }
+  Codex:    { model: gpt-5.5, harness: codex, skills: [codefix] }
+  OpenCode: { model: claude-sonnet-4-6, harness: opencode, skills: [codefix] }
 
 # Events — the bus contract. A step's `on:` may only name an event registered here.
 events:
@@ -272,13 +273,14 @@ sandboxes:
     env_file: secrets/base.env                  # gitignored; resolved at run time
 
 # Agents — capability comes from the sandbox, skills, and budget.
-# One agent per supported runtime, declared explicitly; the starter workflow points at
-# Claude. To run a step on another runtime, change its `agent:` — and give the sandbox
+# Every agent names both keys explicitly: `model` (what it runs on) and `harness` (the
+# runner that drives it). One agent per supported harness; the starter workflow points at
+# Claude. To run a step on another harness, change its `agent:` — and give the sandbox
 # that provider's key (secrets/base.env) plus its API host (`network:` above).
 agents:
-  Claude:   { harness: { runtime: claude-code, model: claude-sonnet-4-6 }, skills: [summarize] }
-  Codex:    { harness: { runtime: codex, model: gpt-5.5 }, skills: [summarize] }
-  OpenCode: { harness: { runtime: opencode, model: claude-sonnet-4-6 }, skills: [summarize] }
+  Claude:   { model: claude-sonnet-4-6, harness: claude-code, skills: [summarize] }
+  Codex:    { model: gpt-5.5, harness: codex, skills: [summarize] }
+  OpenCode: { model: claude-sonnet-4-6, harness: opencode, skills: [summarize] }
 
 # Events — the bus contract. A step's `on:` may only name an event registered here.
 events:

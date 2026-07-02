@@ -8,7 +8,10 @@ from loopy_core.discovery import discover
 from tests.helpers import assert_code, write_project
 from tests.helpers import codes as result_codes
 
-MINIMAL = "sandboxes:\n  default:\n    provider: local\nagents:\n  Worker: { sandbox: default }\n"
+MINIMAL = (
+    "sandboxes:\n  default:\n    provider: local\n"
+    "agents:\n  Worker: { model: claude-sonnet-4-6, harness: claude-code, sandbox: default }\n"
+)
 
 
 def test_minimal_registry_compiles_clean(tmp_path):
@@ -67,19 +70,20 @@ def test_limits_workflows_unknown_workflow_reports_e505(tmp_path):
     assert_code(result, codes.E505, file="registry.yml")
 
 
-def test_defaults_deep_merge_harness_replace_lists(tmp_path):
+def test_defaults_scalar_override_replace_lists(tmp_path):
     registry = (
         "defaults:\n"
         "  agent:\n"
         "    sandbox: default\n"
-        "    harness: { runtime: claude-code, model: claude-sonnet-4-6 }\n"
+        "    model: claude-sonnet-4-6\n"
+        "    harness: claude-code\n"
         "    skills: [base_skill]\n"
         "sandboxes:\n"
         "  default:\n"
         "    provider: daytona\n"
         "agents:\n"
         "  Investigator: {}\n"
-        "  Fixer: { harness: { model: claude-opus-4-8 }, skills: [testing] }\n"
+        "  Fixer: { model: claude-opus-4-8, skills: [testing] }\n"
     )
     write_project(
         tmp_path,
@@ -91,19 +95,41 @@ def test_defaults_deep_merge_harness_replace_lists(tmp_path):
     )
     agents = compile_project(tmp_path).project.registry.agents
 
-    # Investigator inherits the whole default harness, sandbox, and skills.
+    # Investigator inherits the default model, harness, sandbox, and skills.
     inv = agents["Investigator"]
-    assert inv.harness.runtime == "claude-code"
-    assert inv.harness.model == "claude-sonnet-4-6"
+    assert inv.model == "claude-sonnet-4-6"
+    assert inv.harness == "claude-code"
     assert inv.sandbox == "default"
     assert inv.skills == ["base_skill"]
 
-    # Fixer: harness deep-merges (keeps inherited runtime, overrides model);
+    # Fixer: overrides the model, keeps the inherited harness;
     # skills REPLACE the default list (no union).
     fixer = agents["Fixer"]
-    assert fixer.harness.runtime == "claude-code"
-    assert fixer.harness.model == "claude-opus-4-8"
+    assert fixer.model == "claude-opus-4-8"
+    assert fixer.harness == "claude-code"
     assert fixer.skills == ["testing"]
+
+
+def test_agent_missing_model_or_harness_reports_e507(tmp_path):
+    # Both keys are mandatory (directly or via defaults.agent) — nothing is inferred.
+    registry = (
+        "sandboxes:\n  default:\n    provider: local\n"
+        "agents:\n  Worker: { sandbox: default }\n"
+    )
+    write_project(tmp_path, {"registry.yml": registry})
+    assert_code(compile_project(tmp_path), codes.E507, file="registry.yml")
+
+    # The retired nested form (harness: { runtime, model }) is not a string — it no
+    # longer satisfies either key.
+    nested = (
+        "sandboxes:\n  default:\n    provider: local\n"
+        "agents:\n"
+        "  Worker:\n"
+        "    harness: { runtime: claude-code, model: claude-sonnet-4-6 }\n"
+        "    sandbox: default\n"
+    )
+    write_project(tmp_path / "nested", {"registry.yml": nested})
+    assert_code(compile_project(tmp_path / "nested"), codes.E507, file="registry.yml")
 
 
 def test_type_desugar_table(tmp_path):

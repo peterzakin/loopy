@@ -1,6 +1,7 @@
 """Model-provider registry: per-harness model rules.
 
-Each harness `runtime` binds to a model provider and declares two things v1 enforces:
+Each harness id (an agent's `harness` key) binds to a model provider and declares two
+things v1 enforces:
 
 * the env var the sandbox must supply (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`), and
 * which models it is *eligible* to drive — a `claude-code` agent may only name a
@@ -8,10 +9,10 @@ Each harness `runtime` binds to a model provider and declares two things v1 enfo
   harnesses are wired (`validate_model`), so a mistyped pairing fails fast at startup
   instead of shelling out to a CLI that would reject the model anyway.
 
-Single-provider runtimes (`claude-code`, `codex`) declare one static `model_key`.
-A model-agnostic runtime (`opencode`) authenticates per provider, so the required key
-*derives from the model*: it declares `prefix_keys` instead, and the model becomes
-mandatory — with no model there is no provider to derive auth or eligibility from.
+Every agent names its model explicitly (`validate_model` rejects a missing one; there
+is no per-runtime default model). Single-provider runtimes (`claude-code`, `codex`)
+declare one static `model_key`. A model-agnostic runtime (`opencode`) authenticates per
+provider, so the required key *derives from the model*: it declares `prefix_keys`.
 Its CLI names models `provider/model`, but agents may write the bare id every other
 runtime uses (`claude-sonnet-4-6`, `gpt-5.5`): `sugar` expands it to the namespaced
 form (`anthropic/claude-sonnet-4-6`) everywhere it matters — eligibility, key
@@ -31,9 +32,9 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class RuntimeProvider:
-    """How a harness `runtime` binds to a model provider."""
+    """How a harness id (an agent's `harness` key) binds to a model provider."""
 
-    runtime: str  # harness.runtime id (e.g. "claude-code")
+    runtime: str  # agent `harness` id (e.g. "claude-code")
     model_prefixes: tuple[str, ...]  # eligible model-id prefixes this runtime may drive
     reports_cost: bool  # does the harness emit a USD cost we can enforce a spend budget on?
     model_key: str | None = None  # env var the sandbox must supply (single-provider runtimes)
@@ -64,9 +65,9 @@ class RuntimeProvider:
 
     def key_for(self, model: str | None) -> str:
         """The env var this runtime needs for `model`. Static-key runtimes ignore the
-        model; prefix-keyed runtimes derive it (sugar expanded first), so they require
-        one (`validate_model` rejects a keyless pairing before this is ever reached
-        with None)."""
+        model; prefix-keyed runtimes derive it (sugar expanded first), so an
+        underivable pairing raises (`validate_model` rejects it before this is ever
+        reached with a model outside the runtime's providers)."""
         if self.model_key is not None:
             return self.model_key
         model = self.canonical(model)
@@ -98,7 +99,7 @@ _OPENCODE_PREFIX_KEYS: tuple[tuple[str, str], ...] = (
     ("openai/", "OPENAI_API_KEY"),
 )
 
-# harness.runtime -> its provider binding. The union of these is the v1 harness set.
+# agent `harness` id -> its provider binding. The union of these is the v1 harness set.
 PROVIDERS: dict[str, RuntimeProvider] = {
     "claude-code": RuntimeProvider(
         runtime="claude-code",
@@ -128,7 +129,7 @@ PROVIDERS: dict[str, RuntimeProvider] = {
     ),
 }
 
-# harness.runtime -> the env var the sandbox must supply for that runtime. Covers only
+# agent `harness` id -> the env var the sandbox must supply for that runtime. Covers only
 # statically-keyed runtimes; a prefix-keyed runtime's key depends on the agent's model
 # (use `required_model_key(runtime, model)`).
 REQUIRED_MODEL_KEY: dict[str, str] = {
@@ -164,24 +165,20 @@ def canonical_model(runtime: str | None, model: str | None) -> str | None:
 
 
 def validate_model(runtime: str | None, model: str | None) -> None:
-    """Enforce per-harness model eligibility: `model` (when named) must be one the
-    `runtime` is allowed to drive. Raises ValueError on an unknown runtime or an
-    ineligible pairing.
+    """Enforce per-harness model eligibility: every agent must name a model, and it
+    must be one the `runtime` is allowed to drive. Raises ValueError on an unknown
+    runtime, a missing model, or an ineligible pairing.
 
-    A `None` model is permitted for statically-keyed runtimes — the harness then falls
-    back to the runtime's own default model (e.g. whatever `claude`/`codex` picks). A
-    prefix-keyed runtime (`opencode`) must name a model: its provider key and
-    eligibility both derive from it (a bare id like `claude-sonnet-4-6` or an explicit
-    `provider/model` both work)."""
+    There is no fallback to a runtime's own default model — the agent definition is
+    the single place the model is decided, so a manifest never silently tracks
+    whatever a CLI happens to default to. A bare id (`claude-sonnet-4-6`) and the
+    explicit `provider/model` form both work for opencode."""
     prov = provider(runtime)
     if model is None:
-        if prov.model_key is None:
-            raise ValueError(
-                f"the {runtime!r} harness requires an explicit model — a bare id "
-                "(e.g. claude-sonnet-4-6) or provider/model form: its provider key "
-                "derives from the model"
-            )
-        return
+        raise ValueError(
+            f"an agent on the {runtime!r} harness must name a model — a bare id "
+            "(e.g. claude-sonnet-4-6) or, for opencode, provider/model form"
+        )
     if not prov.is_eligible(model):
         raise ValueError(
             f"model {model!r} is not eligible for the {runtime!r} harness "

@@ -8,10 +8,10 @@ code), so they version, diff, and review like the rest of your codebase. There's
 click together: `loopy compile` builds the workflow's DAG straight from those files.
 
 **Agent-neutral.** Loopy orchestrates the loop; it doesn't bind you to one vendor's agent. Every
-step names its runtime in `registry.yml` (`harness.runtime`): **Claude Code**,
+agent in `registry.yml` names its `harness` — the runner that drives it: **Claude Code**,
 **OpenAI Codex**, and **OpenCode** ship today, and the harness registry is built to
-take more. Mix them in one manifest: route a triage step to one runtime and a fixer to another,
-and swap a step's runtime or model without touching its prose.
+take more. Mix them in one manifest: route a triage step to one harness and a fixer to another,
+and swap a step's harness or model without touching its prose.
 
 ## Install
 
@@ -126,14 +126,16 @@ more agents and events.)
 
 ```yaml
 # Defaults: every agent inherits these; override a field only when needed.
-# `harness.runtime` picks the agent runner: `claude-code` (Claude Code, claude-* models),
+# `model` and `harness` are both required on every agent (here they come from defaults).
+# `harness` picks the agent runner: `claude-code` (Claude Code, claude-* models),
 # `codex` (OpenAI Codex, gpt-*/o-series/codex-* models), or `opencode` (OpenCode, which
 # drives either family — write the bare model id; loopy expands it to opencode's
-# provider/model naming). Model must match the runtime.
+# provider/model naming). The model must be one its harness can drive; nothing is inferred.
 defaults:
   agent:
     sandbox: default
-    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
+    model: claude-sonnet-4-6
+    harness: claude-code
 
 # Sandbox: compute + egress. `image:` is the declarative build; `network:` the egress allowlist.
 # `env_file:` points at a gitignored dotenv (a path, or a list of paths merged in order) whose
@@ -152,12 +154,12 @@ sandboxes:
 # Agents: capability comes from the sandbox (image + egress), skills, injected creds, and
 # budget; numeric caps live in budget, not in a tool name.
 agents:
-  Investigator: { skills: [triage, repro-authoring] }                  # inherits default harness
-  Fixer:        { harness: { model: claude-opus-4-8 }, skills: [testing] }
+  Investigator: { skills: [triage, repro-authoring] }                  # inherits default model + harness
+  Fixer:        { model: claude-opus-4-8, skills: [testing] }           # bigger model, same harness
   Reviewer:     { skills: [rubrics/fix-quality] }                       # a judge, review-only skill
   Releaser:     { skills: [rollout] }
-  Scout:        { harness: { runtime: codex, model: gpt-5 }, skills: [triage] }   # runs on OpenAI Codex
-  Sweeper:      { harness: { runtime: opencode, model: claude-sonnet-4-6 }, skills: [triage] }  # runs on OpenCode
+  Scout:        { model: gpt-5, harness: codex, skills: [triage] }      # runs on OpenAI Codex
+  Sweeper:      { model: claude-sonnet-4-6, harness: opencode, skills: [triage] }  # runs on OpenCode
 
 # Events: the bus contract. A step's `on:` may only name an event registered here.
 # Typed field maps.
@@ -176,9 +178,9 @@ events:
 ```
 
 > **No built-in agents.** Every agent a step names must be declared in `registry.yml` — the
-> harness pairing is always explicit and visible, never injected. `loopy init` scaffolds one
-> agent per supported runtime (`claude-code`, `codex`, `opencode`) so the yaml for each is
-> there to point a step at or edit.
+> model + harness pairing is always explicit and visible, never injected or inferred.
+> `loopy init` scaffolds one agent per supported harness (`claude-code`, `codex`,
+> `opencode`) so the yaml for each is there to point a step at or edit.
 
 Beyond a single step's `budget:`, the registry takes a top-level `limits:` block for wider spend
 caps: `cascade_spend: { usd: <n> }` caps the total spend of an entire event cascade, and

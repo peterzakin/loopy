@@ -67,7 +67,7 @@ def test_event_fans_out_to_all_subscribed_workflows():
     # Two workflows both trigger on Ping — BOTH must run, not just the first.
     manifest = Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "registry": {"sandboxes": {}, "agents": {}, "events": {"Ping": {"fields": {}}}},
             "workflows": {
                 "a": {"entry": "x", "steps": {"x": _step("a/x", "Ping")}},
@@ -85,7 +85,7 @@ def test_event_fans_out_to_all_subscribed_workflows():
 def test_run_history_is_recorded():
     manifest = Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "registry": {"sandboxes": {}, "agents": {}, "events": {"Ping": {"fields": {}}}},
             "workflows": {"a": {"entry": "x", "steps": {"x": _step("a/x", "Ping")}}},
             "sensors": [],
@@ -114,7 +114,7 @@ def test_unbounded_loop_hits_iteration_cap_not_stack_overflow():
     }
     manifest = Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "registry": {"sandboxes": {}, "agents": {}, "events": {"Tick": {"fields": {}}}},
             "workflows": {"loop": {"entry": "tick", "steps": {"tick": loop_step}}},
             "sensors": [],
@@ -155,7 +155,7 @@ def test_agent_produced_payload_flows_to_downstream_event():
     }
     manifest = Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "registry": {
                 "sandboxes": {},
                 "agents": {},

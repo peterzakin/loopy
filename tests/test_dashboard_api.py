@@ -175,13 +175,14 @@ def _manifest() -> Manifest:
     cron workflow, an agent, a sandbox with a secret env_file, a poll sensor and a webhook."""
     return Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "compiled_at": "2026-06-19T00:00:00Z",
             "loopy_version": "0.1.0",
             "registry": {
                 "agents": {
                     "Fixer": {
-                        "harness": {"runtime": "claude-code", "model": "claude-opus-4-8"},
+                        "model": "claude-opus-4-8",
+                        "harness": "claude-code",
                         "sandbox": "default",
                         "skills": ["testing"],
                     }
@@ -261,7 +262,7 @@ def test_build_meta_reports_presence_and_counts():
     assert build_meta(None) == {"manifest_present": False}
     meta = build_meta(_manifest())
     assert meta["manifest_present"] is True
-    assert meta["schema_version"] == "1"
+    assert meta["schema_version"] == "2"
     assert meta["counts"]["workflows"] == 2
     assert meta["counts"]["agents"] == 1
     assert meta["counts"]["events"] == 2

@@ -20,7 +20,7 @@ from loopy_runtime.harness.claude_code import ClaudeCodeHarness
 from loopy_runtime.harness.codex import CodexHarness
 from loopy_runtime.harness.opencode import OpenCodeHarness
 from loopy_runtime.harness.router import HarnessRouter
-from loopy_runtime.manifest_model import AgentSpec, HarnessSpec, Manifest
+from loopy_runtime.manifest_model import AgentSpec, Manifest
 from loopy_runtime.runtime.inmemory import InMemoryRuntime
 from loopy_runtime.sandbox.local import LocalSandboxProvider
 from loopy_runtime.sandbox.toolchain import compose_image
@@ -78,9 +78,9 @@ def test_compose_empty_layer_is_noop():
 
 # --- harness toolchains ------------------------------------------------------
 
-_CLAUDE = AgentSpec(harness=HarnessSpec(runtime="claude-code", model="claude-sonnet-4-6"))
-_CODEX = AgentSpec(harness=HarnessSpec(runtime="codex", model="gpt-5-codex"))
-_OPENCODE = AgentSpec(harness=HarnessSpec(runtime="opencode", model="anthropic/claude-sonnet-4-6"))
+_CLAUDE = AgentSpec(model="claude-sonnet-4-6", harness="claude-code")
+_CODEX = AgentSpec(model="gpt-5-codex", harness="codex")
+_OPENCODE = AgentSpec(model="anthropic/claude-sonnet-4-6", harness="opencode")
 
 
 def test_claude_toolchain_has_substrate_plus_cli():
@@ -146,7 +146,7 @@ class _ToolHarness:
 def _empty_manifest() -> Manifest:
     return Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "registry": {"sandboxes": {}, "agents": {}, "events": {}},
             "workflows": {},
             "sensors": [],

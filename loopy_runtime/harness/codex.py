@@ -43,9 +43,11 @@ class CodexHarness(JsonProtocolHarness):
 
     def build_argv(self, step: StepSpec, agent: AgentSpec, prompt: str) -> list[str]:
         # `exec` is codex's non-interactive mode; `--json` streams structured events.
+        # The model is always present (agents name one mandatorily; construction
+        # rejects a missing/ineligible one), so the CLI never falls back to its own
+        # default model.
         argv = ["codex", "exec", prompt, "--json"]
-        if agent.harness.model:
-            argv += ["--model", agent.harness.model]
+        argv += ["--model", agent.model]
         # The loopy sandbox is the boundary, so drop codex's own approval/sandbox layer —
         # the analogue of claude's `bypassPermissions`.
         argv += ["--dangerously-bypass-approvals-and-sandbox"]

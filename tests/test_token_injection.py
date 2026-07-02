@@ -217,7 +217,7 @@ def _one_step_manifest() -> Manifest:
     }
     return Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "registry": {"sandboxes": {}, "agents": {}, "events": {"Go": {"fields": {}}}},
             "workflows": {"wf": {"entry": "run", "steps": {"run": step}}},
             "sensors": [],

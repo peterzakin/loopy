@@ -7,7 +7,8 @@
 defaults:
   agent:
     sandbox: BaseSandbox
-    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
+    model: claude-sonnet-4-6
+    harness: claude-code
 
 # Sandbox — compute + egress. `provider:` selects the backend (this is the source of truth;
 # there is no `--sandbox` flag). `docker` is hermetic: the toolchain (git, the `claude` CLI on
