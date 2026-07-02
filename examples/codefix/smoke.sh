@@ -11,7 +11,7 @@
 #   - a model key (ANTHROPIC_API_KEY in secrets/base.env, or OAuth via HOME)
 #   - git auth: a GitHub App (`loopy auth github`) OR GITHUB_TOKEN in secrets/base.env
 #   - TARGET_REPO: a repo you can push to (defaults to the registry's repos: entry)
-#   - SANDBOX: override the sandbox provider authored in registry.yml — docker | local | daytona
+#   - SANDBOX: override the sandbox provider authored in registry.yml — daytona | docker | local
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
