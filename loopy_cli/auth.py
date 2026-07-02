@@ -37,13 +37,14 @@ CALLBACK_TIMEOUT_SECONDS = 300
 
 
 def build_manifest(name: str, redirect_url: str, *, public: bool = False) -> dict:
-    """Assemble the GitHub App manifest: minimal fix/PR permissions, no webhook.
+    """Assemble the GitHub App manifest: minimal fix/PR permissions, no App webhook.
 
     `hook_attributes` is deliberately omitted: GitHub requires `hook_attributes.url`
     whenever the object is present (sending `{active: false}` alone fails with
-    "url wasn't supplied"). An App with no `hook_attributes` simply has no webhook —
-    which is what we want, since this App is a credential source, not an event sink,
-    so loopy stays serverless.
+    "url wasn't supplied"), and an App webhook's event subscriptions have no update
+    API — it could only ever be wired at creation. Event delivery is *repo* webhooks
+    instead (`loopy webhooks github`), which work at any time; the `repository_hooks`
+    permission below is what lets the App create them.
     """
     return {
         "name": name,
@@ -54,6 +55,8 @@ def build_manifest(name: str, redirect_url: str, *, public: bool = False) -> dic
             "contents": "write",
             "pull_requests": "write",
             "metadata": "read",
+            # create/update the repo webhooks that deliver built-in Github.* events
+            "repository_hooks": "write",
         },
     }
 
@@ -411,6 +414,14 @@ def run_github_auth(
     typer.echo("\n  Verifying credentials…")
     _verify(root)
     typer.echo()
+
+    # With auth landed, offer to wire event delivery too: built-in `Github.*` triggers
+    # only fire once GitHub can deliver webhooks to the engine. The offer gates itself —
+    # it needs a compiled project with repos and a LOOPY_PUBLIC_URL (so it's silent when
+    # `loopy init` runs auth before the scaffold exists) and it never raises.
+    from loopy_cli.webhooks import offer_github_webhooks
+
+    offer_github_webhooks(root)
 
 
 @auth_app.command()

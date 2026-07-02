@@ -25,6 +25,12 @@ from pathlib import Path
 import typer
 
 from loopy_cli.auth import auth_app
+from loopy_cli.webhooks import (
+    normalize_public_url,
+    offer_github_webhooks,
+    registration_findings,
+    webhooks_app,
+)
 
 app = typer.Typer(add_completion=False, help="Loopy — compile and run durable agent workflows.")
 
@@ -32,6 +38,11 @@ app = typer.Typer(add_completion=False, help="Loopy — compile and run durable 
 # sub-app's heavy imports are deferred into its command bodies, so registering it
 # here keeps `loopy compile` runtime-free.
 app.add_typer(auth_app, name="auth")
+
+# `loopy webhooks ...` — wire external services' webhooks to this project's sensors
+# (`loopy webhooks github` registers repo webhooks; `loopy webhooks list` prints every
+# endpoint's delivery URL). Same deferred-imports discipline as `auth`.
+app.add_typer(webhooks_app, name="webhooks")
 
 
 @app.callback()
@@ -365,11 +376,11 @@ def init(
     """Scaffold a new Loopy project: registry, a runnable starter workflow, and an env file.
 
     By default a short wizard offers to close the gaps the scaffold leaves on purpose —
-    reusing an `ANTHROPIC_API_KEY` already in your environment, recording a Redis connection
-    string if you want the networked event bus, recording the public base URL webhooks are
-    delivered at, and wiring git auth — then reports whatever's still missing (the same checks
-    as `loopy doctor`). `--non-interactive` skips the prompts entirely and just writes the
-    placeholder scaffold.
+    recording the public base URL webhooks are delivered at, wiring git auth (and, with
+    both in place, registering GitHub webhooks), reusing an `ANTHROPIC_API_KEY` already in
+    your environment, and recording a Redis connection string if you want the networked
+    event bus — then reports whatever's still missing (the same checks as `loopy doctor`).
+    `--non-interactive` skips the prompts entirely and just writes the placeholder scaffold.
     """
     from loopy_cli.scaffold import InvalidProjectName, scaffold_project, validate_project_name
 
@@ -392,9 +403,12 @@ def init(
     # Wire git auth *before* asking which repo(s) the agent works on. `loopy auth github` creates
     # the App and installs it on the repos it may touch, so it reads better to authenticate and
     # install first, then name the repo(s) with that install fresh in mind — rather than naming
-    # repos into a registry before any auth exists. Auth writes loopy.env into `target`;
-    # `scaffold_project` (run below) preserves those creds under its own template.
+    # repos into a registry before any auth exists. The public webhook URL comes first still:
+    # auth ends by offering webhook registration, which needs the URL already recorded. Both
+    # steps write loopy.env into `target`; `scaffold_project` (run below) preserves those
+    # values under its own template.
     if interactive:
+        _offer_public_webhook_url(target)
         _offer_github_auth(target)
 
     # Which repo(s) the agent works on — this decides the coding vs orchestrator starter. Blank is
@@ -421,7 +435,10 @@ def init(
         _offer_ambient_anthropic_key(target)
         _offer_ambient_daytona_creds(target)
         _offer_redis_bus(target)
-        _offer_public_webhook_url(target)
+        # Webhook registration couldn't be offered during auth above (no registry existed
+        # yet); now the scaffold + repos are on disk, so offer it here when the pieces
+        # (App creds, LOOPY_PUBLIC_URL, repos) are all present. Self-gating, never raises.
+        offer_github_webhooks(target)
         # A repo-less scaffold is a complete orchestrator, not a half-finished setup — say so.
         if not repos:
             _note_orchestrator_mode()
@@ -579,29 +596,6 @@ def _offer_redis_bus(target: Path) -> None:
     typer.echo()
 
 
-def _normalize_public_url(raw: str) -> str:
-    """Validate and canonicalize a public webhook base URL.
-
-    Delivery URLs are built as `<base> + <sensor path>` (e.g. `<base>/hooks/github`), so the
-    base must be a bare http(s) origin (an optional path prefix is fine) with no trailing
-    slash. A scheme-less host is assumed https — the common case for a tunnel or deployed
-    hostname pasted without one. Raises ValueError with the reason on unusable input.
-    """
-    from urllib.parse import urlparse
-
-    candidate = raw.strip()
-    if any(ch.isspace() for ch in candidate):
-        raise ValueError("the URL must not contain whitespace")
-    if "://" not in candidate:
-        candidate = f"https://{candidate}"
-    parsed = urlparse(candidate)
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError(f"unsupported scheme '{parsed.scheme}' — use http:// or https://")
-    if not parsed.netloc:
-        raise ValueError("the URL needs a host, e.g. https://loopy.example.com")
-    return candidate.rstrip("/")
-
-
 def _offer_public_webhook_url(target: Path) -> None:
     """Ask for the public base URL external services deliver webhooks to.
 
@@ -630,7 +624,7 @@ def _offer_public_webhook_url(target: Path) -> None:
         if not raw:
             return
         try:
-            url = _normalize_public_url(raw)
+            url = normalize_public_url(raw)
         except ValueError as exc:
             typer.echo("  " + typer.style(f"✗ {exc}", fg=typer.colors.RED))
             continue
@@ -926,6 +920,12 @@ def _diagnose_runnability(root: Path, project):  # noqa: ANN001 - compile.model.
             creds = None
         if creds is not None:
             findings.extend(check_repo_access(project.registry, creds))
+
+    # GitHub webhook wiring — a project can pass everything above and still never hear a
+    # `Github.*` event because nothing was registered on GitHub's side. Self-gating: only
+    # projects with /hooks/github sensors get findings, and only an App-configured one is
+    # checked live.
+    findings.extend(registration_findings(project, Path(root), control_env=merged))
 
     return findings
 
