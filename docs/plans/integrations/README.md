@@ -57,6 +57,39 @@ Once [00](00-provider-framework.md) lands, each provider is the same five edits:
 - **Docs** — a section in `loopy-landing/docs/integrations.html` and a bump to the catalog on
   the landing hero.
 
+## Credentials & setup (trigger side)
+
+These plans are **receive-only**: inbound webhooks authenticate with a **shared/signing
+secret**, not an OAuth token. This mirrors the split GitHub already uses in the codebase:
+inbound via a webhook secret (`scm/github_webhook.py`, `GITHUB_WEBHOOK_SECRET`), outbound via
+scoped GitHub App tokens (`scm/token_provider.py`, `loopy auth github`). Only the inbound half
+is in scope here.
+
+Loopy is **self-hosted / single-tenant** (automations are files in *your* repo, on *your*
+infra), so a user registers *their own* app/integration once and pastes a secret into their
+env file. **Loopy implements no OAuth flow** for any of these — there is no code exchange and
+no OAuth token held on the trigger path.
+
+| Provider | Register in the vendor | OAuth flow? | Secret env var |
+|---|---|---|---|
+| Sentry | Internal Integration (app-like, no OAuth grant) | No | `SENTRY_WEBHOOK_SECRET` (Client Secret) |
+| Linear | Workspace webhook (Settings → API); no app for one workspace | No | `LINEAR_WEBHOOK_SECRET` (signing secret) |
+| Datadog | Webhooks integration entry (URL + our template) | No | `DATADOG_WEBHOOK_SECRET` (a token you invent) |
+| Slack | A **Slack app**, installed to the workspace | Install is a one-click OAuth *grant*, but not a flow Loopy runs | `SLACK_SIGNING_SECRET` |
+
+Slack is the only one touching OAuth at all, and only as the workspace-install click on the
+user's own app; slash-command replies use the unauthenticated `response_url`, so the trigger
+path holds no Slack token.
+
+### Where OAuth *would* enter (out of scope)
+
+The **action/output** side — an agent resolving a Sentry issue, commenting on a Linear issue,
+posting to Slack — needs outbound, least-privilege, per-workspace credentials, and that is
+where OAuth or app tokens enter, exactly like GitHub's `token_provider`. Sketch for later:
+Slack post-back → bot token via OAuth install; Linear/Sentry write-back → OAuth app *or* a
+personal/integration API token (simpler for single-tenant); Datadog → API + app keys, no
+OAuth ever. None of that is in these four plans.
+
 ## Non-negotiable design choices
 
 - **No new events on the bus without a contract.** Built-in contracts live in `builtins.py`

@@ -135,6 +135,26 @@ Slack registers this on `/hooks/slack`; other providers pass `None`.
 signing-secret setup, the events-vs-slash-command distinction, and `SLACK_SIGNING_SECRET`.
 Add to the catalog and hero.
 
+## Credentials & setup
+
+Slack is the **only** provider that touches OAuth, and only as the install step. The user
+creates a **Slack app** (required even to receive events) and installs it to their workspace;
+the install is a one-click OAuth *grant*, but **Loopy runs no OAuth flow** and holds no Slack
+token on the trigger path. Setup:
+
+1. Create a Slack app (from an app manifest is easiest). Enable **Event Subscriptions** with
+   the request URL `https://<host>/hooks/slack` (Slack immediately fires the
+   `url_verification` handshake — the prehandler answers it), subscribe to `app_mention` /
+   `message.channels`, and register any **slash commands** (also pointed at `/hooks/slack`).
+2. Copy the app's **Signing Secret** into `SLACK_SIGNING_SECRET` in the sandbox's `env_file`.
+3. **Install the app to the workspace** (the OAuth grant) so Slack starts delivering events.
+4. Absent the secret, `/hooks/slack` runs unverified with the standard loud dev warning.
+
+No bot token is needed for triggers or for slash-command replies (`response_url` is
+unauthenticated). A bot token via OAuth is only needed for proactive post-back — the output
+side, out of scope here. Multi-workspace distribution would require Loopy to implement the
+real OAuth flow; single-tenant self-host does not.
+
 ## Effort
 
 Largest of the four. Budget the runner extension points ([00 §6]) as part of this plan if they

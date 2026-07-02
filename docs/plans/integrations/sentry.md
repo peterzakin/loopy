@@ -107,6 +107,20 @@ Add a `#sentry` section to `loopy-landing/docs/integrations.html` mirroring the 
 Then delete/annotate the hand-written Sentry sensor in `examples/incidents` to point at the
 built-in (or keep it as the "here's what the built-in replaces" teaching example).
 
+## Credentials & setup
+
+**No OAuth.** The user creates a Sentry **Internal Integration** (Settings → Developer
+Settings → Internal Integration). That is app-like but has no OAuth grant: it issues a
+**Client Secret** used to sign webhooks. Setup:
+
+1. Create the Internal Integration; enable the webhook and the resources you want (`issue`,
+   `metric_alert`, ...), pointed at `https://<host>/hooks/sentry`.
+2. Copy the **Client Secret** into `SENTRY_WEBHOOK_SECRET` in the sandbox's `env_file`.
+3. Absent the secret, `/hooks/sentry` runs unverified with the standard loud dev warning.
+
+Write-back (agent resolves/comments on an issue) would use the same Internal Integration's
+auth token — that is the action side and is out of scope for this plan.
+
 ## Effort
 
 Small. Clean HMAC, JSON body, header+action discrimination. The only shared-framework touch

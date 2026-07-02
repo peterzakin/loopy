@@ -127,6 +127,22 @@ template into Datadog"**, then the two events, the shared-secret header setup, a
 `DATADOG_WEBHOOK_SECRET`. Add to the catalog and hero. This section carries more setup weight
 than the others precisely because the payload is user-configured.
 
+## Credentials & setup
+
+**No OAuth, no app.** Datadog has no OAuth for webhooks. The user configures a Webhooks
+integration entry directly. Setup:
+
+1. Datadog → Integrations → Webhooks → New. URL `https://<host>/hooks/datadog`, body = the
+   canonical template above, and add a custom header carrying a token you invent
+   (`Authorization: Bearer <token>` or `X-Loopy-Webhook-Token: <token>`).
+2. Reference the webhook by `@webhook-<name>` in the monitors whose alerts should drive Loopy.
+3. Put the **same token** in `DATADOG_WEBHOOK_SECRET` in the sandbox's `env_file`.
+4. Absent the secret, `/hooks/datadog` runs unverified with the standard loud dev warning.
+
+The token is a shared secret you generate, not a vendor credential, so there is nothing to
+register and no OAuth anywhere — for triggers *or* actions (Datadog write-back, if ever added,
+uses API + app keys, still no OAuth).
+
 ## Effort
 
 Small code, but the **docs and the template are the product** here. The novel framework piece

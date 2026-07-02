@@ -97,6 +97,21 @@ Register in `scm/verifiers.py` under `"linear"`.
 `#linear` section in `loopy-landing/docs/integrations.html` (events, sample payloads,
 `LINEAR_WEBHOOK_SECRET`), add to the catalog and the landing hero service list.
 
+## Credentials & setup
+
+**No OAuth for a single workspace.** The user creates a webhook in Settings → API →
+Webhooks — no app, no OAuth grant. Setup:
+
+1. Add a webhook pointed at `https://<host>/hooks/linear`, subscribed to the resources you
+   want (Issues, Comments).
+2. Copy Linear's generated **signing secret** into `LINEAR_WEBHOOK_SECRET` in the sandbox's
+   `env_file`.
+3. Absent the secret, `/hooks/linear` runs unverified with the standard loud dev warning.
+
+An OAuth app is only needed if you want multi-workspace distribution or the agent to call
+Linear's GraphQL API on behalf of a user (the write-back / action side — out of scope). For
+single-tenant write-back, a personal API key is simpler than OAuth.
+
 ## Effort
 
 Small — arguably the cleanest of the four (all discrimination is in-body, no header
