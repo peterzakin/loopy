@@ -5,11 +5,14 @@ credentials locally, so loopy can later mint short-lived, repo-scoped tokens for
 agents — no loopy-owned central app, no persistent server.
 
 The flow:
-  1. build a manifest (minimal perms, no webhook) pointing at a local callback;
+  1. build a manifest (minimal perms) pointing at a local callback — with a webhook baked
+     in when the project has a public URL (`LOOPY_PUBLIC_URL` / registry.yml `public_url`),
+     without one otherwise;
   2. serve a one-shot 127.0.0.1 listener (the `gh auth login` pattern);
   3. open the browser to a local page that auto-POSTs the manifest to GitHub;
   4. GitHub redirects back with a temporary `?code=`; exchange it for creds;
-  5. persist the App id + private key (inline, gitignored) into `loopy.env`;
+  5. persist the App id + private key (and the webhook secret, when GitHub minted one)
+     inline, gitignored, into `loopy.env`;
   6. print the install URL so the user picks which repos the App can touch;
   7. best-effort verify by minting a token.
 
@@ -24,6 +27,7 @@ import html
 import json
 import os
 import secrets
+from collections.abc import Mapping
 from pathlib import Path
 
 import typer
@@ -35,17 +39,24 @@ HOMEPAGE_URL = "https://github.com/peterzakin/loopy"
 DEFAULT_PORT = 8765
 CALLBACK_TIMEOUT_SECONDS = 300
 
+# The canonical GitHub ingress path `loopy run` serves — the webhook we register points here.
+GITHUB_WEBHOOK_PATH = "/hooks/github"
 
-def build_manifest(name: str, redirect_url: str, *, public: bool = False) -> dict:
-    """Assemble the GitHub App manifest: minimal fix/PR permissions, no webhook.
 
-    `hook_attributes` is deliberately omitted: GitHub requires `hook_attributes.url`
-    whenever the object is present (sending `{active: false}` alone fails with
-    "url wasn't supplied"). An App with no `hook_attributes` simply has no webhook —
-    which is what we want, since this App is a credential source, not an event sink,
-    so loopy stays serverless.
+def build_manifest(
+    name: str, redirect_url: str, *, public: bool = False, webhook_url: str | None = None
+) -> dict:
+    """Assemble the GitHub App manifest: minimal fix/PR permissions, webhook optional.
+
+    With `webhook_url` set, `hook_attributes` registers the App's webhook at creation
+    time — the only moment GitHub mints a webhook secret for us (returned in the
+    conversion response to persist). Without it, `hook_attributes` is deliberately
+    omitted: GitHub requires `hook_attributes.url` whenever the object is present
+    (sending `{active: false}` alone fails with "url wasn't supplied"). An App with no
+    `hook_attributes` simply has no webhook — the App stays a pure credential source
+    and loopy stays serverless.
     """
-    return {
+    manifest = {
         "name": name,
         "url": HOMEPAGE_URL,
         "redirect_url": redirect_url,
@@ -56,6 +67,15 @@ def build_manifest(name: str, redirect_url: str, *, public: bool = False) -> dic
             "metadata": "read",
         },
     }
+    if webhook_url:
+        manifest["hook_attributes"] = {"url": webhook_url, "active": True}
+        # A webhook needs event subscriptions or GitHub delivers nothing. Cover the
+        # built-in `Github.*` catalog (PRs, issues, issue comments, pushes).
+        manifest["default_events"] = ["pull_request", "issues", "issue_comment", "push"]
+        # `issues`/`issue_comment` events require issue read access; contents:write
+        # (already granted) covers `push`.
+        manifest["default_permissions"]["issues"] = "read"
+    return manifest
 
 
 def create_app_url(org: str | None) -> str:
@@ -119,7 +139,12 @@ _ERROR_PAGE = (
 
 
 def obtain_manifest_code(
-    *, name: str, org: str | None, port: int, open_browser: bool = True
+    *,
+    name: str,
+    org: str | None,
+    port: int,
+    open_browser: bool = True,
+    webhook_url: str | None = None,
 ) -> str:
     """Run the browser + one-shot callback dance and return the temporary code.
 
@@ -169,7 +194,7 @@ def obtain_manifest_code(
     server = http.server.HTTPServer(("127.0.0.1", port), _Handler)
     actual_port = server.server_address[1]
     redirect_url = f"http://127.0.0.1:{actual_port}/callback"
-    manifest = build_manifest(name, redirect_url)
+    manifest = build_manifest(name, redirect_url, webhook_url=webhook_url)
     server.loopy_ctx = {  # type: ignore[attr-defined]
         "submit_page": render_submit_page(create_app_url(org), manifest, state_token),
         "state": state_token,
@@ -210,6 +235,10 @@ def write_app_credentials(root: str | Path, conversion: dict) -> Path:
     command uses, so `trigger --root <subdir>` silently failed to find a key written
     relative to the project root — an inline key has no such dependency. Because loopy.env
     now carries the private key, it's added to .gitignore. Returns the loopy.env path.
+
+    When the App was created with a webhook (`hook_attributes` in the manifest), GitHub
+    mints a webhook secret and returns it in the conversion — persist it as
+    `GITHUB_WEBHOOK_SECRET` so `loopy run` verifies deliveries without any manual step.
     """
     from loopy_runtime.secrets import CONTROL_PLANE_ENV_FILE, write_control_plane_env
 
@@ -217,10 +246,10 @@ def write_app_credentials(root: str | Path, conversion: dict) -> Path:
     app_id = str(conversion["id"])
     pem = conversion["pem"]
 
-    env_path = write_control_plane_env(
-        root,
-        {"GITHUB_APP_ID": app_id, "GITHUB_APP_PRIVATE_KEY": _escape_pem(pem)},
-    )
+    updates = {"GITHUB_APP_ID": app_id, "GITHUB_APP_PRIVATE_KEY": _escape_pem(pem)}
+    if conversion.get("webhook_secret"):
+        updates["GITHUB_WEBHOOK_SECRET"] = conversion["webhook_secret"]
+    env_path = write_control_plane_env(root, updates)
     _ensure_gitignored(root, CONTROL_PLANE_ENV_FILE)
     return env_path
 
@@ -345,6 +374,32 @@ def _verify(root: str | Path) -> None:
         )
 
 
+def _configured_public_url(root: str | Path) -> str | None:
+    """The public base URL this project is configured with, if any.
+
+    `LOOPY_PUBLIC_URL` in the process env wins — it's a deploy-time constant, set once
+    where the server runs — else the project's registry.yml `public_url`. The registry
+    read is deliberately lenient (the compiler owns strict validation, E216); auth only
+    needs to know whether a URL exists.
+    """
+    env = os.environ.get("LOOPY_PUBLIC_URL", "").strip()
+    if env:
+        return env
+    path = Path(root) / "registry.yml"
+    if not path.is_file():
+        return None
+    try:
+        from ruamel.yaml import YAML
+
+        data = YAML(typ="safe").load(path.read_text())
+    except Exception:  # noqa: BLE001 - a broken registry fails at compile, not here
+        return None
+    if not isinstance(data, Mapping):
+        return None
+    value = data.get("public_url")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
 def run_github_auth(
     *,
     org: str | None = None,
@@ -353,12 +408,22 @@ def run_github_auth(
     root: Path = Path("."),
     force: bool = False,
     no_browser: bool = False,
+    public_url: str | None = None,
+    no_webhook: bool = False,
 ) -> None:
     """Create a GitHub App via the manifest flow and store its credentials.
 
     The plain-function core of `loopy auth github`, callable in-process (e.g. from the
     `loopy init` wizard) without going through Typer's argument parsing — calling the
     decorated command directly would pass `OptionInfo` sentinels instead of real values.
+
+    When the project has a public URL — `public_url` here (the wizard passes the answer it
+    just collected), else `LOOPY_PUBLIC_URL` in the env, else registry.yml `public_url` —
+    the App is created *with* its webhook at `<public-url>/hooks/github`, and the webhook
+    secret GitHub mints lands in loopy.env as `GITHUB_WEBHOOK_SECRET`. Creation is the
+    only moment GitHub hands us that secret, so this is when webhooks become zero-setup.
+    With no URL (or `no_webhook`), the App is created webhook-less, a pure credential
+    source, exactly as before.
     """
     from loopy_runtime.scm import github_app
     from loopy_runtime.secrets import load_control_plane_env
@@ -370,13 +435,29 @@ def run_github_auth(
         )
         raise typer.Exit(code=1)
 
+    webhook_url: str | None = None
+    if not no_webhook:
+        from loopy_core.registry.loader import normalize_public_url
+
+        raw = public_url if public_url and public_url.strip() else _configured_public_url(root)
+        if raw:
+            try:
+                webhook_url = normalize_public_url(raw) + GITHUB_WEBHOOK_PATH
+            except ValueError as exc:
+                typer.echo(f"error: invalid public URL: {exc}", err=True)
+                raise typer.Exit(code=1) from exc
+
     app_name = name or default_app_name(org)
     typer.echo(typer.style("\n  🔐  loopy auth github", fg=typer.colors.CYAN, bold=True))
     typer.echo(typer.style("  " + "─" * 40, fg=typer.colors.BRIGHT_BLACK))
     where = f"org '{org}'" if org else "your personal account"
     typer.echo(f"  → creating GitHub App '{app_name}' under {where}")
+    if webhook_url:
+        typer.echo(f"  → registering its webhook at {webhook_url} (--no-webhook to skip)")
 
-    code = obtain_manifest_code(name=app_name, org=org, port=port, open_browser=not no_browser)
+    code = obtain_manifest_code(
+        name=app_name, org=org, port=port, open_browser=not no_browser, webhook_url=webhook_url
+    )
     try:
         conversion = github_app.exchange_manifest_code(code)
     except github_app.GitHubAPIError as exc:
@@ -388,6 +469,18 @@ def run_github_auth(
         typer.style("  ✓", fg=typer.colors.GREEN)
         + f" wrote App id + private key to {env_path} (gitignored)"
     )
+    if webhook_url:
+        if conversion.get("webhook_secret"):
+            typer.echo(
+                typer.style("  ✓", fg=typer.colors.GREEN)
+                + f" webhook registered at {webhook_url} — GITHUB_WEBHOOK_SECRET stored, "
+                "deliveries will be signature-verified"
+            )
+        else:
+            typer.echo(
+                "  ⓘ GitHub returned no webhook secret — set GITHUB_WEBHOOK_SECRET in "
+                "loopy.env to the App's webhook secret so deliveries are verified"
+            )
 
     slug = conversion.get("slug")
     if slug:
@@ -421,10 +514,28 @@ def github(
     root: Path = typer.Option(Path("."), "--root", help="Project root (where loopy.env lives)."),
     force: bool = typer.Option(False, "--force", help="Overwrite existing stored App credentials."),
     no_browser: bool = typer.Option(False, "--no-browser", help="Print the URL, don't open it."),
+    public_url: str | None = typer.Option(
+        None,
+        "--public-url",
+        help="Public base URL of this loopy server; the App's webhook is registered at "
+        "<url>/hooks/github (default: LOOPY_PUBLIC_URL, else registry.yml public_url).",
+    ),
+    no_webhook: bool = typer.Option(
+        False,
+        "--no-webhook",
+        help="Create the App without a webhook even when a public URL is configured.",
+    ),
 ) -> None:
     """Create your own GitHub App via the manifest flow and store its credentials."""
     run_github_auth(
-        org=org, name=name, port=port, root=root, force=force, no_browser=no_browser
+        org=org,
+        name=name,
+        port=port,
+        root=root,
+        force=force,
+        no_browser=no_browser,
+        public_url=public_url,
+        no_webhook=no_webhook,
     )
 
 

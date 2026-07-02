@@ -190,9 +190,10 @@ _LOOPY_ENV = """\
 # GITHUB_APP_PRIVATE_KEY=
 
 # --- GitHub webhook ingress ---
-# Verifies X-Hub-Signature-256 on /hooks/github deliveries. Generate a secret
-# (openssl rand -hex 32), set it here, and give GitHub the same value in the webhook
-# settings; the payload URL is registry.yml's public_url + /hooks/github.
+# Verifies X-Hub-Signature-256 on /hooks/github deliveries. When a public URL is
+# configured, `loopy auth github` registers the App's webhook and writes the
+# GitHub-minted secret here for you. Wiring a webhook by hand instead? Generate a
+# secret (openssl rand -hex 32), set it here, and give GitHub the same value.
 # GITHUB_WEBHOOK_SECRET=
 
 # --- Daytona (the default sandbox; required when a sandbox uses provider: daytona) ---

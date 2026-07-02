@@ -182,16 +182,25 @@ def test_scaffold_still_refuses_dir_with_unrelated_file(tmp_path):
         scaffold_project(target, "demo")
 
 
-def test_init_offers_github_auth_then_repos_then_public_url(tmp_path, monkeypatch):
-    """The wizard authenticates first, asks which repo(s) to work on, then where the server
-    will be hosted (both scaffold inputs) — verified by call order."""
+def test_init_asks_public_url_then_auth_then_repos(tmp_path, monkeypatch):
+    """The wizard asks for the hosted URL first — the GitHub auth offer that follows bakes the
+    webhook URL into the App at creation — then authenticates (receiving that URL), then asks
+    which repo(s) to work on. Verified by call order and the URL pass-through."""
     calls: list[str] = []
+    auth_received: list[str | None] = []
 
-    monkeypatch.setattr(loopy_cli, "_offer_github_auth", lambda target: calls.append("auth"))
-    monkeypatch.setattr(loopy_cli, "_prompt_for_repos", lambda: (calls.append("repos"), [])[1])
     monkeypatch.setattr(
-        loopy_cli, "_prompt_for_public_url", lambda: (calls.append("url"), None)[1]
+        loopy_cli,
+        "_prompt_for_public_url",
+        lambda: (calls.append("url"), "https://loopy.example.com")[1],
     )
+
+    def fake_auth(target, public_url=None):
+        calls.append("auth")
+        auth_received.append(public_url)
+
+    monkeypatch.setattr(loopy_cli, "_offer_github_auth", fake_auth)
+    monkeypatch.setattr(loopy_cli, "_prompt_for_repos", lambda: (calls.append("repos"), [])[1])
     # Keep the rest of the interactive wizard quiet.
     monkeypatch.setattr(loopy_cli, "_offer_ambient_anthropic_key", lambda target: None)
     monkeypatch.setattr(loopy_cli, "_offer_ambient_daytona_creds", lambda target: None)
@@ -206,7 +215,11 @@ def test_init_offers_github_auth_then_repos_then_public_url(tmp_path, monkeypatc
 
     loopy_cli.init("demo", directory=tmp_path, non_interactive=False)
 
-    assert calls == ["auth", "repos", "url"]
+    assert calls == ["url", "auth", "repos"]
+    assert auth_received == ["https://loopy.example.com"]  # the wizard's answer reaches auth
+    # ...and the same URL lands in the scaffolded registry.
+    registry = (tmp_path / "demo" / "registry.yml").read_text()
+    assert "public_url: https://loopy.example.com" in registry
 
 
 @pytest.mark.parametrize("bad", ["", "  ", ".", "..", "a/b", "a\\b", "-leading", "/abs"])

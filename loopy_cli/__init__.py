@@ -337,21 +337,22 @@ def init(
 
     target = (directory / name).resolve()
 
+    # Where the server will be publicly hosted — asked before the auth offer because the GitHub
+    # App manifest bakes the webhook URL in at creation time (the only moment GitHub mints the
+    # webhook secret for us). The answer also lands in registry.yml as `public_url` below.
+    public_url = _prompt_for_public_url() if interactive else None
+
     # Wire git auth *before* asking which repo(s) the agent works on. `loopy auth github` creates
     # the App and installs it on the repos it may touch, so it reads better to authenticate and
     # install first, then name the repo(s) with that install fresh in mind — rather than naming
     # repos into a registry before any auth exists. Auth writes loopy.env into `target`;
     # `scaffold_project` (run below) preserves those creds under its own template.
     if interactive:
-        _offer_github_auth(target)
+        _offer_github_auth(target, public_url)
 
     # Which repo(s) the agent works on — this decides the coding vs orchestrator starter. Blank is
     # a first-class answer (a repo-less orchestrator), so we never fall back to a placeholder repo.
     repos = _prompt_for_repos() if interactive else None
-
-    # Where the server will be publicly hosted — lands in registry.yml as `public_url` (webhook
-    # senders deliver to <public_url>/hooks/...). Blank scaffolds the field as a commented stub.
-    public_url = _prompt_for_public_url() if interactive else None
 
     try:
         created = scaffold_project(target, name, repos=repos, public_url=public_url)
@@ -534,7 +535,8 @@ def _prompt_for_public_url() -> str | None:
     """Ask where this loopy server will be publicly hosted; blank is a first-class answer.
 
     The answer becomes registry.yml's top-level `public_url` — the base URL webhook senders
-    (e.g. a GitHub App) deliver to, as `<public_url>/hooks/<provider>`. It's plain project
+    deliver to, as `<public_url>/hooks/<provider>` — and feeds the GitHub auth offer that
+    follows, which registers the App's webhook there at creation time. It's plain project
     config the user can edit in registry.yml any time, so blank just leaves the field
     scaffolded as a commented stub, and an unusable answer is dropped with a pointer rather
     than baked into the registry.
@@ -556,11 +558,14 @@ def _prompt_for_public_url() -> str | None:
         return None
 
 
-def _offer_github_auth(target: Path) -> None:
+def _offer_github_auth(target: Path, public_url: str | None = None) -> None:
     """Offer to wire git auth now by running the `loopy auth github` manifest flow in-process.
 
-    Declining just leaves the step for later — `_report_remaining_setup` will flag it. A failed
-    or aborted auth run is caught so it never takes the whole `init` down with it.
+    With a `public_url` (just collected by the wizard — registry.yml doesn't exist yet at this
+    point), the App is created with its webhook registered at `<public_url>/hooks/github`, and
+    the confirm prompt says so. Declining just leaves the step for later —
+    `_report_remaining_setup` will flag it. A failed or aborted auth run is caught so it never
+    takes the whole `init` down with it.
     """
     from loopy_runtime.secrets import load_control_plane_env
 
@@ -568,16 +573,17 @@ def _offer_github_auth(target: Path) -> None:
     if load_control_plane_env(target).get("GITHUB_APP_ID"):
         return
 
-    if not typer.confirm(
-        "  Wire git auth now? Runs `loopy auth github` (creates a GitHub App, opens a browser)",
-        default=True,
-    ):
+    prompt = "  Wire git auth now? Runs `loopy auth github` (creates a GitHub App, opens a browser"
+    if public_url:
+        prompt += f"; registers its webhook at {public_url}/hooks/github"
+    prompt += ")"
+    if not typer.confirm(prompt, default=True):
         return
 
     from loopy_cli.auth import run_github_auth
 
     try:
-        run_github_auth(root=target)
+        run_github_auth(root=target, public_url=public_url)
     except typer.Exit:
         typer.echo("  (skipped — git auth not completed; run `loopy auth github` later)")
     except Exception as exc:  # noqa: BLE001 - never let onboarding crash the scaffold

@@ -52,6 +52,24 @@ def test_build_manifest_shape():
     }
 
 
+def test_build_manifest_with_webhook_url_registers_hook():
+    # With a public URL known, the App is created *with* its webhook — GitHub then mints
+    # the webhook secret and returns it in the conversion for us to persist.
+    manifest = auth.build_manifest(
+        "loopy-acme",
+        "http://127.0.0.1:8765/callback",
+        webhook_url="https://loopy.example.com/hooks/github",
+    )
+    assert manifest["hook_attributes"] == {
+        "url": "https://loopy.example.com/hooks/github",
+        "active": True,
+    }
+    # A webhook without subscriptions delivers nothing — the built-in Github.* catalog
+    # (PRs, issues, issue comments, pushes) must be covered, with the perms it needs.
+    assert manifest["default_events"] == ["pull_request", "issues", "issue_comment", "push"]
+    assert manifest["default_permissions"]["issues"] == "read"
+
+
 def test_create_app_url_personal_vs_org():
     assert auth.create_app_url(None) == "https://github.com/settings/apps/new"
     assert auth.create_app_url("acme") == "https://github.com/organizations/acme/settings/apps/new"
@@ -183,6 +201,22 @@ def test_write_app_credentials_inlines_key_and_gitignores_env(tmp_path):
 
     # loopy.env now carries the private key, so it must be gitignored.
     assert "loopy.env" in (tmp_path / ".gitignore").read_text()
+
+
+def test_write_app_credentials_persists_webhook_secret(tmp_path):
+    # An App created with a webhook comes back with a GitHub-minted webhook_secret; it
+    # must land in loopy.env so `loopy run` verifies deliveries with no manual step.
+    conversion = {"id": 1, "pem": "PEM", "slug": "x", "webhook_secret": "whsec_abc123"}
+    auth.write_app_credentials(tmp_path, conversion)
+    assert load_control_plane_env(tmp_path)["GITHUB_WEBHOOK_SECRET"] == "whsec_abc123"
+
+
+def test_write_app_credentials_skips_absent_webhook_secret(tmp_path):
+    # A webhook-less App: GitHub returns webhook_secret as null — no key is written, so
+    # the run path's "unverified /hooks/github" warning stays accurate.
+    conversion = {"id": 1, "pem": "PEM", "slug": "x", "webhook_secret": None}
+    auth.write_app_credentials(tmp_path, conversion)
+    assert "GITHUB_WEBHOOK_SECRET" not in load_control_plane_env(tmp_path)
 
 
 def test_credentials_round_trip_restores_multiline_pem(tmp_path):
@@ -349,6 +383,98 @@ def test_run_github_auth_no_browser_skips_open(monkeypatch, tmp_path):
     auth.run_github_auth(root=tmp_path, no_browser=True)
 
     assert opened == []
+
+
+def _stub_auth_flow(monkeypatch, captured: dict, conversion: dict):
+    """Stub the network/browser edges of run_github_auth, capturing the manifest kwargs."""
+    monkeypatch.delenv("LOOPY_PUBLIC_URL", raising=False)
+
+    def fake_obtain(**kwargs):
+        captured.update(kwargs)
+        return "code123"
+
+    monkeypatch.setattr(auth, "obtain_manifest_code", fake_obtain)
+    monkeypatch.setattr(github_app, "exchange_manifest_code", lambda code: conversion)
+    monkeypatch.setattr(auth, "_wait_for_installation", lambda root: None)
+    monkeypatch.setattr(auth, "_verify", lambda root: None)
+
+
+_WEBHOOK_CONVERSION = {"id": 7, "pem": "PEM", "slug": "loopy-abcd", "webhook_secret": "whsec_9"}
+
+
+def test_run_github_auth_registers_webhook_from_registry_public_url(monkeypatch, tmp_path):
+    # registry.yml's `public_url` (collected at init, editable any time) flows into the App
+    # manifest as the webhook URL, and the secret GitHub mints round-trips into loopy.env.
+    (tmp_path / "registry.yml").write_text("public_url: https://loopy.example.com/\n")
+    captured: dict = {}
+    _stub_auth_flow(monkeypatch, captured, _WEBHOOK_CONVERSION)
+
+    auth.run_github_auth(root=tmp_path, no_browser=True)
+
+    assert captured["webhook_url"] == "https://loopy.example.com/hooks/github"
+    assert load_control_plane_env(tmp_path)["GITHUB_WEBHOOK_SECRET"] == "whsec_9"
+
+
+def test_run_github_auth_env_var_overrides_registry(monkeypatch, tmp_path):
+    # LOOPY_PUBLIC_URL is a deploy-time constant — set in the process env it wins over
+    # whatever registry.yml carries.
+    (tmp_path / "registry.yml").write_text("public_url: https://stale.example.com\n")
+    captured: dict = {}
+    _stub_auth_flow(monkeypatch, captured, _WEBHOOK_CONVERSION)
+    monkeypatch.setenv("LOOPY_PUBLIC_URL", "https://live.example.com")
+
+    auth.run_github_auth(root=tmp_path, no_browser=True)
+
+    assert captured["webhook_url"] == "https://live.example.com/hooks/github"
+
+
+def test_run_github_auth_explicit_public_url_wins(monkeypatch, tmp_path):
+    # An explicit public_url (the init wizard's just-collected answer, or --public-url)
+    # beats every configured source — and is normalized on the way in.
+    (tmp_path / "registry.yml").write_text("public_url: https://stale.example.com\n")
+    captured: dict = {}
+    _stub_auth_flow(monkeypatch, captured, _WEBHOOK_CONVERSION)
+
+    auth.run_github_auth(root=tmp_path, no_browser=True, public_url="fresh.example.com/")
+
+    assert captured["webhook_url"] == "https://fresh.example.com/hooks/github"
+
+
+def test_run_github_auth_without_public_url_stays_webhook_less(monkeypatch, tmp_path):
+    # No URL anywhere → the serverless default is preserved: no hook_attributes requested.
+    captured: dict = {}
+    _stub_auth_flow(
+        monkeypatch, captured, {"id": 7, "pem": "PEM", "slug": "loopy-abcd", "webhook_secret": None}
+    )
+
+    auth.run_github_auth(root=tmp_path, no_browser=True)
+
+    assert captured["webhook_url"] is None
+    assert "GITHUB_WEBHOOK_SECRET" not in load_control_plane_env(tmp_path)
+
+
+def test_run_github_auth_no_webhook_flag_opts_out(monkeypatch, tmp_path):
+    # --no-webhook keeps the App a pure credential source even with a URL configured.
+    (tmp_path / "registry.yml").write_text("public_url: https://loopy.example.com\n")
+    captured: dict = {}
+    _stub_auth_flow(monkeypatch, captured, {"id": 7, "pem": "PEM", "slug": "x"})
+
+    auth.run_github_auth(root=tmp_path, no_browser=True, no_webhook=True)
+
+    assert captured["webhook_url"] is None
+
+
+def test_run_github_auth_rejects_bad_public_url(monkeypatch, tmp_path):
+    # A malformed URL must fail here, loudly — not get baked into a GitHub App where the
+    # broken webhook only surfaces as silent non-delivery much later.
+    captured: dict = {}
+    _stub_auth_flow(monkeypatch, captured, {"id": 7, "pem": "PEM", "slug": "x"})
+
+    import typer
+
+    with pytest.raises(typer.Exit):
+        auth.run_github_auth(root=tmp_path, no_browser=True, public_url="ftp://nope")
+    assert "webhook_url" not in captured  # never reached the browser dance
 
 
 def test_wait_for_installation_times_out(monkeypatch, tmp_path):
