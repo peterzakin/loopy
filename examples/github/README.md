@@ -34,12 +34,12 @@ GitHub ──webhook(/hooks/github, X-Hub-Signature-256)──▶ loopy ingress
 
 > Scope note: a built-in event fires for **any** repository the GitHub App delivers — there is no
 > per-repo filter on the trigger. Scope is whatever the App is installed on (here, the repo in
-> `sandboxes.Dev.repos`).
+> `sandboxes.BaseSandbox.repos`).
 
 ## Setup
 
 1. **GitHub App for repo access** (recommended): `loopy auth github`, then install the App on
-   the repo in `sandboxes.Dev.repos`. (Or drop a `GITHUB_TOKEN` PAT in `secrets/base.env`.)
+   the repo in `sandboxes.BaseSandbox.repos`. (Or drop a `GITHUB_TOKEN` PAT in `secrets/base.env`.)
 2. **Webhook secret** — generate one and put it in the control-plane env so the ingress can
    verify deliveries:
    ```

@@ -400,7 +400,7 @@ def _note_orchestrator_mode() -> None:
     typer.echo(
         typer.style(
             "    Try it with `loopy trigger --event Note`. Want code edits instead? Add a repo "
-            "to sandboxes.Dev.repos and run `loopy auth github`.",
+            "to sandboxes.BaseSandbox.repos and run `loopy auth github`.",
             fg=typer.colors.BRIGHT_BLACK,
         )
     )

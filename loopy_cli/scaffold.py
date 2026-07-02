@@ -17,7 +17,7 @@ from pathlib import Path
 # choke on them — a plain `.replace` of an unambiguous token is safer.
 _NAME = "__PROJECT_NAME__"
 
-# Sentinel for the Dev sandbox's `repos:` line — rendered from the repo(s) the user names at
+# Sentinel for the BaseSandbox sandbox's `repos:` line — rendered from the repo(s) the user names at
 # `init` time (or an empty list). Same `.replace` rationale as `_NAME`.
 _REPOS_LINE = "__REPOS_LINE__"
 
@@ -51,7 +51,7 @@ _REGISTRY_YML = """\
 # Defaults — every agent inherits these; override a field only when needed.
 defaults:
   agent:
-    sandbox: Dev
+    sandbox: BaseSandbox
 
 # Sandbox — compute + egress. `daytona` runs each agent in an isolated cloud sandbox built
 # from the `image:` spec below (set DAYTONA_API_KEY in loopy.env). Swap `provider:` to `docker`
@@ -59,7 +59,7 @@ defaults:
 #   • `repos:` is what the agent clones to edit code — keep it pointed at a repo you can push to
 #   • `env_file:` is the gitignored dotenv injected as the sandbox's environment
 sandboxes:
-  Dev:
+  BaseSandbox:
     provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
     # git over https + the model API. Switching a step to Codex (or OpenCode on an
@@ -143,7 +143,7 @@ def task_queue(req) -> CodeTask:
 """
 
 _DEV_ENV = """\
-# Secrets for the `Dev` sandbox, injected as environment variables at run time. Gitignored —
+# Secrets for the `BaseSandbox` sandbox, injected as environment variables at run time. Gitignored —
 # never commit this file. Lines are KEY=VALUE; values are literal (no ${VAR} interpolation).
 
 # --- model auth ---
@@ -212,7 +212,7 @@ agent that edits a checkout and opens a pull request.
 ## Run it
 
 ```bash
-# 1. confirm sandboxes.Dev.repos points at a repo you can push to (set from your init answer)
+# 1. confirm sandboxes.BaseSandbox.repos points at a repo you can push to (set at init)
 
 # 2. give the sandbox its secrets
 #    edit secrets/base.env and set ANTHROPIC_API_KEY
@@ -254,7 +254,7 @@ _ORCH_REGISTRY_YML = """\
 # Defaults — every agent inherits these; override a field only when needed.
 defaults:
   agent:
-    sandbox: Dev
+    sandbox: BaseSandbox
 
 # Sandbox — compute + egress. `daytona` runs each agent in an isolated cloud sandbox built
 # from the `image:` spec below (set DAYTONA_API_KEY in loopy.env). Swap `provider:` to `docker`
@@ -263,7 +263,7 @@ defaults:
 #   • want an agent that edits code? add a repo (and run `loopy auth github`) and a PR workflow
 #   • `env_file:` is the gitignored dotenv injected as the sandbox's environment
 sandboxes:
-  Dev:
+  BaseSandbox:
     provider: daytona
     image: { debian_slim: "3.12", workdir: /home/loopy, user: loopy }
     # just the model API — no git, no repos. Switching a step to Codex (or OpenCode on an
@@ -343,7 +343,7 @@ def notes_inbox(req) -> Note:
 """
 
 _ORCH_DEV_ENV = """\
-# Secrets for the `Dev` sandbox, injected as environment variables at run time. Gitignored —
+# Secrets for the `BaseSandbox` sandbox, injected as environment variables at run time. Gitignored —
 # never commit this file. Lines are KEY=VALUE; values are literal (no ${VAR} interpolation).
 
 # --- model auth ---
@@ -402,8 +402,8 @@ loopy trigger . \\
   --fields '{"text": "Customer call: they want SSO by Q3 and flagged slow CSV export."}'
 ```
 
-Want an agent that edits code instead? Point `sandboxes.Dev.repos` at a repo you can push to,
-run `loopy auth github`, and add a workflow that opens a PR.
+Want an agent that edits code instead? Point `sandboxes.BaseSandbox.repos` at a repo you can
+push to, run `loopy auth github`, and add a workflow that opens a PR.
 
 `run`/`trigger` accept a project directory and compile it for you; `loopy compile .` is still
 there to write a standalone `manifest.json` (the deploy artifact) or as a CI gate (`--check`).
@@ -413,7 +413,7 @@ top-level Loopy README for the authoring model.
 
 
 def _render_repos_line(repos: list[str]) -> str:
-    """Render the Dev sandbox's `repos:` line from the repo(s) the agent will work on."""
+    """Render the BaseSandbox sandbox's `repos:` line from the repo(s) the agent will work on."""
     return f"repos: [{', '.join(repos)}]   # cloned at acquire time (git auth injected)"
 
 

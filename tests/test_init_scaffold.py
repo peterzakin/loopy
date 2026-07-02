@@ -50,7 +50,7 @@ def test_orchestrator_scaffold_compiles_green(tmp_path):
     # A real, keepable workflow — not an empty shell or a placeholder to fix.
     assert "summarize" in result.project.workflows
     # No repo declared, and crucially never the old unpushable placeholder.
-    assert result.project.registry.sandboxes["Dev"].repos == []
+    assert result.project.registry.sandboxes["BaseSandbox"].repos == []
     assert "octocat" not in (target / "registry.yml").read_text().lower()
 
 
@@ -70,7 +70,7 @@ def test_scaffold_declares_an_agent_per_runtime(tmp_path):
 
 
 def test_scaffold_writes_named_repos(tmp_path):
-    """Repos named at init land verbatim in the Dev sandbox's `repos:` and compile green."""
+    """Repos named at init land verbatim in the BaseSandbox sandbox's `repos:` and compile green."""
     target = tmp_path / "demo"
     scaffold_project(target, "demo", repos=["me/app", "me/other"])
 
@@ -79,7 +79,7 @@ def test_scaffold_writes_named_repos(tmp_path):
 
     result = compile_project(target)
     assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
-    repos = [r.url for r in result.project.registry.sandboxes["Dev"].repos]
+    repos = [r.url for r in result.project.registry.sandboxes["BaseSandbox"].repos]
     assert repos == ["me/app", "me/other"]
 
 

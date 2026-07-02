@@ -6,7 +6,7 @@
 # Defaults — every agent inherits these; override a field only when needed.
 defaults:
   agent:
-    sandbox: Dev
+    sandbox: BaseSandbox
     harness: { runtime: claude-code, model: claude-sonnet-4-6 }
 
 # Sandbox — compute + egress. `provider:` selects the backend (this is the source of truth;
@@ -15,7 +15,7 @@ defaults:
 # Switch `provider:` to `local` (bare subprocess) for a no-Docker box, but then PATH/HOME/the
 # model key must be supplied in the env_file (see README); or `daytona` for a cloud sandbox.
 sandboxes:
-  Dev:
+  BaseSandbox:
     provider: docker
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
     network: [github.com, api.anthropic.com]   # git over https + the model API
