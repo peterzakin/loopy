@@ -278,11 +278,13 @@ API call, a future `loopy auth sentry` could script it end-to-end. See
 - Follow the loopy-landing `STYLE_GUIDE.md` for any copy (no emdashes, no traffic-light window
   chrome, no marketing-speak).
 
-## Appendix: `loopy auth sentry` (follow-up)
+## Appendix: `loopy auth sentry` (implemented)
 
-Not part of the built-in-integration PR, but the natural companion command — the equivalent of
-`loopy auth github` (`loopy_cli/auth.py`). It scripts the Custom/Internal Integration setup so
-the user doesn't click through Sentry's Developer Settings by hand.
+The companion command, the equivalent of `loopy auth github` (`loopy_cli/auth.py`). It scripts
+the Custom/Internal Integration setup so the user doesn't click through Sentry's Developer
+Settings by hand. **Shipped**: `loopy_runtime/scm/sentry_app.py` (the API client) and the
+`sentry` command in `loopy_cli/auth.py`, covered by `tests/test_auth_sentry.py`. The sections
+below describe what was built.
 
 ### Which token generates the webhook: a User token, as a one-time bootstrap
 
@@ -420,18 +422,23 @@ securely prompts for a Client Secret from an integration created in the UI, writ
 
 ### Wiring
 
-- Add **`LOOPY_PUBLIC_URL`** as shared, provider-agnostic config in `loopy_runtime/config.py`
-  (alongside `--host`/`--port`/`REDIS_URL`), so it is defined once and every provider's webhook
-  URL is computed from it — this is not Sentry-specific and shouldn't live in the Sentry code.
-- Add a `sentry` command to the existing `auth_app` Typer group in `loopy_cli/auth.py`; defer
-  heavy HTTP imports into the body, matching the module's convention.
-- `loopy init`: add `SENTRY_AUTH_TOKEN` to the environment credentials the wizard already
-  detects (alongside `ANTHROPIC_API_KEY` / `DAYTONA_API_KEY`) and offer to run `auth sentry`
-  when a workflow triggers on `Sentry.*`.
-- `loopy auth status`: report the Sentry integration (slug + whether `SENTRY_WEBHOOK_SECRET` is
-  set, best-effort `GET` to confirm the webhook URL).
-- `loopy doctor`: flag a missing `SENTRY_WEBHOOK_SECRET` when a workflow triggers on `Sentry.*`
-  (runnability check, alongside the existing GitHub checks).
+Done in this change:
+
+- The `sentry` command is added to the `auth_app` Typer group in `loopy_cli/auth.py`, with
+  heavy HTTP imports deferred into the body per the module's convention; `run_sentry_auth` is
+  the plain-function core (callable in-process, like `run_github_auth`).
+- `LOOPY_PUBLIC_URL` is read here to compute the webhook URL. (It is consumed as an env var
+  today; promoting it to a first-class field in `loopy_runtime/config.py` alongside
+  `--host`/`--port`/`REDIS_URL` is a small follow-up, since only `auth sentry` reads it so far.)
+
+Still open (small follow-ups, not blocking the command):
+
+- `loopy init`: detect `SENTRY_AUTH_TOKEN` / `LOOPY_PUBLIC_URL` in the environment (alongside
+  `ANTHROPIC_API_KEY` / `DAYTONA_API_KEY`) and offer to run `auth sentry` when a workflow
+  triggers on `Sentry.*`.
+- `loopy auth status`: also report the Sentry integration (slug + whether
+  `SENTRY_WEBHOOK_SECRET` is set).
+- `loopy doctor`: flag a missing `SENTRY_WEBHOOK_SECRET` when a workflow triggers on `Sentry.*`.
 
 ## Effort
 
