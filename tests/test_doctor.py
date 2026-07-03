@@ -21,6 +21,7 @@ from loopy_cli.scaffold import scaffold_project
 from loopy_core.compile.pipeline import compile_project
 from loopy_runtime.scm import github_app
 from loopy_runtime.secrets import _parse_dotenv, load_control_plane_env
+from tests.helpers import write_project
 
 
 def _diagnose(root, *, control_plane_env=None):
@@ -294,3 +295,59 @@ def test_check_repo_access_degrades_to_warn_on_error(tmp_path, monkeypatch):
     monkeypatch.setattr(github_app, "list_installations", boom)
     findings = check_repo_access(registry, object())
     assert len(findings) == 1 and findings[0].level == "warn"
+
+
+# ── built-in webhook secret (used provider, secret unset) ───────────────────
+
+_SENTRY_PROJECT = {
+    "registry.yml": (
+        "defaults: { agent: { sandbox: default, model: claude-sonnet-4-6,"
+        " harness: claude-code } }\n"
+        "sandboxes: { default: { provider: local } }\n"
+        "agents: { Investigator: {} }\n"
+    ),
+    "workflows/triage/t.md": "---\non: Sentry.IssueCreated\nagent: Investigator\n---\nTriage it.\n",
+}
+
+
+def test_used_builtin_provider_warns_when_secret_unset(tmp_path):
+    write_project(tmp_path, _SENTRY_PROJECT)
+    findings = _diagnose(tmp_path)  # no SENTRY_WEBHOOK_SECRET in env
+    warn = next((f for f in findings if "SENTRY_WEBHOOK_SECRET" in f.message), None)
+    assert warn is not None and warn.level == "warn"
+    assert "loopy auth sentry" in (warn.hint or "")
+
+
+def test_builtin_secret_warning_clears_when_set(tmp_path):
+    write_project(tmp_path, _SENTRY_PROJECT)
+    findings = _diagnose(tmp_path, control_plane_env={"SENTRY_WEBHOOK_SECRET": "s3cr3t"})
+    assert not any("SENTRY_WEBHOOK_SECRET" in f.message for f in findings)
+
+
+def test_unused_provider_never_warns(tmp_path):
+    """A project that triggers on no built-in event gets no secret finding at all."""
+    write_project(
+        tmp_path,
+        {
+            "registry.yml": _SENTRY_PROJECT["registry.yml"] + "events:\n  CodeTask: { id: str }\n",
+            "workflows/triage/t.md": "---\non: CodeTask\nagent: Investigator\n---\nWork.\n",
+        },
+    )
+    findings = _diagnose(tmp_path)
+    assert not any("WEBHOOK_SECRET" in f.message for f in findings)
+
+
+def test_github_builtin_secret_is_not_double_warned(tmp_path):
+    """GitHub's delivery wiring is reported by registration_findings, so the generic secret
+    check skips it — a `Github.*` project with no secret gets no SENTRY-style finding here."""
+    write_project(
+        tmp_path,
+        {
+            "registry.yml": _SENTRY_PROJECT["registry.yml"],
+            "workflows/review/r.md": (
+                "---\non: Github.PullRequestOpened\nagent: Investigator\n---\nReview.\n"
+            ),
+        },
+    )
+    findings = _diagnose(tmp_path)
+    assert not any("GITHUB_WEBHOOK_SECRET" in f.message for f in findings)

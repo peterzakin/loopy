@@ -118,11 +118,16 @@ class BuiltinProvider:
     prefix: str  # reserved event-name prefix, e.g. "Github."
     webhook_path: str  # the one URL the provider posts every event type to
     events: dict[str, dict[str, str]]
+    secret_env: str  # env var holding the webhook signing secret (verified at ingress)
 
 
 BUILTIN_PROVIDERS: tuple[BuiltinProvider, ...] = (
-    BuiltinProvider("github", GITHUB_PREFIX, "/hooks/github", GITHUB_EVENTS),
-    BuiltinProvider("sentry", SENTRY_PREFIX, "/hooks/sentry", SENTRY_EVENTS),
+    BuiltinProvider(
+        "github", GITHUB_PREFIX, "/hooks/github", GITHUB_EVENTS, "GITHUB_WEBHOOK_SECRET"
+    ),
+    BuiltinProvider(
+        "sentry", SENTRY_PREFIX, "/hooks/sentry", SENTRY_EVENTS, "SENTRY_WEBHOOK_SECRET"
+    ),
 )
 
 

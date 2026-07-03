@@ -27,6 +27,14 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
+from loopy_core.builtins import provider_for
+
+# Built-in providers with a dedicated delivery-wiring path whose absence is already reported
+# elsewhere (GitHub by `registration_findings`), so the generic secret check skips them to
+# avoid a duplicate finding. The per-provider fix hint for the rest:
+_WEBHOOK_SECRET_FIX = {"sentry": "run `loopy auth sentry` (or set it in loopy.env)"}
+_SECRET_CHECK_SKIP = frozenset({"github"})
+
 # The exact values the scaffold writes. Each is *present* (so presence checks pass) but not
 # runnable — these are the strings `doctor` exists to catch.
 PLACEHOLDER_ANTHROPIC_KEY = "sk-ant-..."
@@ -228,6 +236,28 @@ def diagnose(
                 "add DAYTONA_API_KEY to loopy.env (control-plane creds), or export it",
             )
         )
+
+    # 5. Built-in webhook secret — a workflow triggering on a built-in provider's event
+    #    (e.g. `on: Sentry.IssueCreated`) needs that provider's signing secret set, or `loopy
+    #    run` accepts its deliveries unverified. Only fires for providers actually referenced
+    #    (their event is injected into the registry with builtin=True) whose secret is unset.
+    #    Warn, not error: the runtime still runs, loudly unverified — matching that posture.
+    used_providers = {}
+    for evname, event in registry.events.items():
+        if getattr(event, "builtin", False):
+            provider = provider_for(evname)
+            if provider is not None and provider.name not in _SECRET_CHECK_SKIP:
+                used_providers[provider.name] = provider
+    for name, provider in sorted(used_providers.items()):
+        if not control_plane_env.get(provider.secret_env):
+            findings.append(
+                Finding(
+                    "warn",
+                    f"{provider.secret_env} is not set — {name} deliveries to "
+                    f"{provider.webhook_path} run unverified (dev only)",
+                    _WEBHOOK_SECRET_FIX.get(name, f"set {provider.secret_env} in loopy.env"),
+                )
+            )
 
     return findings
 
