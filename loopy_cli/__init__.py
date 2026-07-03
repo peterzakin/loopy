@@ -1192,13 +1192,18 @@ def run(
         raise typer.Exit(code=1) from exc
     receiver = LocalEventReceiver(event_bus, m.registry.events)  # shared gate for webhooks + polls
     sensor_runner = FastAPISensorRunner(receiver)
-    # GitHub posts every event type to one URL signed with X-Hub-Signature-256; verify it at the
-    # edge when the secret is configured. Paths under /hooks/github opt in; absent a secret we run
-    # unverified (dev only) and say so loudly.
-    from loopy_runtime.scm.github_webhook import signature_verifier
+    # Each built-in provider posts every event type to one URL and signs the raw body; verify
+    # at the edge when that provider's secret is configured. Keyed by path prefix (not sensor
+    # source) so hand-written sensors sharing a built-in path — e.g. examples/github — stay
+    # verified too. Absent a secret we run unverified (dev only) and say so loudly, once per
+    # provider.
+    from loopy_runtime.scm import github_webhook, sentry_webhook
 
-    github_secret = os.environ.get("GITHUB_WEBHOOK_SECRET")
-    warned_unverified = False
+    edge_verifiers = {
+        "/hooks/github": ("GITHUB_WEBHOOK_SECRET", github_webhook.signature_verifier),
+        "/hooks/sentry": ("SENTRY_WEBHOOK_SECRET", sentry_webhook.signature_verifier),
+    }
+    warned_unverified: set[str] = set()
     for sensor in m.sensors:
         if sensor.trigger.kind != "webhook" or not sensor.trigger.path:
             continue
@@ -1214,16 +1219,20 @@ def run(
             )
             fn = synthesizing_publisher(m, sensor)
         verify = None
-        if sensor.trigger.path.startswith("/hooks/github"):
-            if github_secret:
-                verify = signature_verifier(github_secret)
-            elif not warned_unverified:
+        for path_prefix, (secret_env, make_verifier) in edge_verifiers.items():
+            if not sensor.trigger.path.startswith(path_prefix):
+                continue
+            secret = os.environ.get(secret_env)
+            if secret:
+                verify = make_verifier(secret)
+            elif path_prefix not in warned_unverified:
                 typer.echo(
-                    "warning: GITHUB_WEBHOOK_SECRET not set; /hooks/github signatures are "
+                    f"warning: {secret_env} not set; {path_prefix} signatures are "
                     "unverified (dev only — set it before exposing this endpoint)",
                     err=True,
                 )
-                warned_unverified = True
+                warned_unverified.add(path_prefix)
+            break
         sensor_runner.register_webhook(sensor.trigger.path, fn, verify=verify)
 
     # Poll sensors run on the in-process scheduler, sharing the runtime's StateStore for

@@ -2,6 +2,9 @@ from loopy import sensor
 from loopy.events import Incident, MetricThreshold
 
 
+# Teaching example: this shapes Sentry's payload into the project's own normalized
+# `Incident` (fanned in from several sources). To consume the raw Sentry event instead,
+# the built-in `on: Sentry.IssueCreated` needs no sensor at all.
 @sensor(webhook="/hooks/sentry", emits="Incident")
 def sentry_issues(req) -> Incident:
     issue = req.json["data"]["issue"]

@@ -1,20 +1,22 @@
 """Inject built-in events + their producing sensors, and built-in agents (Option A).
 
-A workflow may trigger on a platform-shipped event (`on: Github.PullRequestOpened`)
-without declaring it or authoring a sensor, and a step may name a platform-shipped agent
-(`agent: BaseClaude`) without a registry entry. This pass — run after workflows/sensors
-are loaded and *before* `resolve_refs` and `cross_check` — does:
+A workflow may trigger on a platform-shipped event (`on: Github.PullRequestOpened`,
+`on: Sentry.IssueCreated`) without declaring it or authoring a sensor, and a step may
+name a platform-shipped agent (`agent: BaseClaude`) without a registry entry. This pass
+— run after workflows/sensors are loaded and *before* `resolve_refs` and `cross_check`
+— does:
 
-  1. Guards the reserved namespace: a user-declared event or user sensor in `Github.*`
-     is an error (E215). The platform owns producers in that namespace.
-  2. For each `Github.*` event a workflow triggers on, registers its contract (so
+  1. Guards the reserved namespaces: a user-declared event or user sensor under any
+     `BUILTIN_PROVIDERS` prefix is an error (E215). The platform owns producers there.
+  2. For each built-in event a workflow triggers on, registers its contract (so
      `{{ event.field }}` refs resolve and the runtime can validate it) and synthesizes
-     a built-in `Sensor` on `/hooks/github` (so the event has a producer — no W501).
-  3. Reports an unknown `Github.*` trigger (E112) with the catalog of known names.
+     a built-in `Sensor` on the provider's webhook path (so the event has a producer —
+     no W501).
+  3. Reports an unknown reserved-prefix trigger (E112) with that provider's catalog.
   4. For each built-in agent (`BaseClaude`/`BaseCodex`) a step names and the project didn't
      declare, registers it so `cross_check`'s X2 resolves it like any registered agent.
 
-Validation of the reserved namespace lives entirely here; `cross_check` skips its
+Validation of the reserved namespaces lives entirely here; `cross_check` skips its
 E504 registration check for reserved-prefix events (this pass owns them).
 """
 
@@ -23,10 +25,9 @@ from __future__ import annotations
 from loopy_core.builtins import (
     BUILTIN_AGENT_SANDBOX,
     BUILTIN_AGENTS,
-    GITHUB_EVENTS,
-    GITHUB_PREFIX,
     is_builtin_agent,
     is_reserved,
+    provider_for,
 )
 from loopy_core.compile import codes
 from loopy_core.compile.diagnostics import DiagnosticCollector
@@ -36,7 +37,6 @@ from loopy_core.sensors.model import Sensor, SensorTrigger
 from loopy_core.span import Span, span_at
 from loopy_core.workflow.model import Workflow
 
-_BUILTIN_PATH = "/hooks/github"
 _BUILTIN_SPAN = span_at("<built-in>")
 
 
@@ -61,12 +61,15 @@ def inject_builtins(
 
     built: list[Sensor] = []
     for name in sorted(referenced):
-        contract = GITHUB_EVENTS.get(name)
+        provider = provider_for(name)
+        if provider is None:  # unreachable: collection above is gated on is_reserved
+            continue
+        contract = provider.events.get(name)
         if contract is None:
-            known = ", ".join(sorted(GITHUB_EVENTS))
+            known = ", ".join(sorted(provider.events))
             diags.error(
                 codes.E112,
-                f"unknown built-in event '{name}'; known built-ins: {known}",
+                f"unknown built-in event '{name}'; known {provider.name} built-ins: {known}",
                 span=referenced[name],
             )
             continue
@@ -75,10 +78,12 @@ def inject_builtins(
         built.append(
             Sensor(
                 name=f"builtin:{name}",
-                trigger=SensorTrigger(kind="webhook", path=_BUILTIN_PATH, span=_BUILTIN_SPAN),
+                trigger=SensorTrigger(
+                    kind="webhook", path=provider.webhook_path, span=_BUILTIN_SPAN
+                ),
                 emits=name,
                 source="builtin",
-                provider="github",
+                provider=provider.name,
                 span=_BUILTIN_SPAN,
             )
         )
@@ -119,31 +124,35 @@ def _guard_reserved(
     sensors: list[Sensor],
     diags: DiagnosticCollector,
 ) -> None:
-    """E215 — the `Github.` namespace is reserved for built-ins; a user may not declare an
-    event, author a sensor, or have a step emit into it."""
+    """E215 — the built-in provider namespaces (`Github.`, `Sentry.`) are reserved; a user
+    may not declare an event, author a sensor, or have a step emit into one."""
     for evname, event in registry.events.items():
-        if is_reserved(evname) and not event.builtin:
+        provider = provider_for(evname)
+        if provider is not None and not event.builtin:
             diags.error(
                 codes.E215,
-                f"event '{evname}' uses the reserved '{GITHUB_PREFIX}' namespace "
-                f"(built-in GitHub events); name it differently",
+                f"event '{evname}' uses the reserved '{provider.prefix}' namespace "
+                f"(built-in {provider.name} events); name it differently",
                 span=event.span,
             )
     for sensor in sensors:
-        if is_reserved(sensor.emits):
+        provider = provider_for(sensor.emits)
+        if provider is not None:
             diags.error(
                 codes.E215,
-                f"sensor '{sensor.name}' emits into the reserved '{GITHUB_PREFIX}' namespace; "
-                f"built-in GitHub events are produced by the platform",
+                f"sensor '{sensor.name}' emits into the reserved '{provider.prefix}' namespace; "
+                f"built-in {provider.name} events are produced by the platform",
                 span=sensor.span,
             )
     for workflow in workflows.values():
         for step in workflow.steps.values():
             for emitted in step.emits:
-                if is_reserved(emitted):
+                provider = provider_for(emitted)
+                if provider is not None:
                     diags.error(
                         codes.E215,
-                        f"step '{step.id}' emits into the reserved '{GITHUB_PREFIX}' namespace; "
-                        f"built-in GitHub events are produced by the platform",
+                        f"step '{step.id}' emits into the reserved '{provider.prefix}' "
+                        f"namespace; built-in {provider.name} events are produced by the "
+                        f"platform",
                         span=step.span,
                     )

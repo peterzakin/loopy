@@ -220,19 +220,21 @@ The event-publish layer: code that turns the outside world into **registered eve
 more files (a single `sensors.py` is fine); each sensor is a function decorated with `@sensor`,
 triggered by a `poll` or a `webhook`.
 
-> **Common GitHub events are built in; you may not need a sensor at all.** A workflow can
-> trigger on a platform-shipped event directly (`on: Github.PullRequestOpened`) with no
-> `registry.yml` entry and no `sensors/` file; the compiler injects the contract and a
-> `/hooks/github` sensor for you. Catalog: `Github.PullRequestOpened`, `PullRequestMerged`,
-> `IssueOpened`, `IssueCommentCreated`, `Push`. The `Github.` namespace is reserved. See
-> [`examples/github/`](examples/github/). Write your own `@sensor` (below) for any source the
-> built-ins don't cover.
+> **Common GitHub and Sentry events are built in; you may not need a sensor at all.** A
+> workflow can trigger on a platform-shipped event directly (`on: Github.PullRequestOpened`,
+> `on: Sentry.IssueCreated`) with no `registry.yml` entry and no `sensors/` file; the compiler
+> injects the contract and a `/hooks/<provider>` sensor for you. Catalog:
+> `Github.PullRequestOpened`, `PullRequestMerged`, `IssueOpened`, `IssueCommentCreated`,
+> `Push`; `Sentry.IssueCreated`, `IssueResolved`. The `Github.` and `Sentry.` namespaces are
+> reserved. See [`examples/github/`](examples/github/). Write your own `@sensor` (below) for
+> any source the built-ins don't cover.
 
 > **Both `poll` and `webhook` are supported.** `loopy run` hosts each `@sensor(webhook=...)` as an
 > HTTP route and fans one path out to every sensor on it (GitHub posts every event type to a single
 > URL, so several sensors can share `/hooks/github`). Ingress can be signed: when
 > `GITHUB_WEBHOOK_SECRET` is set, `loopy run` verifies GitHub's `X-Hub-Signature-256` HMAC at the
-> edge before any sensor sees the payload. See
+> edge before any sensor sees the payload (likewise `SENTRY_WEBHOOK_SECRET` for Sentry's
+> `Sentry-Hook-Signature` on `/hooks/sentry`). See
 > [`examples/incidents/sensors/sensors.py`](examples/incidents/sensors/sensors.py)
 > for a mix of `webhook` and `poll` sensors.
 

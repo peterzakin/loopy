@@ -8,12 +8,13 @@ plus the contract/mapper agreement that keeps the core and runtime halves in loc
 
 from __future__ import annotations
 
-from loopy_core.builtins import GITHUB_EVENTS
+from loopy_core.builtins import BUILTIN_PROVIDERS, GITHUB_EVENTS
 from loopy_core.compile import codes
 from loopy_core.compile.manifest import to_manifest
 from loopy_core.compile.pipeline import compile_project
 from loopy_core.events.codegen import generate_events
 from loopy_runtime.scm.github_builtins import BUILTIN_MAPPERS
+from loopy_runtime.scm.sentry_builtins import MAPPERS as SENTRY_MAPPERS
 from tests.helpers import assert_code, write_project
 from tests.helpers import codes as result_codes
 
@@ -153,8 +154,12 @@ def test_builtin_events_excluded_from_codegen(tmp_path):
 
 def test_catalog_and_mappers_agree():
     """The core contracts and the runtime mappers must cover the same events with the same
-    field names — the single guard against the two halves drifting."""
-    assert set(GITHUB_EVENTS) == set(BUILTIN_MAPPERS)
+    field names — the single guard against the two halves drifting. Every provider in the
+    catalog must have a runtime mapper set, and each pair must cover the same events."""
+    runtime_mappers = {"github": BUILTIN_MAPPERS, "sentry": SENTRY_MAPPERS}
+    assert {p.name for p in BUILTIN_PROVIDERS} == set(runtime_mappers)
+    for provider in BUILTIN_PROVIDERS:
+        assert set(provider.events) == set(runtime_mappers[provider.name]), provider.name
 
 
 def test_each_mapper_returns_exactly_its_contract_fields():
