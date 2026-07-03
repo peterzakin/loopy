@@ -48,7 +48,6 @@ code { font-family: var(--mono); font-size: .92em; }
 }
 .view-link:hover { color: var(--ink); }
 .view-link.is-active { color: var(--accent); background: var(--accent-sb); }
-.health { display: flex; align-items: center; }
 
 /* ── page + views ───────────────────────────────────────────────────────── */
 .page { padding: 26px 24px 80px; }
