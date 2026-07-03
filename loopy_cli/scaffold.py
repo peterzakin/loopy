@@ -69,7 +69,7 @@ sandboxes:
     __REPOS_LINE__
 
 agents:
-  Claude:   { model: claude-sonnet-4-6, harness: claude-code, skills: [codefix] }
+  Claude:   { model: claude-opus-4-8, harness: claude-code, skills: [codefix] }
   Codex:    { model: gpt-5.5, harness: codex, skills: [codefix] }
   OpenCode: { model: claude-sonnet-4-6, harness: opencode, skills: [codefix] }
 
@@ -347,7 +347,7 @@ sandboxes:
     # repos: [owner/repo]
 
 agents:
-  Claude:   { model: claude-sonnet-4-6, harness: claude-code }
+  Claude:   { model: claude-opus-4-8, harness: claude-code }
   Codex:    { model: gpt-5.5, harness: codex }
   OpenCode: { model: claude-sonnet-4-6, harness: opencode }
 
