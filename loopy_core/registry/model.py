@@ -21,6 +21,8 @@ class Sandbox(BaseModel):
     name: str
     provider: str | None = None
     image: dict = Field(default_factory=dict)
+    # Optional egress allowlist. Empty (the default) means open egress; a non-empty
+    # list is an opt-in allowlist of the hosts the sandbox may reach.
     network: list[str] = Field(default_factory=list)
     # Path(s) to env file(s) supplying this sandbox's secrets. A *reference* only —
     # the compiler records it and never reads the file (values resolve at run time).

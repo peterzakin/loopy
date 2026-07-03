@@ -160,7 +160,8 @@ defaults:
     model: claude-sonnet-4-6
     harness: claude-code
 
-# Sandbox: compute + egress. `image:` is the declarative build; `network:` the egress allowlist.
+# Sandbox: compute + egress. `image:` is the declarative build; `network:` an optional egress
+# allowlist (omit it for open egress; set it to restrict the sandbox to named hosts).
 # `env_file:` points at a gitignored dotenv (a path, or a list of paths merged in order) whose
 # keys are injected as the sandbox's environment
 # (the sandbox inherits *nothing* from your shell; secrets like `ANTHROPIC_API_KEY` must live
@@ -170,7 +171,7 @@ sandboxes:
   default:
     provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
-    network: [github.com, api.anthropic.com]   # git over https + the model API
+    network: [github.com, api.anthropic.com]   # optional: restrict egress to git over https + the model API
     env_file: secrets/base.env        # gitignored; injected as the sandbox's env
     repos: [octocat/Hello-World]     # cloned into the workspace at acquire time (git auth injected)
 
