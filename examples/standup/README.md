@@ -36,12 +36,11 @@ cp examples/standup/base.env.example examples/standup/secrets/base.env
 # 3. compile (writes manifest.json; the DAG prints)
 loopy compile examples/standup
 
-# 4. fire one tick by hand instead of waiting for 9am (compiles too):
-loopy trigger examples/standup \
-  --event cron \
-  --fields '{"scheduled_at": "2026-07-02T09:00:00Z", "last_run": "2026-07-01T09:00:00Z"}' \
-  --json
+# 4. start the engine; the scheduler fires the workflow at each 9am tick
+loopy run
 ```
 
-`loopy run` arms the schedule for real; `loopy trigger --event cron` is the way to exercise
-one tick on demand.
+A cron workflow fires on its schedule under `loopy run`; there is no hand-fired cron trigger
+(`loopy trigger` fires *events*, and a cron entry doesn't subscribe to one). To watch it fire
+without waiting for 9am, set the expression to a near time while testing, e.g.
+`on: cron("*/5 * * * *")`, then run `loopy run` and watch it in `loopy admin`.

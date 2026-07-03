@@ -35,9 +35,11 @@ loopy auth github          # or put a GITHUB_TOKEN in secrets/base.env
 # 3. compile
 loopy compile examples/dep-upkeep
 
-# 4. fire one nightly tick on demand instead of waiting for 3am:
-loopy trigger examples/dep-upkeep \
-  --event cron \
-  --fields '{"scheduled_at": "2026-07-02T03:00:00Z", "last_run": "2026-07-01T03:00:00Z"}' \
-  --json
+# 4. start the engine; the scheduler fires the workflow at each 3am tick
+loopy run
 ```
+
+A cron workflow fires on its schedule under `loopy run`; there is no hand-fired cron trigger
+(`loopy trigger` fires *events*, and a cron entry doesn't subscribe to one). To watch it fire
+without waiting for 3am, set the expression to a near time while testing, e.g.
+`on: cron("*/5 * * * *")`, then run `loopy run` and watch it in `loopy admin`.
