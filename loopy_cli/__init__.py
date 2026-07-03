@@ -25,6 +25,7 @@ from pathlib import Path
 import typer
 
 from loopy_cli.auth import auth_app
+from loopy_cli.integrations import integrations_command
 from loopy_cli.webhooks import (
     normalize_public_url,
     offer_github_webhooks,
@@ -43,6 +44,10 @@ app.add_typer(auth_app, name="auth")
 # (`loopy webhooks github` registers repo webhooks; `loopy webhooks list` prints every
 # endpoint's delivery URL). Same deferred-imports discipline as `auth`.
 app.add_typer(webhooks_app, name="webhooks")
+
+# `loopy integrations [name]` — inspect the built-in webhook providers (github, sentry):
+# which are used, whether each signing secret is configured, and per-provider setup.
+app.command(name="integrations")(integrations_command)
 
 
 @app.callback()

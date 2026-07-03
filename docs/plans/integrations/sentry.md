@@ -434,17 +434,23 @@ Done in this change:
   Sentry-specific. `auth sentry` consumes it today; the GitHub webhook-URL step (below) is its
   next consumer.
 
-Still open (small follow-ups, not blocking the command):
+Done since:
+
+- `loopy doctor` flags a used built-in provider whose webhook secret is unset (generic over
+  `BUILTIN_PROVIDERS`; GitHub is skipped, its delivery wiring is covered by
+  `registration_findings`). `BuiltinProvider` now carries `secret_env` as the single source.
+- `loopy integrations [name]` / `loopy integrations list` inspects the built-in providers —
+  which are used, whether each secret is set, per-provider events and delivery URL. This
+  replaced the earlier "extend `loopy auth status`" idea: a provider-centric view rather than
+  a GitHub-App-centric one.
+
+Still open (small follow-ups):
 
 - `loopy auth github`: now that `LOOPY_PUBLIC_URL` is shared config, have the GitHub flow print
-  (or register) its webhook URL via `config.hook_url(public, "/hooks/github")` so the user
-  isn't left to hand-construct it — the second consumer that motivated hoisting the value.
-- `loopy init`: detect `SENTRY_AUTH_TOKEN` / `LOOPY_PUBLIC_URL` in the environment (alongside
-  `ANTHROPIC_API_KEY` / `DAYTONA_API_KEY`) and offer to run `auth sentry` when a workflow
-  triggers on `Sentry.*`.
-- `loopy auth status`: also report the Sentry integration (slug + whether
-  `SENTRY_WEBHOOK_SECRET` is set).
-- `loopy doctor`: flag a missing `SENTRY_WEBHOOK_SECRET` when a workflow triggers on `Sentry.*`.
+  (or register) its webhook URL via `config.hook_url(public, "/hooks/github")`. (Note: `main`
+  since added `loopy webhooks github`, which largely covers this.)
+- `loopy init` Sentry detection: intentionally skipped — Sentry setup stays an explicit
+  `loopy auth sentry` step, not part of the first-run wizard.
 
 ## Effort
 
