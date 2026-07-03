@@ -434,9 +434,7 @@ def github(
     no_browser: bool = typer.Option(False, "--no-browser", help="Print the URL, don't open it."),
 ) -> None:
     """Create your own GitHub App via the manifest flow and store its credentials."""
-    run_github_auth(
-        org=org, name=name, port=port, root=root, force=force, no_browser=no_browser
-    )
+    run_github_auth(org=org, name=name, port=port, root=root, force=force, no_browser=no_browser)
 
 
 @auth_app.command()
@@ -455,3 +453,246 @@ def status(
 
     typer.echo(typer.style("  ✓", fg=typer.colors.GREEN) + f" GitHub App id {creds.app_id} set")
     _verify(root)
+
+
+# ── Sentry: create a Custom Integration so `Sentry.*` built-ins have a producer ──────────
+#
+# Unlike GitHub (a browser manifest flow that mints an App from nothing), Sentry has no
+# create-without-credentials path for internal integrations, so this takes a bootstrap auth
+# token — read from the environment, else prompted — and calls the API directly. The token
+# only creates the integration and is never stored; what we persist is the integration's
+# Client Secret (`SENTRY_WEBHOOK_SECRET`, which signs inbound webhooks) and its slug.
+
+SENTRY_DEFAULT_BASE = "https://sentry.io"
+SENTRY_HOOK_PATH = "/hooks/sentry"
+# The token needs org-write to create an integration; a CI Organization Auth Token doesn't.
+_SENTRY_TOKEN_HELP = (
+    "Get one in Sentry: User Settings -> Auth Tokens -> Create New Token, scope 'org:write'.\n"
+    "  (Organization Auth Tokens are CI-scoped and can't create integrations.)"
+)
+
+
+def _project_env(root: str | Path) -> dict[str, str]:
+    """Process env with `loopy.env` merged underneath (process env wins)."""
+    from loopy_runtime.secrets import load_control_plane_env
+
+    merged = dict(os.environ)
+    for key, value in load_control_plane_env(root).items():
+        merged.setdefault(key, value)
+    return merged
+
+
+def _sentry_webhook_url(flag: str | None, env: dict[str, str]) -> str:
+    """Resolve the public webhook URL: --webhook-url -> $LOOPY_PUBLIC_URL -> prompt.
+
+    The public base is shared, provider-agnostic config (`loopy_runtime.config`); here we
+    just append `/hooks/sentry` and check it's reachable. Sentry must reach it over public
+    HTTPS, so a localhost/non-https answer is warned about (not fatal — the user may tunnel)."""
+    import urllib.parse
+
+    from loopy_runtime import config
+
+    base = config.resolve_public_url(flag, env=env)
+    if not base:
+        typer.echo(
+            "\n  Sentry delivers webhooks to a public HTTPS URL. In local dev, expose "
+            "`loopy run`\n  with a tunnel (e.g. `cloudflared tunnel --url http://127.0.0.1:8000`)."
+        )
+        base = typer.prompt("  Public base URL (or full /hooks/sentry URL)").strip()
+    parts = urllib.parse.urlsplit(base)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        raise typer.BadParameter(f"webhook URL must be an absolute http(s) URL, got {base!r}")
+    if parts.scheme != "https" or parts.hostname in ("localhost", "127.0.0.1"):
+        typer.echo(
+            typer.style("  warning:", fg=typer.colors.YELLOW)
+            + f" {base} isn't public HTTPS; Sentry won't reach it until you tunnel/deploy."
+        )
+    return config.hook_url(base, SENTRY_HOOK_PATH)
+
+
+def _resolve_sentry_org(token: str, org: str | None, base_url: str, env: dict[str, str]) -> str:
+    """--org -> $SENTRY_ORG -> auto-detect (one org: use it; several: ask)."""
+    from loopy_runtime.scm import sentry_app
+
+    if org or env.get("SENTRY_ORG"):
+        return org or env["SENTRY_ORG"]
+    orgs = sentry_app.list_organizations(token, base_url=base_url)
+    if len(orgs) == 1:
+        return orgs[0]["slug"]
+    slugs = ", ".join(o.get("slug", "?") for o in orgs) or "(none)"
+    raise typer.BadParameter(
+        f"could not pick an org automatically; pass --org. The token sees: {slugs}"
+    )
+
+
+def write_sentry_credentials(root: str | Path, *, secret: str, slug: str | None) -> Path:
+    """Persist the Client Secret (+ slug, if API-created) into gitignored loopy.env."""
+    from loopy_runtime.secrets import CONTROL_PLANE_ENV_FILE, write_control_plane_env
+
+    updates = {"SENTRY_WEBHOOK_SECRET": secret}
+    if slug:
+        updates["SENTRY_APP_SLUG"] = slug
+    env_path = write_control_plane_env(root, updates)
+    _ensure_gitignored(root, CONTROL_PLANE_ENV_FILE)
+    return env_path
+
+
+def run_sentry_auth(
+    *,
+    org: str | None = None,
+    webhook_url: str | None = None,
+    name: str = "loopy",
+    events: str = "issue",
+    sentry_url: str | None = None,
+    root: Path = Path("."),
+    force: bool = False,
+    manual: bool = False,
+    update: bool = False,
+) -> None:
+    """Create (or update) a Sentry Custom Integration and store its Client Secret."""
+    from loopy_runtime.scm import sentry_app
+    from loopy_runtime.secrets import load_control_plane_env
+
+    env = _project_env(root)
+    base_url = sentry_url or env.get("SENTRY_URL") or SENTRY_DEFAULT_BASE
+    stored = load_control_plane_env(root)
+
+    typer.echo(typer.style("\n  🔐  loopy auth sentry", fg=typer.colors.CYAN, bold=True))
+    typer.echo(typer.style("  " + "─" * 40, fg=typer.colors.BRIGHT_BLACK))
+
+    # --manual: the API isn't usable (e.g. only a CI token); store a pasted secret.
+    if manual:
+        secret = typer.prompt("  Paste the integration's Client Secret", hide_input=True).strip()
+        env_path = write_sentry_credentials(root, secret=secret, slug=None)
+        typer.echo(
+            typer.style("  ✓", fg=typer.colors.GREEN)
+            + f" wrote SENTRY_WEBHOOK_SECRET to {env_path}"
+        )
+        return
+
+    token = env.get("SENTRY_AUTH_TOKEN")
+    if not token:
+        typer.echo("  " + _SENTRY_TOKEN_HELP)
+        token = typer.prompt("  Sentry auth token", hide_input=True).strip()
+    if not token:
+        typer.echo("error: no Sentry auth token provided", err=True)
+        raise typer.Exit(code=1)
+
+    # --update: repoint the existing integration's webhook URL; leave the secret alone.
+    if update:
+        slug = stored.get("SENTRY_APP_SLUG")
+        if not slug:
+            typer.echo(
+                "error: no SENTRY_APP_SLUG in loopy.env; run `loopy auth sentry` first.", err=True
+            )
+            raise typer.Exit(code=1)
+        url = _sentry_webhook_url(webhook_url, env)
+        try:
+            sentry_app.update_integration_webhook(token, slug, url, base_url=base_url)
+        except sentry_app.SentryAPIError as exc:
+            _fail_sentry(exc)
+        typer.echo(
+            typer.style("  ✓", fg=typer.colors.GREEN) + f" updated {slug} webhook URL to {url}"
+        )
+        return
+
+    if stored.get("SENTRY_WEBHOOK_SECRET") and not force:
+        typer.echo(
+            "error: SENTRY_WEBHOOK_SECRET already set in loopy.env; "
+            "re-run with --force to overwrite.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    org = _resolve_sentry_org(token, org, base_url, env)
+    url = _sentry_webhook_url(webhook_url, env)
+    event_list = [e.strip() for e in events.split(",") if e.strip()]
+    typer.echo(f"  → creating internal integration '{name}' in org '{org}'")
+    try:
+        app = sentry_app.create_internal_integration(
+            token,
+            org,
+            name=name,
+            webhook_url=url,
+            events=event_list,
+            scopes=["event:read"],
+            base_url=base_url,
+        )
+    except sentry_app.SentryAPIError as exc:
+        _fail_sentry(exc)
+
+    secret = app.get("clientSecret")
+    slug = app.get("slug")
+    if not secret:
+        typer.echo(
+            "error: Sentry didn't return a Client Secret. Copy it from the integration in the "
+            "UI\n  and run `loopy auth sentry --manual`.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    # Write immediately: the secret is shown only in this response and masked on every read after.
+    env_path = write_sentry_credentials(root, secret=secret, slug=slug)
+    typer.echo(
+        typer.style("  ✓", fg=typer.colors.GREEN)
+        + f" created '{slug}'; wrote SENTRY_WEBHOOK_SECRET + SENTRY_APP_SLUG to {env_path}"
+    )
+    typer.echo(
+        "\n  Next: start `loopy run`, then trigger a test issue in Sentry to confirm delivery."
+        "\n  (For Sentry.AlertTriggered, also add this integration as an Alert Rule Action.)\n"
+    )
+
+
+def _fail_sentry(exc) -> None:  # -> NoReturn
+    """Turn a Sentry API error into a clean CLI exit, with scope guidance on a 403."""
+    if getattr(exc, "status", None) == 403:
+        typer.echo(
+            "error: the token can't create an integration (403). Use a User Auth Token or an\n"
+            "  internal-integration token with 'org:write' — an Organization Auth Token is\n"
+            "  CI-scoped and won't work. Or run `loopy auth sentry --manual`.",
+            err=True,
+        )
+    else:
+        typer.echo(f"error: {exc}", err=True)
+    raise typer.Exit(code=1)
+
+
+@auth_app.command()
+def sentry(
+    org: str | None = typer.Option(
+        None, "--org", help="Sentry org slug (default: $SENTRY_ORG, else auto-detect)."
+    ),
+    webhook_url: str | None = typer.Option(
+        None, "--webhook-url", help="Public URL; default $LOOPY_PUBLIC_URL + /hooks/sentry."
+    ),
+    name: str = typer.Option("loopy", "--name", help="Integration name."),
+    events: str = typer.Option("issue", "--events", help="Comma-separated resources to subscribe."),
+    sentry_url: str | None = typer.Option(
+        None, "--sentry-url", help="Base URL for self-hosted Sentry ($SENTRY_URL)."
+    ),
+    root: Path = typer.Option(Path("."), "--root", help="Project root (where loopy.env lives)."),
+    force: bool = typer.Option(
+        False, "--force", help="Overwrite an existing SENTRY_WEBHOOK_SECRET."
+    ),
+    manual: bool = typer.Option(
+        False, "--manual", help="Skip the API; paste a Client Secret from the UI."
+    ),
+    update: bool = typer.Option(
+        False, "--update", help="Repoint the stored integration's webhook URL."
+    ),
+) -> None:
+    """Create a Sentry Custom Integration for the built-in `Sentry.*` events.
+
+    Reads the bootstrap token from $SENTRY_AUTH_TOKEN (else prompts). The token creates the
+    integration and is not stored; only the Client Secret (SENTRY_WEBHOOK_SECRET) is.
+    """
+    run_sentry_auth(
+        org=org,
+        webhook_url=webhook_url,
+        name=name,
+        events=events,
+        sentry_url=sentry_url,
+        root=root,
+        force=force,
+        manual=manual,
+        update=update,
+    )

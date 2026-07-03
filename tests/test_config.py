@@ -12,7 +12,9 @@ from loopy_runtime.config import (
     DEFAULT_STATE_PATH,
     ConfigError,
     LoopyConfig,
+    hook_url,
     resolve,
+    resolve_public_url,
     resolve_redis_url,
 )
 
@@ -95,3 +97,41 @@ def test_redis_url_env_used(monkeypatch):
 def test_redis_url_default(monkeypatch):
     monkeypatch.delenv("REDIS_URL", raising=False)
     assert resolve_redis_url(None) == DEFAULT_REDIS_URL
+
+
+# ── public URL (shared across providers) ────────────────────────────────────
+
+
+def test_public_url_flag_wins(monkeypatch):
+    monkeypatch.setenv("LOOPY_PUBLIC_URL", "https://env.example.com")
+    assert resolve_public_url("https://flag.example.com") == "https://flag.example.com"
+
+
+def test_public_url_from_env(monkeypatch):
+    monkeypatch.setenv("LOOPY_PUBLIC_URL", "https://env.example.com")
+    assert resolve_public_url(None) == "https://env.example.com"
+
+
+def test_public_url_none_when_unset(monkeypatch):
+    monkeypatch.delenv("LOOPY_PUBLIC_URL", raising=False)
+    assert resolve_public_url(None) is None
+
+
+def test_public_url_reads_passed_env_mapping(monkeypatch):
+    """Callers with a merged loopy.env view pass it explicitly (process env is not consulted)."""
+    monkeypatch.delenv("LOOPY_PUBLIC_URL", raising=False)
+    assert resolve_public_url(None, env={"LOOPY_PUBLIC_URL": "https://merged"}) == "https://merged"
+
+
+def test_hook_url_appends_path_to_bare_base():
+    assert (
+        hook_url("https://x.example.com", "/hooks/sentry") == "https://x.example.com/hooks/sentry"
+    )
+    assert (
+        hook_url("https://x.example.com/", "/hooks/github") == "https://x.example.com/hooks/github"
+    )
+
+
+def test_hook_url_leaves_a_full_url_untouched():
+    full = "https://x.example.com/hooks/sentry"
+    assert hook_url(full, "/hooks/sentry") == full
