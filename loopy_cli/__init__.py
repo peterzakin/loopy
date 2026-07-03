@@ -7,6 +7,7 @@
     loopy admin     serve the read-only dashboard over the run-state DB `loopy run` writes
     loopy demo      serve the dashboard against in-memory fake data (dev-only; safe to delete)
     loopy help      show this overview, or help for one command (`loopy help run`)
+    loopy docs      print the authoring reference (or `loopy docs errors`) as markdown
 
 Heavy deps are imported lazily per command so `loopy compile` stays runtime-free.
 """
@@ -24,6 +25,12 @@ from pathlib import Path
 import typer
 
 from loopy_cli.auth import auth_app
+from loopy_cli.webhooks import (
+    normalize_public_url,
+    offer_github_webhooks,
+    registration_findings,
+    webhooks_app,
+)
 
 app = typer.Typer(add_completion=False, help="Loopy — compile and run durable agent workflows.")
 
@@ -31,6 +38,11 @@ app = typer.Typer(add_completion=False, help="Loopy — compile and run durable 
 # sub-app's heavy imports are deferred into its command bodies, so registering it
 # here keeps `loopy compile` runtime-free.
 app.add_typer(auth_app, name="auth")
+
+# `loopy webhooks ...` — wire external services' webhooks to this project's sensors
+# (`loopy webhooks github` registers repo webhooks; `loopy webhooks list` prints every
+# endpoint's delivery URL). Same deferred-imports discipline as `auth`.
+app.add_typer(webhooks_app, name="webhooks")
 
 
 @app.callback()
@@ -85,6 +97,56 @@ def help(  # noqa: A001 - the command is literally named `help`; shadowing the b
         cmd = sub
         path = f"{path} {token}"
     typer.echo(cmd.get_help(cmd_ctx))
+
+
+# The docs shipped inside the package, printed as plain markdown. This exists for coding
+# agents (and offline humans): docs that travel with the install are always version-matched
+# and need no URL — an agent can run `loopy docs` and get the whole authoring model as
+# context. Topics map to files in docs_md/, except `errors`, which renders the live
+# diagnostic catalog from loopy_core so it can never drift from the compiler.
+_DOCS_DIR = Path(__file__).resolve().parent / "docs_md"
+_DOCS_TOPICS = ("authoring", "errors")
+
+
+def _render_error_catalog() -> str:
+    """The LOOPY-Exxx/Wxxx catalog as markdown, straight from the compiler's own table."""
+    from loopy_core.compile.codes import DESCRIPTIONS
+
+    lines = [
+        "# Loopy diagnostic codes",
+        "",
+        "Emitted by `loopy compile` as `<severity> <code> <file>:<line>:<col>: <message>`,",
+        "often with a `hint:` line. Codes are stable and never renumbered.",
+        "",
+        "| Code | Meaning |",
+        "|---|---|",
+    ]
+    lines += [f"| `{code}` | {desc} |" for code, desc in sorted(DESCRIPTIONS.items())]
+    return "\n".join(lines)
+
+
+@app.command()
+def docs(
+    topic: str = typer.Argument(
+        "authoring", help="What to print: `authoring` (the full reference) or `errors`."
+    ),
+) -> None:
+    """Print loopy's documentation as markdown, for agents and offline reading.
+
+    `loopy docs` prints the full authoring reference (workflows, steps, registry, sensors,
+    secrets — everything needed to write a project); `loopy docs errors` prints the
+    diagnostic-code catalog. Output is plain markdown on stdout, so it pipes cleanly into
+    a pager, a file, or an agent's context.
+    """
+    if topic == "errors":
+        typer.echo(_render_error_catalog())
+        return
+    doc = _DOCS_DIR / f"{topic}.md"
+    if not doc.is_file():
+        known = ", ".join(_DOCS_TOPICS)
+        typer.echo(f"error: unknown docs topic '{topic}'. Topics: {known}.", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(doc.read_text())
 
 
 def _enable_progress_logging() -> None:
@@ -304,30 +366,35 @@ def init(
     directory: Path = typer.Option(
         Path("."), "--dir", help="Parent directory to create the project under (default: cwd)."
     ),
-    non_interactive: bool = typer.Option(
-        False,
-        "--non-interactive",
-        "-y",
-        help="Skip the setup prompts: write the placeholder scaffold verbatim (scripts/CI).",
-    ),
 ) -> None:
     """Scaffold a new Loopy project: registry, a runnable starter workflow, and an env file.
 
-    By default a short wizard offers to close the gaps the scaffold leaves on purpose —
-    reusing an `ANTHROPIC_API_KEY` already in your environment, recording a Redis connection
-    string if you want the networked event bus, and wiring git auth — then reports whatever's
-    still missing (the same checks as `loopy doctor`). `--non-interactive` skips the prompts
-    entirely and just writes the placeholder scaffold.
+    A short wizard drives the whole thing — it offers to close the gaps the scaffold leaves
+    on purpose: recording the public base URL webhooks are delivered at, wiring git auth
+    (and, with both in place, registering GitHub webhooks), reusing an `ANTHROPIC_API_KEY`
+    already in your environment, and recording a Redis connection string if you want the
+    networked event bus — then reports whatever's still missing (the same checks as
+    `loopy doctor`). There is no non-interactive mode: setup is a conversation with a human
+    (git auth alone needs a browser), so `init` requires a terminal.
+
+    Git auth is the gate for the starter workflow: loopy is built around agents that work on
+    code, so without git auth wired (or, past that, without a repo to act on) there is nothing
+    runnable to scaffold — `init` writes only a trimmed-down registry.yml plus the env files,
+    no workflow, and points at wiring GitHub as the next step.
     """
     from loopy_cli.scaffold import InvalidProjectName, scaffold_project, validate_project_name
 
-    # Prompt only when we actually have a human on a terminal; `--non-interactive` forces off.
-    interactive = not non_interactive and sys.stdin.isatty()
+    # The wizard is the command — without a human on a terminal there's nobody to answer the
+    # repo question (and `loopy auth github` needs a browser), so refuse rather than guess.
+    if not sys.stdin.isatty():
+        typer.echo(
+            "error: loopy init is interactive and needs a terminal. "
+            "Ask a human to run it — there is no headless mode.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
 
     if not name:
-        if not interactive:
-            typer.echo("error: project name is required with --non-interactive", err=True)
-            raise typer.Exit(code=1)
         name = typer.prompt("Project name")
     try:
         name = validate_project_name(name)
@@ -335,11 +402,26 @@ def init(
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
-    # Ask up front which repo(s) the agent works on so the scaffold lands the real value
-    # (a checkout to edit) instead of an unpushable placeholder. Blank is a first-class answer.
-    repos = _prompt_for_repos() if interactive else None
-
     target = (directory / name).resolve()
+
+    # Wire git auth *before* asking which repo(s) the agent works on. `loopy auth github` creates
+    # the App and installs it on the repos it may touch, so it reads better to authenticate and
+    # install first, then name the repo(s) with that install fresh in mind — rather than naming
+    # repos into a registry before any auth exists. The public webhook URL comes first still:
+    # auth ends by offering webhook registration, which needs the URL already recorded. Both
+    # steps write loopy.env into `target`; `scaffold_project` (run below) preserves those
+    # values under its own template.
+    _offer_public_webhook_url(target)
+    github_authed = _offer_github_auth(target)
+
+    # Git auth is the gate for the starter workflow. Loopy is built around agents that clone a
+    # checkout, edit it, and open a PR, so without git auth wired there is nothing runnable to
+    # scaffold — we skip straight to the minimal registry (no workflow) rather than ask which
+    # repo(s) to name into a project that can't reach them. With auth in place, ask which repo(s)
+    # the workflow should act on; blank is allowed but strongly discouraged, and confirmed
+    # explicitly, and we never fall back to a placeholder repo.
+    repos = _prompt_for_repos() if github_authed else []
+
     try:
         created = scaffold_project(target, name, repos=repos)
     except FileExistsError as exc:
@@ -355,17 +437,19 @@ def init(
         typer.echo("      " + typer.style(f"{name}/{rel.as_posix()}", fg=typer.colors.GREEN))
     typer.echo()
 
-    # Offer to close the gaps the scaffold leaves on purpose before reporting what's left.
-    if interactive:
-        _offer_ambient_anthropic_key(target)
-        _offer_ambient_daytona_creds(target)
-        _offer_redis_bus(target)
-        # Git auth only matters if the agent actually clones a repo. With none configured,
-        # creating a GitHub App would have nothing to install on — so skip it and say why.
-        if repos:
-            _offer_github_auth(target)
-        else:
-            _note_orchestrator_mode()
+    # Offer to close the remaining gaps the scaffold leaves on purpose before reporting what's left.
+    _offer_ambient_anthropic_key(target)
+    _offer_ambient_daytona_creds(target)
+    _offer_redis_bus(target)
+    # Webhook registration couldn't be offered during auth above (no registry existed
+    # yet); now the scaffold + repos are on disk, so offer it here when the pieces
+    # (App creds, LOOPY_PUBLIC_URL, repos) are all present. Self-gating, never raises.
+    offer_github_webhooks(target)
+
+    # A repo-less scaffold is deliberately bare — no starter workflow. Repeat the warning the
+    # user already confirmed past, and point at the way out.
+    if not repos:
+        _note_minimal_mode()
 
     # A clean compile is *not* a runnable project: the scaffold ships placeholders on purpose
     # (a fake API key, maybe no git auth). Run the same checks as `loopy doctor` so the user
@@ -374,33 +458,52 @@ def init(
 
 
 def _prompt_for_repos() -> list[str]:
-    """Ask which repo(s) the agent should work on; an empty answer is a first-class choice.
+    """Ask which repo(s) the agent should work on, strongly discouraging the repo-less path.
 
-    A repo is what the starter `codefix` workflow clones to edit and open a PR against. But
-    loopy is still useful with none — you get a workflow orchestrator that just doesn't touch a
-    code repo — so blank means "no repo", not "unfinished", and we never fall back to an
-    unpushable placeholder.
+    A repo is what the starter `codefix` workflow clones to edit and open a PR against —
+    loopy is built around agents that work on code, so without one there is no starter
+    workflow to scaffold, just a trimmed-down registry. Blank is therefore never a silent
+    default: it takes an explicit confirmation (declining re-asks for repos), and we never
+    fall back to an unpushable placeholder.
     """
-    raw = typer.prompt(
-        "  Which repo(s) should the agent work on? (owner/repo, comma-separated; "
-        "blank = no repo)",
-        default="",
-        show_default=False,
-    )
-    return [r.strip() for r in raw.split(",") if r.strip()]
+    while True:
+        raw = typer.prompt(
+            "  Which repo(s) should the agent work on? (owner/repo, comma-separated)",
+            default="",
+            show_default=False,
+        )
+        repos = [r.strip() for r in raw.split(",") if r.strip()]
+        if repos:
+            return repos
+        typer.echo(
+            "  "
+            + typer.style("⚠", fg=typer.colors.YELLOW)
+            + " Loopy is built around agents that work on repos (clone, edit, open a PR)."
+        )
+        typer.echo(
+            typer.style(
+                "    Without one you get a bare registry.yml and no starter workflow — "
+                "there is nothing useful to run until GitHub access is wired.",
+                fg=typer.colors.BRIGHT_BLACK,
+            )
+        )
+        if typer.confirm("  Continue without a repo anyway?", default=False):
+            return []
 
 
-def _note_orchestrator_mode() -> None:
-    """Frame a repo-less scaffold as a real, runnable orchestrator — not a half-finished setup."""
+def _note_minimal_mode() -> None:
+    """A minimal scaffold (no git auth, or no repo) is deliberately bare.
+
+    Warn, and name the way out."""
     typer.echo(
         "  "
-        + typer.style("ⓘ", fg=typer.colors.BLUE)
-        + " No repo — scaffolded a workflow orchestrator: a Note → summary + action-items loop."
+        + typer.style("⚠", fg=typer.colors.YELLOW)
+        + " Minimal scaffold — a trimmed-down registry.yml and env files, no starter workflow."
     )
     typer.echo(
         typer.style(
-            "    Try it with `loopy trigger --event Note`. Want code edits instead? Add a repo "
-            "to sandboxes.Dev.repos and run `loopy auth github`.",
+            "    To make this project useful: run `loopy auth github`, add repo(s) to "
+            "sandboxes.BaseSandbox.repos, then add a workflow (`loopy docs` has the reference).",
             fg=typer.colors.BRIGHT_BLACK,
         )
     )
@@ -520,9 +623,55 @@ def _offer_redis_bus(target: Path) -> None:
     typer.echo()
 
 
-def _offer_github_auth(target: Path) -> None:
+def _offer_public_webhook_url(target: Path) -> None:
+    """Ask for the public base URL external services deliver webhooks to.
+
+    Webhook sensors bind locally (`loopy run --host/--port`), but the services that call them
+    (GitHub, Sentry, …) need a public URL — a deployed host or a dev tunnel (ngrok,
+    cloudflared). Recording it as `LOOPY_PUBLIC_URL` in `loopy.env` gives every webhook one
+    base: a sensor's delivery URL is `LOOPY_PUBLIC_URL + its path` (the built-in GitHub
+    sensor: `<base>/hooks/github`), and `loopy run` prints the full delivery URLs at startup
+    so they can be pasted into each source's webhook settings. Blank is a first-class answer
+    (nothing external delivers webhooks yet — sensors still serve locally); skips silently
+    when `loopy.env` already has one (e.g. re-init) so we never clobber it.
+    """
+    from loopy_runtime.secrets import load_control_plane_env, write_control_plane_env
+
+    # Already configured (e.g. re-init over an existing tree) — nothing to offer, don't clobber.
+    if load_control_plane_env(target).get("LOOPY_PUBLIC_URL"):
+        return
+
+    while True:
+        raw = typer.prompt(
+            "  Public base URL where webhooks are delivered? (e.g. https://loopy.example.com "
+            "or a tunnel URL; blank = none yet)",
+            default="",
+            show_default=False,
+        ).strip()
+        if not raw:
+            return
+        try:
+            url = normalize_public_url(raw)
+        except ValueError as exc:
+            typer.echo("  " + typer.style(f"✗ {exc}", fg=typer.colors.RED))
+            continue
+        break
+
+    write_control_plane_env(target, {"LOOPY_PUBLIC_URL": url})
+    typer.echo(
+        "  "
+        + typer.style("✓", fg=typer.colors.GREEN)
+        + " wrote LOOPY_PUBLIC_URL to loopy.env — webhook sensors receive deliveries at "
+        f"{url}/hooks/<name> (GitHub: {url}/hooks/github)"
+    )
+    typer.echo()
+
+
+def _offer_github_auth(target: Path) -> bool:
     """Offer to wire git auth now by running the `loopy auth github` manifest flow in-process.
 
+    Returns whether git auth is configured once the offer is done — the caller uses this to
+    decide between the coding starter (auth present) and the minimal registry (auth absent).
     Declining just leaves the step for later — `_report_remaining_setup` will flag it. A failed
     or aborted auth run is caught so it never takes the whole `init` down with it.
     """
@@ -530,13 +679,13 @@ def _offer_github_auth(target: Path) -> None:
 
     # Already configured (e.g. re-init over an existing tree) — nothing to offer.
     if load_control_plane_env(target).get("GITHUB_APP_ID"):
-        return
+        return True
 
     if not typer.confirm(
         "  Wire git auth now? Runs `loopy auth github` (creates a GitHub App, opens a browser)",
         default=True,
     ):
-        return
+        return False
 
     from loopy_cli.auth import run_github_auth
 
@@ -544,8 +693,13 @@ def _offer_github_auth(target: Path) -> None:
         run_github_auth(root=target)
     except typer.Exit:
         typer.echo("  (skipped — git auth not completed; run `loopy auth github` later)")
+        return False
     except Exception as exc:  # noqa: BLE001 - never let onboarding crash the scaffold
         typer.echo(f"  (git auth didn't complete: {exc} — run `loopy auth github` later)")
+        return False
+
+    # Confirm the App creds actually landed rather than assuming the flow succeeded.
+    return bool(load_control_plane_env(target).get("GITHUB_APP_ID"))
 
 
 def _report_remaining_setup(target: Path, name: str) -> None:
@@ -800,6 +954,12 @@ def _diagnose_runnability(root: Path, project):  # noqa: ANN001 - compile.model.
             creds = None
         if creds is not None:
             findings.extend(check_repo_access(project.registry, creds))
+
+    # GitHub webhook wiring — a project can pass everything above and still never hear a
+    # `Github.*` event because nothing was registered on GitHub's side. Self-gating: only
+    # projects with /hooks/github sensors get findings, and only an App-configured one is
+    # checked live.
+    findings.extend(registration_findings(project, Path(root), control_env=merged))
 
     return findings
 
@@ -1267,6 +1427,21 @@ def run(
             f"serving {len(sensor_runner.webhook_paths)} webhook(s) on {cfg.host}:{cfg.port}: "
             f"{', '.join(sensor_runner.webhook_paths)}"
         )
+        # With LOOPY_PUBLIC_URL set (loopy.env, prompted at `loopy init`), print the full
+        # delivery URL per sensor — the exact strings to paste into each source's webhook
+        # settings. Without it, point at the setting instead of leaving the user to guess
+        # how the local bind maps to a public endpoint.
+        public_base = os.environ.get("LOOPY_PUBLIC_URL", "").strip().rstrip("/")
+        if public_base:
+            typer.echo(
+                "public delivery URLs: "
+                + ", ".join(f"{public_base}{p}" for p in sensor_runner.webhook_paths)
+            )
+        else:
+            typer.echo(
+                "note: LOOPY_PUBLIC_URL not set — set it in loopy.env to print each "
+                "sensor's public delivery URL (base + path)"
+            )
     else:
         typer.echo("no webhook sensors; web server not started (poll/cron-only)")
     typer.echo(

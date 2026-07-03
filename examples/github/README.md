@@ -34,24 +34,27 @@ GitHub ──webhook(/hooks/github, X-Hub-Signature-256)──▶ loopy ingress
 
 > Scope note: a built-in event fires for **any** repository the GitHub App delivers — there is no
 > per-repo filter on the trigger. Scope is whatever the App is installed on (here, the repo in
-> `sandboxes.Dev.repos`).
+> `sandboxes.BaseSandbox.repos`).
 
 ## Setup
 
 1. **GitHub App for repo access** (recommended): `loopy auth github`, then install the App on
-   the repo in `sandboxes.Dev.repos`. (Or drop a `GITHUB_TOKEN` PAT in `secrets/base.env`.)
-2. **Webhook secret** — generate one and put it in the control-plane env so the ingress can
-   verify deliveries:
+   the repo in `sandboxes.BaseSandbox.repos`. (Or drop a `GITHUB_TOKEN` PAT in `secrets/base.env`.)
+2. **Public URL + webhooks** — record where GitHub should deliver, then let loopy register
+   the webhooks (creates one on each repo in `registry.yml`, subscribes exactly the events
+   the workflows here trigger on, and writes `GITHUB_WEBHOOK_SECRET` into `loopy.env` so the
+   ingress verifies deliveries):
    ```
-   echo "GITHUB_WEBHOOK_SECRET=$(openssl rand -hex 32)" >> loopy.env
+   echo "LOOPY_PUBLIC_URL=https://<your-host>" >> loopy.env
+   loopy webhooks github
    ```
-3. **Point GitHub at the endpoint.** In the App's (or repo's) webhook settings:
-   - Payload URL: `https://<your-host>/hooks/github`
-   - Content type: `application/json`
-   - Secret: the value from step 2
-   - Events: **Pull requests** (subscribe to Issues / Pushes too if you trigger on those)
    (For local dev, expose `http://127.0.0.1:8000` with a tunnel, e.g. `cloudflared`/`ngrok`.)
-4. **Model + sandbox creds:** `cp base.env.example secrets/base.env` and fill it in.
+
+   Registering by hand instead? In the repo's webhook settings use payload URL
+   `https://<your-host>/hooks/github`, content type `application/json`, a secret you also
+   write to `loopy.env` as `GITHUB_WEBHOOK_SECRET`, and subscribe **Pull requests** (plus
+   Issues / Pushes if you trigger on those).
+3. **Model + sandbox creds:** `cp base.env.example secrets/base.env` and fill it in.
 
 ## Run it
 

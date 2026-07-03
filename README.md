@@ -8,10 +8,10 @@ code), so they version, diff, and review like the rest of your codebase. There's
 click together: `loopy compile` builds the workflow's DAG straight from those files.
 
 **Agent-neutral.** Loopy orchestrates the loop; it doesn't bind you to one vendor's agent. Every
-step names its runtime in `registry.yml` (`harness.runtime`): **Claude Code**
-and **OpenAI Codex** ship today, and the harness registry is built to
-take more. Mix them in one manifest: route a triage step to one runtime and a fixer to another,
-and swap a step's runtime or model without touching its prose.
+agent in `registry.yml` names its `harness` — the runner that drives it: **Claude Code**,
+**OpenAI Codex**, and **OpenCode** ship today, and the harness registry is built to
+take more. Mix them in one manifest: route a triage step to one harness and a fixer to another,
+and swap a step's harness or model without touching its prose.
 
 ## Install
 
@@ -33,9 +33,30 @@ command with `uv run` from the repo (e.g. `uv run loopy compile`).
 (control-plane creds: keys like `DAYTONA_API_KEY`, plus the GitHub App entries that
 `loopy auth github` writes). All are gitignored. Run every command from the project directory so
 `loopy.env` and `--root` stay in sync; `loopy init` sets this up for you. `init` is
-interactive: it asks which repo(s) the agent should work on, offers to fill in credentials it
-finds in your environment (`ANTHROPIC_API_KEY`, `DAYTONA_API_KEY`), and finishes by running the
-same checks as `loopy doctor` so you know what's left before a first run.
+interactive: it asks for the public base URL webhooks are delivered at (stored as
+`LOOPY_PUBLIC_URL`; each webhook sensor receives deliveries at that base plus its path, e.g.
+`<base>/hooks/github`), asks which repo(s) the agent should work on, offers to fill in
+credentials it finds in your environment (`ANTHROPIC_API_KEY`, `DAYTONA_API_KEY`), offers to
+register GitHub webhooks when the URL, App, and repos are all in place (`loopy webhooks
+github` does the same any time later), and finishes by running the same checks as
+`loopy doctor` so you know what's left before a first run.
+
+## Using Loopy with an AI agent
+
+Most first drafts of a loop are written by a coding agent ("build me a loop that…"), so the
+toolchain is built to be driven headlessly:
+
+- Every scaffolded project ships an **`AGENTS.md`** — the one-page map Claude Code, Codex,
+  and OpenCode auto-discover: authoring rules, the verify loop, the secrets model.
+- **`loopy docs`** prints the full authoring reference as markdown straight from the CLI
+  (version-matched to the install, works offline); `loopy docs errors` prints the stable
+  `LOOPY-E` diagnostic catalog.
+- The verify loop is exit-code-clean: `loopy compile --check` (valid?), `loopy doctor`
+  (runnable?), and `loopy trigger --json` (one run end-to-end, full record on stdout).
+- The two commands that need a human are `loopy init` (an interactive setup wizard — it
+  refuses to run without a terminal) and `loopy auth github` (a browser flow). For git
+  auth the headless alternative is a `GITHUB_TOKEN` (`contents:write` +
+  `pull_requests:write`) in the sandbox's `env_file`.
 
 ## Workflows
 
@@ -126,12 +147,18 @@ more agents and events.)
 
 ```yaml
 # Defaults: every agent inherits these; override a field only when needed.
-# `harness.runtime` picks the agent runner: `claude-code` (Claude Code, claude-* models) or
-# `codex` (OpenAI Codex, gpt-*/o-series/codex-* models). Model must match the runtime.
+# `model` and `harness` are both required on every agent (here they come from defaults).
+# `harness` picks the agent runner: `claude-code` (Claude Code, claude-* models),
+# `codex` (OpenAI Codex, gpt-*/o-series/codex-* models), or `opencode` (OpenCode, which
+# drives either family — write the bare model id; loopy expands it to opencode's
+# provider/model naming). The model must be one its harness can drive; nothing is
+# inferred, and `loopy compile` rejects a cross-provider pairing (a gpt-* model on
+# claude-code, or vice versa) as a compile-time error (LOOPY-E508).
 defaults:
   agent:
     sandbox: default
-    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
+    model: claude-sonnet-4-6
+    harness: claude-code
 
 # Sandbox: compute + egress. `image:` is the declarative build; `network:` the egress allowlist.
 # `env_file:` points at a gitignored dotenv (a path, or a list of paths merged in order) whose
@@ -150,11 +177,12 @@ sandboxes:
 # Agents: capability comes from the sandbox (image + egress), skills, injected creds, and
 # budget; numeric caps live in budget, not in a tool name.
 agents:
-  Investigator: { skills: [triage, repro-authoring] }                  # inherits default harness
-  Fixer:        { harness: { model: claude-opus-4-8 }, skills: [testing] }
+  Investigator: { skills: [triage, repro-authoring] }                  # inherits default model + harness
+  Fixer:        { model: claude-opus-4-8, skills: [testing] }           # bigger model, same harness
   Reviewer:     { skills: [rubrics/fix-quality] }                       # a judge, review-only skill
   Releaser:     { skills: [rollout] }
-  Scout:        { harness: { runtime: codex, model: gpt-5 }, skills: [triage] }   # runs on OpenAI Codex
+  Scout:        { model: gpt-5, harness: codex, skills: [triage] }      # runs on OpenAI Codex
+  Sweeper:      { model: claude-sonnet-4-6, harness: opencode, skills: [triage] }  # runs on OpenCode
 
 # Events: the bus contract. A step's `on:` may only name an event registered here.
 # Typed field maps.
@@ -172,11 +200,10 @@ events:
   GoalShipped:     { goal_id: str }                                    # terminal announcement
 ```
 
-> **Built-in agents.** Like the `Github.*` events (below), two agents ship with the platform:
-> `BaseClaude` (`claude-code`, `claude-sonnet-4-6`) and `BaseCodex` (`codex`, `gpt-5.5`). A step
-> may name either in `agent:` with **no** `registry.yml` entry; the compiler injects it, bound to
-> the project's `default` sandbox with no skills. Declaring your own agent under the same name
-> overrides the built-in.
+> **No built-in agents.** Every agent a step names must be declared in `registry.yml` — the
+> model + harness pairing is always explicit and visible, never injected or inferred.
+> `loopy init` scaffolds one agent per supported harness (`claude-code`, `codex`,
+> `opencode`) so the yaml for each is there to point a step at or edit.
 
 Beyond a single step's `budget:`, the registry takes a top-level `limits:` block for wider spend
 caps: `cascade_spend: { usd: <n> }` caps the total spend of an entire event cascade, and
@@ -231,7 +258,13 @@ triggered by a `poll` or a `webhook`.
 
 > **Both `poll` and `webhook` are supported.** `loopy run` hosts each `@sensor(webhook=...)` as an
 > HTTP route and fans one path out to every sensor on it (GitHub posts every event type to a single
-> URL, so several sensors can share `/hooks/github`). Ingress can be signed: when
+> URL, so several sensors can share `/hooks/github`). A sensor's public delivery URL is one base
+> plus its path: set `LOOPY_PUBLIC_URL` in `loopy.env` (prompted for at `loopy init`) to your
+> deployed host or dev tunnel; `loopy webhooks list` prints each full delivery URL
+> (e.g. `<base>/hooks/github`), and **`loopy webhooks github`** registers GitHub's side for you —
+> it creates a webhook on each repo in `registry.yml` via the App from `loopy auth github` and
+> lands the signing secret in `loopy.env` (`--check` reports without changing anything; built-in
+> `Github.*` triggers never fire until this or a manual registration exists). When
 > `GITHUB_WEBHOOK_SECRET` is set, `loopy run` verifies GitHub's `X-Hub-Signature-256` HMAC at the
 > edge before any sensor sees the payload (likewise `SENTRY_WEBHOOK_SECRET` for Sentry's
 > `Sentry-Hook-Signature` on `/hooks/sentry`). See

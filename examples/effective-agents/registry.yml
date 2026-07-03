@@ -22,15 +22,16 @@
 
 defaults:
   agent:
-    sandbox: Dev
-    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
+    sandbox: BaseSandbox
+    model: claude-sonnet-4-6
+    harness: claude-code
 
 # One sandbox for the whole project. These patterns are text-in/text-out, so the only
-# egress they need is the model API; no repo is cloned. (Swap in `daytona` for a cloud
-# sandbox, or add tools to `apt:`/`network:` if a worker needs to run code.)
+# egress they need is the model API; no repo is cloned. (Swap in `docker` for a fully local
+# run, or add tools to `apt:`/`network:` if a worker needs to run code.)
 sandboxes:
-  Dev:
-    provider: docker
+  BaseSandbox:
+    provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
     network: [api.anthropic.com]
     env_file: secrets/base.env   # gitignored; supplies ANTHROPIC_API_KEY
@@ -41,8 +42,8 @@ agents:
   Writer:       {}                                                    # drafts / transforms text
   Classifier:   {}                                                    # the router's brain
   Reviewer:     {}                                                    # one of several parallel reviewers
-  Judge:        { harness: { model: claude-opus-4-8 }, skills: [grading-rubric] }
-  Orchestrator: { harness: { model: claude-opus-4-8 } }               # plans the subtasks
+  Judge:        { model: claude-opus-4-8, skills: [grading-rubric] }
+  Orchestrator: { model: claude-opus-4-8 }                            # plans the subtasks
   Worker:       {}                                                    # executes the plan
 
 # Events — the bus contract. One entry event per pattern; `ContentRequested` is special:

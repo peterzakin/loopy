@@ -11,7 +11,7 @@ from loopy_core.compile.model import Project
 from loopy_core.registry.model import Agent, Event, Registry, Sandbox
 from loopy_core.workflow.model import Budget, Ref, Step, Trigger, Workflow
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 
 def to_manifest(project: Project) -> dict:
@@ -60,7 +60,8 @@ def _sandbox(sb: Sandbox) -> dict:
 
 def _agent(ag: Agent) -> dict:
     return {
-        "harness": {"runtime": ag.harness.runtime, "model": ag.harness.model},
+        "model": ag.model,
+        "harness": ag.harness,
         "sandbox": ag.sandbox,
         "skills": ag.skills,
     }

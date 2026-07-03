@@ -13,6 +13,7 @@ from loopy_core.compile import codes
 from loopy_core.compile.diagnostics import DiagnosticCollector
 from loopy_core.compile.model import EventLineage, Lineage, Project
 from loopy_core.discovery import Inventory
+from loopy_core.providers import validate_model
 from loopy_core.span import span_at
 
 
@@ -47,6 +48,30 @@ def cross_check(project: Project, inv: Inventory, diags: DiagnosticCollector) ->
 
     # X2 — every registered agent names a sandbox, and it (+ its skills) resolve.
     for agent in registry.agents.values():
+        # Both `model:` and `harness:` are mandatory flat keys (directly or via
+        # `defaults.agent`) — neither is ever inferred from the other.
+        if agent.model is None:
+            diags.error(
+                codes.E507,
+                f"agent '{agent.name}' declares no model; every agent must name one "
+                f"(set model: on the agent or defaults.agent.model)",
+                span=agent.span,
+            )
+        if agent.harness is None:
+            diags.error(
+                codes.E507,
+                f"agent '{agent.name}' declares no harness; every agent must name one "
+                f"(set harness: on the agent or defaults.agent.harness)",
+                span=agent.span,
+            )
+        if agent.model is not None and agent.harness is not None:
+            # X2 — the harness must be a supported one, and the model must be in the
+            # family it can drive (a claude-* model on claude-code, an OpenAI model on
+            # codex, either on opencode). Same rule the harnesses re-enforce at startup.
+            try:
+                validate_model(agent.harness, agent.model)
+            except ValueError as exc:
+                diags.error(codes.E508, f"agent '{agent.name}': {exc}", span=agent.span)
         if agent.sandbox is None:
             # Where an agent runs is never inferred — it must name a sandbox (directly or via
             # `defaults.agent.sandbox`). Pairs with E214 (that sandbox must declare a provider).

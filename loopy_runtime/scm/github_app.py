@@ -198,6 +198,73 @@ def mint_installation_token(
     )
 
 
+def list_repo_hooks(token: str, owner: str, repo: str, *, base_url: str = GITHUB_API) -> list[dict]:
+    """List a repository's webhooks (installation-token auth; needs webhooks:read).
+
+    One page of 100 — a repo with more webhooks than that is far outside anything
+    `loopy webhooks github` manages, and the caller only searches for its own URL.
+    """
+    result = _request_json(
+        "GET",
+        f"{base_url}/repos/{owner}/{repo}/hooks?per_page=100",
+        headers={"Authorization": f"token {token}"},
+    )
+    return result if isinstance(result, list) else []
+
+
+def _hook_payload(url: str, secret: str, events: Sequence[str]) -> dict:
+    return {
+        "config": {"url": url, "content_type": "json", "secret": secret},
+        "events": list(events),
+        "active": True,
+    }
+
+
+def create_repo_hook(
+    token: str,
+    owner: str,
+    repo: str,
+    *,
+    url: str,
+    secret: str,
+    events: Sequence[str],
+    base_url: str = GITHUB_API,
+) -> dict:
+    """Create a repo webhook delivering `events` to `url`, signed with `secret`
+    (installation-token auth; needs webhooks:write)."""
+    return _request_json(
+        "POST",
+        f"{base_url}/repos/{owner}/{repo}/hooks",
+        headers={"Authorization": f"token {token}"},
+        payload=_hook_payload(url, secret, events),
+    )
+
+
+def update_repo_hook(
+    token: str,
+    owner: str,
+    repo: str,
+    hook_id: int | str,
+    *,
+    url: str,
+    secret: str,
+    events: Sequence[str],
+    base_url: str = GITHUB_API,
+) -> dict:
+    """Converge an existing repo webhook onto `url`/`events`/`secret` and re-activate it.
+
+    Always resends the secret: GitHub never returns hook secrets, so equality can't be
+    checked — rewriting is the only way to guarantee the local `GITHUB_WEBHOOK_SECRET`
+    is what GitHub actually signs with.
+    """
+    return _request_json(
+        "PATCH",
+        f"{base_url}/repos/{owner}/{repo}/hooks/{hook_id}",
+        headers={"Authorization": f"token {token}"},
+        payload=_hook_payload(url, secret, events),
+    )
+
+
 def list_installation_repositories(token: str, *, base_url: str = GITHUB_API) -> dict:
     """List the repos an installation token can reach (`{total_count, repositories}`).
 

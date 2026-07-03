@@ -26,7 +26,7 @@ from tests.helpers import codes as result_codes
 
 # A minimal project that compiles clean — one local sandbox + agent, no events declared.
 REGISTRY = (
-    "defaults: { agent: { sandbox: default } }\n"
+    "defaults: { agent: { sandbox: default, model: claude-sonnet-4-6, harness: claude-code } }\n"
     "sandboxes: { default: { provider: local } }\n"
     "agents: { Investigator: {} }\n"
 )

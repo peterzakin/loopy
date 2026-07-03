@@ -282,7 +282,7 @@ def test_start_with_no_polls_is_a_noop():
 def _poll_manifest() -> Manifest:
     return Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "registry": {"sandboxes": {}, "agents": {}, "events": {"Thing": {"fields": {}}}},
             "workflows": {
                 "w": {

@@ -1,8 +1,8 @@
 """P1 — parse registry.yml into a typed Registry with defaults applied.
 
 Parses with ruamel.yaml so keys retain line numbers for `file:line` spans, applies
-`defaults.agent` inheritance (deep-merge `harness`, replace `skills` lists,
-scalar override for `sandbox`), desugars event field types, and runs X1 naming.
+`defaults.agent` inheritance (scalar override for `model`/`harness`/`sandbox`,
+replace `skills` lists), desugars event field types, and runs X1 naming.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from loopy_core.discovery import Inventory
 from loopy_core.registry.model import (
     Agent,
     Event,
-    Harness,
     Limits,
     Registry,
     Repo,
@@ -228,13 +227,22 @@ def _load_repos(value: object, file: str, line: int, diags: DiagnosticCollector)
     return repos
 
 
+def _scalar(value: object) -> str | None:
+    """A non-empty string value, or None for anything else (absent, empty, wrong type —
+    e.g. the retired nested `harness: { runtime, model }` mapping). A None here surfaces
+    as the X2 missing-model/harness diagnostic (E507) rather than a parse crash."""
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
 def _load_agents(ag_map: Mapping, default_agent: Mapping, file: str) -> dict[str, Agent]:
     out: dict[str, Agent] = {}
     for name, body in ag_map.items():
         body = body or {}
-        # harness: deep-merge field-by-field (agent overrides defaults).
-        harness = {**(default_agent.get("harness") or {}), **(body.get("harness") or {})}
-        # sandbox: scalar override, else inherit.
+        # model / harness / sandbox: scalar override, else inherit from defaults.agent.
+        model = _scalar(body.get("model", default_agent.get("model")))
+        harness = _scalar(body.get("harness", default_agent.get("harness")))
         sandbox = body.get("sandbox", default_agent.get("sandbox"))
         # skills: the agent's own list replaces the default wholesale (no union).
         skills = (
@@ -242,7 +250,8 @@ def _load_agents(ag_map: Mapping, default_agent: Mapping, file: str) -> dict[str
         )
         out[name] = Agent(
             name=name,
-            harness=Harness(**harness),
+            model=model,
+            harness=harness,
             sandbox=sandbox,
             skills=skills,
             span=span_at(file, _line_of(ag_map, name)),

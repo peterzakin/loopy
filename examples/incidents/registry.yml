@@ -5,7 +5,8 @@
 defaults:
   agent:
     sandbox: default
-    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
+    model: claude-sonnet-4-6
+    harness: claude-code
 
 # Sandbox — compute + egress. `image:` is the declarative build; `network:` the egress allowlist.
 sandboxes:
@@ -20,7 +21,7 @@ sandboxes:
 # budget; numeric caps live in budget, not in a tool name.
 agents:
   Investigator: { skills: [triage, repro-authoring] }
-  Fixer: { harness: { model: claude-opus-4-8 }, skills: [testing] }
+  Fixer: { model: claude-opus-4-8, skills: [testing] }
   Reviewer: { skills: [rubrics/fix-quality] }
   Releaser: { skills: [rollout] }
 

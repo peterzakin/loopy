@@ -4,7 +4,7 @@ Three layers, all offline:
   * `ToolchainLayer.merge` + `compose_image` (pure): how a harness's additive toolchain
     composes onto a (harness-agnostic) user `image:` spec.
   * Each harness declares its CLI + runtime and the binaries to probe.
-  * The runtime's post-acquire probe (`_verify_toolchain`) fails fast when the live sandbox
+  * The runner's post-acquire probe (`_verify_toolchain`) fails fast when the live sandbox
     is missing a required tool.
 """
 
@@ -18,8 +18,9 @@ from loopy_runtime.bus.inproc import InProcessEventBus
 from loopy_runtime.contract import ExecResult, ToolchainLayer
 from loopy_runtime.harness.claude_code import ClaudeCodeHarness
 from loopy_runtime.harness.codex import CodexHarness
+from loopy_runtime.harness.opencode import OpenCodeHarness
 from loopy_runtime.harness.router import HarnessRouter
-from loopy_runtime.manifest_model import AgentSpec, HarnessSpec, Manifest
+from loopy_runtime.manifest_model import AgentSpec, Manifest
 from loopy_runtime.runtime.inmemory import InMemoryRuntime
 from loopy_runtime.sandbox.local import LocalSandboxProvider
 from loopy_runtime.sandbox.toolchain import compose_image
@@ -77,8 +78,9 @@ def test_compose_empty_layer_is_noop():
 
 # --- harness toolchains ------------------------------------------------------
 
-_CLAUDE = AgentSpec(harness=HarnessSpec(runtime="claude-code", model="claude-sonnet-4-6"))
-_CODEX = AgentSpec(harness=HarnessSpec(runtime="codex", model="gpt-5-codex"))
+_CLAUDE = AgentSpec(model="claude-sonnet-4-6", harness="claude-code")
+_CODEX = AgentSpec(model="gpt-5-codex", harness="codex")
+_OPENCODE = AgentSpec(model="anthropic/claude-sonnet-4-6", harness="opencode")
 
 
 def test_claude_toolchain_has_substrate_plus_cli():
@@ -93,6 +95,13 @@ def test_codex_toolchain_has_substrate_plus_cli():
     assert "git" in layer.apt and "nodejs" in layer.apt
     assert any("codex" in c for c in layer.run)
     assert set(layer.probe) == {"git", "codex"}
+
+
+def test_opencode_toolchain_has_substrate_plus_cli():
+    layer = OpenCodeHarness({"a": _OPENCODE}).toolchain(_OPENCODE)
+    assert "git" in layer.apt and "nodejs" in layer.apt
+    assert any("opencode-ai" in c for c in layer.run)
+    assert set(layer.probe) == {"git", "opencode"}
 
 
 def test_required_tools_is_the_probe():
@@ -137,7 +146,7 @@ class _ToolHarness:
 def _empty_manifest() -> Manifest:
     return Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "registry": {"sandboxes": {}, "agents": {}, "events": {}},
             "workflows": {},
             "sensors": [],
@@ -158,24 +167,26 @@ def _runtime(tools) -> InMemoryRuntime:
 
 def test_probe_passes_when_all_tools_present():
     rt = _runtime({"git", "claude"})
-    asyncio.run(rt._verify_toolchain(_ProbeSandbox(missing=()), _CLAUDE, "fixer", "default"))
+    asyncio.run(rt.runner._verify_toolchain(_ProbeSandbox(missing=()), _CLAUDE, "fixer", "default"))
 
 
 def test_probe_raises_listing_missing_tools():
     rt = _runtime({"git", "claude"})
     with pytest.raises(RuntimeError, match="missing tool.*claude"):
         asyncio.run(
-            rt._verify_toolchain(_ProbeSandbox(missing=("claude",)), _CLAUDE, "f", "default")
+            rt.runner._verify_toolchain(_ProbeSandbox(missing=("claude",)), _CLAUDE, "f", "default")
         )
 
 
 def test_probe_failure_treats_all_tools_as_missing():
     rt = _runtime({"git", "claude"})
     with pytest.raises(RuntimeError, match="missing tool"):
-        asyncio.run(rt._verify_toolchain(_ProbeSandbox(raises=True), _CLAUDE, "f", "default"))
+        asyncio.run(
+            rt.runner._verify_toolchain(_ProbeSandbox(raises=True), _CLAUDE, "f", "default")
+        )
 
 
 def test_probe_skipped_when_no_required_tools():
     rt = _runtime(set())
     # No exec needed; a sandbox that would raise on exec must never be called.
-    asyncio.run(rt._verify_toolchain(_ProbeSandbox(raises=True), _CLAUDE, "f", "default"))
+    asyncio.run(rt.runner._verify_toolchain(_ProbeSandbox(raises=True), _CLAUDE, "f", "default"))

@@ -37,20 +37,16 @@
   "registry": {
     "agents": {
       "Fixer": {
-        "harness": {
-          "model": "claude-opus-4-8",
-          "runtime": "claude-code"
-        },
+        "harness": "claude-code",
+        "model": "claude-opus-4-8",
         "sandbox": "default",
         "skills": [
           "testing"
         ]
       },
       "Investigator": {
-        "harness": {
-          "model": "claude-sonnet-4-6",
-          "runtime": "claude-code"
-        },
+        "harness": "claude-code",
+        "model": "claude-sonnet-4-6",
         "sandbox": "default",
         "skills": [
           "triage",
@@ -58,20 +54,16 @@
         ]
       },
       "Releaser": {
-        "harness": {
-          "model": "claude-sonnet-4-6",
-          "runtime": "claude-code"
-        },
+        "harness": "claude-code",
+        "model": "claude-sonnet-4-6",
         "sandbox": "default",
         "skills": [
           "rollout"
         ]
       },
       "Reviewer": {
-        "harness": {
-          "model": "claude-sonnet-4-6",
-          "runtime": "claude-code"
-        },
+        "harness": "claude-code",
+        "model": "claude-sonnet-4-6",
         "sandbox": "default",
         "skills": [
           "rubrics/fix-quality"
@@ -174,7 +166,7 @@
       }
     }
   },
-  "schema_version": "1",
+  "schema_version": "2",
   "sensors": [
     {
       "emits": "MetricThreshold",

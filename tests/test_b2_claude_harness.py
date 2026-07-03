@@ -19,7 +19,6 @@ from loopy_runtime.manifest_model import (
     AgentSpec,
     BudgetSpec,
     EventContract,
-    HarnessSpec,
     StepSpec,
 )
 
@@ -50,7 +49,7 @@ def _ctx():
     )
 
 
-AGENT = AgentSpec(harness=HarnessSpec(runtime="claude-code", model="claude-opus-4-8"))
+AGENT = AgentSpec(model="claude-opus-4-8", harness="claude-code")
 
 
 def _harness():

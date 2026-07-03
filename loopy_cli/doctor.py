@@ -264,7 +264,7 @@ def check_repo_access(registry, creds) -> list[Finding]:  # noqa: ANN001 - Regis
 
     wanted = _declared_repo_slugs(registry)
     if not wanted:
-        return []  # no repos cloned → nothing to check (orchestrator-style project)
+        return []  # no repos cloned → nothing to check (repo-less project)
 
     def _warn(detail: str) -> list[Finding]:
         return [

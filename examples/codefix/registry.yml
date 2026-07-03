@@ -6,17 +6,19 @@
 # Defaults — every agent inherits these; override a field only when needed.
 defaults:
   agent:
-    sandbox: Dev
-    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
+    sandbox: BaseSandbox
+    model: claude-sonnet-4-6
+    harness: claude-code
 
 # Sandbox — compute + egress. `provider:` selects the backend (this is the source of truth;
-# there is no `--sandbox` flag). `docker` is hermetic: the toolchain (git, the `claude` CLI on
-# PATH, HOME) comes from the image, so a local run needs no host-env leak — the gap #6 fixed.
-# Switch `provider:` to `local` (bare subprocess) for a no-Docker box, but then PATH/HOME/the
-# model key must be supplied in the env_file (see README); or `daytona` for a cloud sandbox.
+# there is no `--sandbox` flag). `daytona` runs each agent in an isolated cloud sandbox built
+# from the `image:` spec below (set DAYTONA_API_KEY in loopy.env). Switch `provider:` to `docker`
+# for a fully local, hermetic run — the toolchain (git, the `claude` CLI on PATH, HOME) comes
+# from the same image, so it needs no host-env leak — or `local` (bare subprocess), but then
+# PATH/HOME/the model key must be supplied in the env_file (see README).
 sandboxes:
-  Dev:
-    provider: docker
+  BaseSandbox:
+    provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
     network: [github.com, api.anthropic.com]   # git over https + the model API
     env_file: secrets/base.env                  # gitignored; resolved by the backend at run time

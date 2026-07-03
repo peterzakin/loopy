@@ -17,12 +17,20 @@ from pathlib import Path
 # choke on them — a plain `.replace` of an unambiguous token is safer.
 _NAME = "__PROJECT_NAME__"
 
-# Sentinel for the Dev sandbox's `repos:` line — rendered from the repo(s) the user names at
+# Sentinel for the BaseSandbox sandbox's `repos:` line — rendered from the repo(s) the user names at
 # `init` time (or an empty list). Same `.replace` rationale as `_NAME`.
 _REPOS_LINE = "__REPOS_LINE__"
 
+# Sentinel for the starter-specific tail of AGENTS.md (what the scaffolded workflow does and
+# how to fire it — or, for the minimal no-repo scaffold, what's missing and how to close it).
+_STARTER_BLOCK = "__STARTER_BLOCK__"
+
 # A project name doubles as the new directory name, so keep it a single safe path segment.
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+# The only pre-existing entries `scaffold_project` tolerates in an otherwise-fresh target: the two
+# files `loopy init` may write via `loopy auth github` before it scaffolds (see `scaffold_project`).
+_PREEXISTING_OK = frozenset({"loopy.env", ".gitignore"})
 
 
 class InvalidProjectName(ValueError):
@@ -51,8 +59,7 @@ _REGISTRY_YML = """\
 # Defaults — every agent inherits these; override a field only when needed.
 defaults:
   agent:
-    sandbox: Dev
-    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
+    sandbox: BaseSandbox
 
 # Sandbox — compute + egress. `daytona` runs each agent in an isolated cloud sandbox built
 # from the `image:` spec below (set DAYTONA_API_KEY in loopy.env). Swap `provider:` to `docker`
@@ -60,16 +67,24 @@ defaults:
 #   • `repos:` is what the agent clones to edit code — keep it pointed at a repo you can push to
 #   • `env_file:` is the gitignored dotenv injected as the sandbox's environment
 sandboxes:
-  Dev:
+  BaseSandbox:
     provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
-    network: [github.com, api.anthropic.com]   # git over https + the model API
+    # git over https + the model API. Switching a step to Codex (or OpenCode on an
+    # OpenAI model)? Add api.openai.com here.
+    network: [github.com, api.anthropic.com]
     env_file: secrets/base.env                  # gitignored; resolved at run time
     __REPOS_LINE__
 
 # Agents — capability comes from the sandbox, skills, injected git creds, and budget.
+# Every agent names both keys explicitly: `model` (what it runs on) and `harness` (the
+# runner that drives it). One agent per supported harness; the starter workflow points at
+# Claude. To run a step on another harness, change its `agent:` — and give the sandbox
+# that provider's key (secrets/base.env) plus its API host (`network:` above).
 agents:
-  Coder: { skills: [codefix] }
+  Claude:   { model: claude-sonnet-4-6, harness: claude-code, skills: [codefix] }
+  Codex:    { model: gpt-5.5, harness: codex, skills: [codefix] }
+  OpenCode: { model: claude-sonnet-4-6, harness: opencode, skills: [codefix] }
 
 # Events — the bus contract. A step's `on:` may only name an event registered here.
 events:
@@ -86,7 +101,7 @@ events:
 _OPEN_PR_MD = """\
 ---
 on: CodeTask
-agent: Coder
+agent: Claude
 output:
   pr_url: url
   summary: str
@@ -137,12 +152,15 @@ def task_queue(req) -> CodeTask:
 """
 
 _DEV_ENV = """\
-# Secrets for the `Dev` sandbox, injected as environment variables at run time. Gitignored —
+# Secrets for the `BaseSandbox` sandbox, injected as environment variables at run time. Gitignored —
 # never commit this file. Lines are KEY=VALUE; values are literal (no ${VAR} interpolation).
 
-# --- model auth (claude-code) ---
-# Required for the daytona/docker providers (the built image carries no creds).
+# --- model auth ---
+# Required for the daytona/docker providers (the built image carries no creds). The Claude
+# agent (claude-code) and the OpenCode agent's claude-* model authenticate with this key.
 ANTHROPIC_API_KEY=sk-ant-...
+# The Codex agent (and an OpenCode agent on an OpenAI model) uses this one instead.
+# OPENAI_API_KEY=sk-...
 
 # --- git auth ---
 # Only needed if you are NOT using a GitHub App. `loopy auth github` injects a scoped token
@@ -174,6 +192,13 @@ _LOOPY_ENV = """\
 # Set REDIS_URL to run on the networked Redis bus; `loopy run` picks it up automatically
 # (leave it unset for the single-process in-memory bus). `--bus` overrides this.
 # REDIS_URL=redis://localhost:6379
+
+# --- Public webhook base URL ---
+# Where external services deliver webhooks to this engine — a deployed host or a dev tunnel
+# (ngrok, cloudflared). Each webhook sensor is served at LOOPY_PUBLIC_URL + its path (the
+# built-in GitHub sensor: <base>/hooks/github); `loopy run` prints the full delivery URLs at
+# startup. Leave unset if nothing external delivers webhooks yet.
+# LOOPY_PUBLIC_URL=
 """
 
 _GITIGNORE = """\
@@ -203,7 +228,7 @@ agent that edits a checkout and opens a pull request.
 ## Run it
 
 ```bash
-# 1. confirm sandboxes.Dev.repos points at a repo you can push to (set from your init answer)
+# 1. confirm sandboxes.BaseSandbox.repos points at a repo you can push to (set at init)
 
 # 2. give the sandbox its secrets
 #    edit secrets/base.env and set ANTHROPIC_API_KEY
@@ -230,172 +255,239 @@ loopy trigger . \\
 there to write a standalone `manifest.json` (the deploy artifact) or as a CI gate (`--check`).
 Run every command from this directory so `loopy.env` and `--root` stay in sync. See the
 top-level Loopy README for the authoring model.
+
+Building this out with a coding agent? [`AGENTS.md`](AGENTS.md) is the one-page map it
+reads first (authoring rules, the verify loop, the secrets model).
 """
 
-# --- the no-repo starter: a non-coding workflow orchestrator -----------------------------------
-# Scaffolded when `loopy init` is given no repo. A `Note` event drives an agent that distills it
-# into a summary + action items — a genuinely useful loop on its own (and a clean template to
-# swap a real source/skill into), with no git, no checkout, no GitHub App to set up.
+# --- AGENTS.md — the agent-facing map, shared by both scaffolds --------------------------------
+# Most first edits to a scaffolded project are made by a coding agent ("build me a loop that…"),
+# and AGENTS.md is the file those agents auto-discover. It compresses the authoring model, the
+# verify loop, and the secrets rules into one page so an agent can work without fetching docs.
 
-_ORCH_REGISTRY_YML = """\
-# __PROJECT_NAME__ — a starter Loopy project. One Note event drives a claude agent that distills
-# it into a short summary + action items. No repo, no git — a pure workflow orchestrator. Edit
-# freely; `loopy compile .` validates the result.
+_AGENTS_MD = """\
+# AGENTS.md — working in this Loopy project
+
+This directory is a **Loopy project**: agent automations authored as files. Workflows,
+skills, and sensors are Markdown and Python; `registry.yml` declares the shared entities
+(Agents, Sandboxes, Events); `loopy compile` builds the workflow DAG straight from these
+files. This page is the map. `loopy docs` prints the full authoring reference and
+`loopy docs errors` explains every `LOOPY-E` diagnostic code.
+
+## The edit loop
+
+Validate after every change — the compiler is fast, static, and precise:
+
+```bash
+loopy compile --check .   # exit 0 = valid. Errors: `error LOOPY-E### file:line:col: message`
+loopy doctor              # exit 0 = runnable. Names what's missing (keys, git auth, provider creds)
+```
+
+**A green compile is not a runnable project.** Compile proves the files are well-formed;
+`loopy doctor` proves the credentials and repos behind them are real. Run it before the
+first run and after touching any env file.
+
+To exercise one run end-to-end (in-memory, no server needed):
+
+```bash
+loopy trigger . --event <EventName> --fields '{"field": "value"}' --json
+```
+
+`--json` prints the full run record: steps, outputs, emitted events, failures.
+
+## Layout
+
+| Path | What it is |
+|---|---|
+| `registry.yml` | the shared entities: agents, sandboxes, events (a few fields each) |
+| `workflows/<name>/` | one workflow per directory, one step per `.md` file |
+| `skills/<name>/SKILL.md` | reusable skills; agents reference them by name in `registry.yml` |
+| `sensors/` | `@sensor` functions that turn outside signals into registered events |
+| `secrets/base.env` | the sandbox's env (model key, git token) — gitignored |
+| `loopy.env` | control-plane creds (Daytona key, GitHub App); never reaches a sandbox |
+| `manifest.json`, `loopy/` | compile outputs — generated, don't hand-edit |
+
+## Rules the compiler enforces
+
+- A workflow has exactly **one entry step** carrying `on:` — a registered event or
+  `on: cron("0 3 * * *")` (quoted 5-field expression). Every other step carries
+  `after: <step>` (or `after: [a, b]`). A step with neither is an orphan (E103).
+- **Outputs vs. events.** `output:` is a step's typed result, read by later steps in the
+  *same* workflow as `{{ step.field }}`. `emits:` puts a registered event on the bus for
+  *other* workflows to `on:`. Same-workflow handoff = output; cross-workflow seam = event.
+- Every event in `on:`/`emits:` must be registered under `events:` in `registry.yml` (E504).
+  Exception: built-in `Github.*` triggers (`PullRequestOpened`, `PullRequestMerged`,
+  `IssueOpened`, `IssueCommentCreated`, `Push`) need no registration and no sensor.
+- Field types are JSON Schema shorthand: `str`, `int`, `float`, `bool`, `url`,
+  `enum[a, b, c]`. Anything else is E201.
+- Every step's `agent:` must exist in `registry.yml` (E501); every sandbox declares
+  `provider: local | docker | daytona` (E214); every agent resolves to a sandbox (E506).
+- Defined entities are **Capitalized** (`CodeTask`, `Claude`) and referenced by exact
+  name. Filenames, step names, and event *fields* stay lowercase.
+- A sensor declares its event statically — `@sensor(poll="10m", emits="EventName")` or
+  `@sensor(webhook="/hooks/x", emits="EventName")`. The compiler reads the decorator and
+  never runs your code (E402). Poll intervals: `"30s"`, `"5m"`, `"1h"`, `"2d"`.
+- Templates flow by reference: `{{ event.field }}` from the trigger, `{{ step.field }}`
+  from a direct `after:` predecessor. Unresolvable refs fail compile (E302/E304/E305).
+
+## A step file
+
+```markdown
+---
+on: SomeEvent               # entry step only; other steps use `after: <step>`
+agent: Claude               # must exist in registry.yml
+output: { result: str }     # typed; downstream steps read {{ this_step.result }}
+emits: SomethingHappened    # optional — only if another workflow subscribes
+budget: { wall_clock: 15, spend: { usd: 2 } }   # wall_clock in minutes
+---
+The agent's objective, in prose. Reads {{ event.field }} from the trigger.
+```
+
+## Secrets (the #1 first-run trap)
+
+The sandbox inherits **nothing** from the shell. Everything the agent needs lives in the
+file the sandbox's `env_file:` names (`secrets/base.env`): `ANTHROPIC_API_KEY` for
+claude-code, `OPENAI_API_KEY` for codex, `GITHUB_TOKEN` for git (unless a GitHub App is
+configured). `loopy.env` holds engine-side creds and never reaches a sandbox. Both are
+gitignored — never commit them, and never write a secret into `registry.yml` or a step.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `loopy compile --check .` | validate only (the CI gate); bare `compile` writes `manifest.json` |
+| `loopy doctor` | runnability check — placeholder keys, git auth, provider creds |
+| `loopy trigger . --event E --fields '{...}' --json` | fire one event; print the run record |
+| `loopy run` | start the engine (compiles first); `--in-process` = no-Docker dev server |
+| `loopy admin` | read-only dashboard over recorded runs (http://127.0.0.1:9000) |
+| `loopy auth github` | GitHub App manifest flow — **opens a browser; not headless-safe** |
+| `loopy webhooks github` | register GitHub repo webhooks (`loopy webhooks list` = delivery URLs) |
+| `loopy docs [topic]` | this reference in full; `loopy docs errors` = the diagnostic catalog |
+
+Headless notes: `loopy init` and `loopy auth github` are interactive — both need a human
+on a terminal (auth also opens a browser), so ask the user to run them. For git auth a
+`GITHUB_TOKEN` (contents:write + pull_requests:write) in `secrets/base.env` works instead.
+
+## This project's starter
+
+__STARTER_BLOCK__
+"""
+
+_CODING_STARTER_BLOCK = """\
+One workflow, `codefix`: a `CodeTask` event drives the `Claude` agent to edit a checkout
+of the repo(s) in `sandboxes.BaseSandbox.repos` and open a pull request (emits
+`PROpened`). Fire one end-to-end:
+
+```bash
+loopy trigger . --event CodeTask \\
+  --fields '{"task": "add a CONTRIBUTING.md", "branch": "codefix/contributing"}' --json
+```\
+"""
+
+_MINIMAL_STARTER_BLOCK = """\
+None yet. This project was initialized **without GitHub access**, so `loopy init` wrote only
+the registry and env files — no workflow, no skill, no sensor. Loopy is built around agents
+that work on repos (clone a checkout, edit, open a PR); before building anything, close that
+gap:
+
+1. Run `loopy auth github` (needs a human and a browser — ask the user to run it, or put a
+   `GITHUB_TOKEN` in `secrets/base.env`).
+2. Add the repo(s) to `sandboxes.BaseSandbox.repos` in `registry.yml`.
+3. Add a workflow under `workflows/<name>/` (one `.md` step per file) and register its events
+   in `registry.yml` — `loopy docs` has the full authoring reference.\
+"""
+
+
+# --- the no-repo scaffold: a trimmed-down registry, no starter workflow ------------------------
+# Scaffolded when `loopy init` is given no repo — a path init strongly discourages. Loopy is
+# built around agents that work on repos, so without one there is no starter workflow to write:
+# the scaffold is just a minimal registry.yml plus the env files, and every file points at the
+# same next step (wire GitHub access, then build).
+
+_MINIMAL_REGISTRY_YML = """\
+# __PROJECT_NAME__ — a minimal Loopy registry. This project was initialized without GitHub
+# access, so there is no starter workflow: loopy is built around agents that work on repos
+# (clone a checkout, edit, open a PR), and without one there is nothing useful to run yet.
+# Strongly recommended before building anything:
+#   1. wire git auth: `loopy auth github`
+#   2. add the repo(s) the agent works on to sandboxes.BaseSandbox.repos below
+#   3. add a workflow under workflows/<name>/ — `loopy docs` prints the authoring reference
+# `loopy compile .` validates the result after every edit.
 
 # Defaults — every agent inherits these; override a field only when needed.
 defaults:
   agent:
-    sandbox: Dev
-    harness: { runtime: claude-code, model: claude-sonnet-4-6 }
+    sandbox: BaseSandbox
 
 # Sandbox — compute + egress. `daytona` runs each agent in an isolated cloud sandbox built
 # from the `image:` spec below (set DAYTONA_API_KEY in loopy.env). Swap `provider:` to `docker`
 # for a fully local, hermetic run — both build from the same `image:` spec.
-#   • no repos: this loop only talks to the model, so egress is just api.anthropic.com
-#   • want an agent that edits code? add a repo (and run `loopy auth github`) and a PR workflow
-#   • `env_file:` is the gitignored dotenv injected as the sandbox's environment
 sandboxes:
-  Dev:
+  BaseSandbox:
     provider: daytona
-    image: { debian_slim: "3.12", workdir: /home/loopy, user: loopy }
-    network: [api.anthropic.com]               # just the model API — no git, no repos
+    image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
+    # git over https + the model API. Switching a step to Codex (or OpenCode on an
+    # OpenAI model)? Add api.openai.com here.
+    network: [github.com, api.anthropic.com]
     env_file: secrets/base.env                  # gitignored; resolved at run time
+    # what the agent clones to edit code — set this once `loopy auth github` has run:
+    # repos: [owner/repo]
 
-# Agents — capability comes from the sandbox, skills, and budget.
+# Agents — one per supported harness; a workflow step names one with `agent:`. Every agent
+# names both keys explicitly: `model` (what it runs on) and `harness` (the runner that
+# drives it). Running a step on Codex/OpenCode also needs that provider's key
+# (secrets/base.env) plus its API host (`network:` above).
 agents:
-  Summarizer: { skills: [summarize] }
+  Claude:   { model: claude-sonnet-4-6, harness: claude-code }
+  Codex:    { model: gpt-5.5, harness: codex }
+  OpenCode: { model: claude-sonnet-4-6, harness: opencode }
 
-# Events — the bus contract. A step's `on:` may only name an event registered here.
-events:
-  # the note to distill — fire one by hand with `loopy trigger --event Note --fields '{...}'`
-  Note:
-    text: str     # the content to summarize, in prose
-  # emitted once the summary is ready — a downstream step could subscribe with `on: Summarized`
-  Summarized:
-    summary: str
-    action_items: str
+# Events — the bus contract. Register here every event a workflow will `on:` or `emits:`,
+# then reference it from the workflow's step files. For example:
+# events:
+#   CodeTask:
+#     task: str     # what to change, in prose
+#     branch: str   # the branch to push the edit on
 """
 
-_ORCH_WORKFLOW_MD = """\
----
-on: Note
-agent: Summarizer
-output:
-  summary: str
-  action_items: str
-emits: Summarized
-budget: { wall_clock: 5, spend: { usd: 1 } }
----
-You're handed a note. Distill it — no preamble, and don't just echo the input back.
-
-The note:
-{{ event.text }}
-
-Produce two things:
-1. `summary` — 2–3 sentences capturing the essence in plain language.
-2. `action_items` — concrete next steps the note implies, one per line, each starting with a
-   verb. If the note implies nothing to do, return the single line `none`.
-
-Stay faithful to the note: don't invent facts, names, or action items it doesn't support.
-"""
-
-_ORCH_SKILL_MD = """\
-# summarize
-
-Turn a note into a short, faithful summary and a list of action items.
-
-- Lead with a summary a busy reader could skim in one breath — 2–3 sentences, no filler.
-- Pull out only action items the note actually implies: concrete, verb-first, one per line.
-- Don't invent facts, names, or numbers that aren't in the note.
-- If there's nothing to act on, say `none` rather than padding the list.
-"""
-
-_ORCH_SENSORS_PY = """\
-from loopy import sensor
-from loopy.events import Note  # generated by `loopy compile` — optional, for your typechecker
-
-
-@sensor(poll="10m", emits="Note")  # `emits` is the contract the compiler reads
-def notes_inbox(req) -> Note:
-    \"\"\"Poll an inbox for notes to summarize.
-
-    A stub to start from — a real sensor would read from email, a Slack channel, a webhook, or
-    a spreadsheet, and return a Note per item. Returning None emits nothing; this is here so
-    `Note` has a declared producer (and you can still fire one by hand with
-    `loopy trigger --event Note`).
-    \"\"\"
-    return None
-"""
-
-_ORCH_DEV_ENV = """\
-# Secrets for the `Dev` sandbox, injected as environment variables at run time. Gitignored —
-# never commit this file. Lines are KEY=VALUE; values are literal (no ${VAR} interpolation).
-
-# --- model auth (claude-code) ---
-# Required for the daytona/docker providers (the built image carries no creds).
-ANTHROPIC_API_KEY=sk-ant-...
-
-# --- only for the `local` provider (a bare subprocess inherits nothing from your shell) ---
-# With the daytona/docker providers these come from the built image; leave them out.
-# PATH=/usr/local/bin:/usr/bin:/bin
-# HOME=/home/you
-"""
-
-_ORCH_LOOPY_ENV = """\
-# Control-plane credentials — the creds the loopy *engine* needs. These are NOT injected
-# into sandboxes (the agent's environment is secrets/base.env); they stay at the control
-# plane. Gitignored — never commit this file. Lines are KEY=VALUE; values are literal.
-
-# --- Daytona (the default sandbox; required when a sandbox uses provider: daytona) ---
-# DAYTONA_API_KEY=
-
-# --- Redis event bus ---
-# Set REDIS_URL to run on the networked Redis bus; `loopy run` picks it up automatically
-# (leave it unset for the single-process in-memory bus). `--bus` overrides this.
-# REDIS_URL=redis://localhost:6379
-
-# Adding a repo later? `loopy auth github` writes GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY here.
-"""
-
-_ORCH_README_MD = """\
+_MINIMAL_README_MD = """\
 # __PROJECT_NAME__
 
-A Loopy project, scaffolded by `loopy init`. One `Note` event drives a `claude-code` agent that
-distills it into a short summary and a list of action items — a pure workflow orchestrator, with
-no code repo involved.
+A minimal Loopy project, scaffolded by `loopy init` **without GitHub access**: a registry
+(sandbox + agents) and the env files, but no starter workflow. Loopy is built around agents
+that work on repos (clone a checkout, edit, open a PR), so without one there is nothing
+useful to run yet.
 
-## Run it
+## Finish the setup
 
 ```bash
-# 1. give the sandbox its secrets
+# 1. wire git auth (writes loopy.env in this project — gitignored)
+loopy auth github
+loopy auth status            # then visit the printed install URL to pick repos
+
+# 2. point the sandbox at the repo(s) the agent works on
+#    registry.yml → sandboxes.BaseSandbox: uncomment `repos:` and name them
+
+# 3. give the sandbox its secrets
 #    edit secrets/base.env and set ANTHROPIC_API_KEY
 
-# 2. check it's runnable — a green compile is not a runnable project
+# 4. add a workflow — one directory under workflows/, one .md step per file, its events
+#    registered in registry.yml. `loopy docs` prints the authoring reference.
+
+# 5. check what's still missing — a green compile is not a runnable project
 loopy doctor
-
-# 3. start the engine — `loopy run` compiles the project on the fly, then brings up the
-#    server (hosts sensors, drives runs; sandboxes run on whatever registry.yml's `provider:`
-#    names). Container stack by default — add `--in-process` for a no-Docker dev server.
-loopy run
-
-# fire one note by hand to watch the loop end-to-end (compiles too):
-loopy trigger . \\
-  --event Note \\
-  --fields '{"text": "Customer call: they want SSO by Q3 and flagged slow CSV export."}'
 ```
 
-Want an agent that edits code instead? Point `sandboxes.Dev.repos` at a repo you can push to,
-run `loopy auth github`, and add a workflow that opens a PR.
+Then `loopy run` starts the engine (it compiles the project on the fly), and
+`loopy trigger . --event <Event> --fields '{...}'` fires one run by hand.
 
-`run`/`trigger` accept a project directory and compile it for you; `loopy compile .` is still
-there to write a standalone `manifest.json` (the deploy artifact) or as a CI gate (`--check`).
-Run every command from this directory so `loopy.env` and `--root` stay in sync. See the
-top-level Loopy README for the authoring model.
+Building this out with a coding agent? [`AGENTS.md`](AGENTS.md) is the one-page map it
+reads first (authoring rules, the verify loop, the secrets model).
 """
 
 
 def _render_repos_line(repos: list[str]) -> str:
-    """Render the Dev sandbox's `repos:` line from the repo(s) the agent will work on."""
+    """Render the BaseSandbox sandbox's `repos:` line from the repo(s) the agent will work on."""
     return f"repos: [{', '.join(repos)}]   # cloned at acquire time (git auth injected)"
 
 
@@ -410,20 +502,19 @@ def _coding_files(repos: list[str]) -> dict[str, str]:
         "loopy.env": _LOOPY_ENV,
         ".gitignore": _GITIGNORE,
         "README.md": _README_MD,
+        "AGENTS.md": _AGENTS_MD.replace(_STARTER_BLOCK, _CODING_STARTER_BLOCK),
     }
 
 
-def _orchestrator_files() -> dict[str, str]:
-    """The repo-less starter: a Note → summary + action-items loop (no git, no checkout)."""
+def _minimal_files() -> dict[str, str]:
+    """The no-repo scaffold: a trimmed-down registry + env files, no starter workflow."""
     return {
-        "registry.yml": _ORCH_REGISTRY_YML,
-        "workflows/summarize/summarize.md": _ORCH_WORKFLOW_MD,
-        "skills/summarize/SKILL.md": _ORCH_SKILL_MD,
-        "sensors/sensors.py": _ORCH_SENSORS_PY,
-        "secrets/base.env": _ORCH_DEV_ENV,
-        "loopy.env": _ORCH_LOOPY_ENV,
+        "registry.yml": _MINIMAL_REGISTRY_YML,
+        "secrets/base.env": _DEV_ENV,
+        "loopy.env": _LOOPY_ENV,
         ".gitignore": _GITIGNORE,
-        "README.md": _ORCH_README_MD,
+        "README.md": _MINIMAL_README_MD,
+        "AGENTS.md": _AGENTS_MD.replace(_STARTER_BLOCK, _MINIMAL_STARTER_BLOCK),
     }
 
 
@@ -435,21 +526,33 @@ def scaffold_project(
     `target` is created if absent; an existing **non-empty** directory is refused so we never
     clobber work. The caller is expected to have validated `name` via `validate_project_name`.
 
-    The starter is chosen by repo access — so a fresh project is something you'd actually keep,
-    not a placeholder to fix. With one or more `repos`, you get the coding loop (edit a checkout,
-    open a PR). With none, you get a repo-less orchestrator (turn a Note into a summary) — useful
-    on its own, and never an unpushable placeholder repo.
+    The scaffold is chosen by repo access. With one or more `repos`, you get the coding starter
+    (edit a checkout, open a PR). With none — a path `loopy init` strongly discourages — there is
+    no starter workflow at all: just a trimmed-down registry.yml plus the env files, every one of
+    them pointing at wiring GitHub access as the next step.
     """
+    from loopy_runtime.secrets import load_control_plane_env, write_control_plane_env
+
     target = Path(target)
-    if target.exists() and any(target.iterdir()):
+    # `loopy init` now offers `loopy auth github` *before* scaffolding, so a fresh target may
+    # already hold the two files that step writes — loopy.env (App creds) and .gitignore. Tolerate
+    # exactly those; any other pre-existing content is real work we refuse to clobber.
+    if target.exists() and any(p.name not in _PREEXISTING_OK for p in target.iterdir()):
         raise FileExistsError(f"{target} already exists and is not empty")
 
+    # Preserve any real control-plane creds a preceding `loopy auth github` wrote. The scaffold's
+    # loopy.env ships commented placeholders, so we write the template first, then merge the real
+    # values back on top — keeping both the explanatory comments and the creds.
+    preexisting_creds = load_control_plane_env(target)
+
     repos = repos or []
-    files = _coding_files(repos) if repos else _orchestrator_files()
+    files = _coding_files(repos) if repos else _minimal_files()
     created: list[Path] = []
     for rel, template in files.items():
         path = target / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(template.replace(_NAME, name))
         created.append(Path(rel))
+    if preexisting_creds:
+        write_control_plane_env(target, preexisting_creds)
     return sorted(created, key=lambda p: p.as_posix())

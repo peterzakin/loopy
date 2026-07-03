@@ -8,14 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from loopy_core.span import Span
 
 
-class Harness(BaseModel):
-    # `model` would otherwise collide with pydantic's protected `model_` namespace.
-    model_config = ConfigDict(protected_namespaces=())
-
-    runtime: str | None = None
-    model: str | None = None
-
-
 class Repo(BaseModel):
     # A GitHub repo to clone into the sandbox workspace at acquire time. `url` is an
     # `owner/name` shorthand or a full https URL; the rest are optional checkout knobs.
@@ -40,8 +32,15 @@ class Sandbox(BaseModel):
 
 
 class Agent(BaseModel):
+    # `model` would otherwise collide with pydantic's protected `model_` namespace.
+    model_config = ConfigDict(protected_namespaces=())
+
     name: str
-    harness: Harness = Field(default_factory=Harness)
+    # `model` and `harness` are flat sibling keys, both mandatory on every agent
+    # (directly or via `defaults.agent`). Optional in the IR so the loader can carry
+    # a malformed agent through to the X2 cross-check, which enforces presence (E507).
+    model: str | None = None
+    harness: str | None = None
     sandbox: str | None = None
     skills: list[str] = Field(default_factory=list)
     span: Span

@@ -1,10 +1,8 @@
-"""Inject built-in events + their producing sensors, and built-in agents (Option A).
+"""Inject built-in events + their producing sensors (Option A).
 
 A workflow may trigger on a platform-shipped event (`on: Github.PullRequestOpened`,
-`on: Sentry.IssueCreated`) without declaring it or authoring a sensor, and a step may
-name a platform-shipped agent (`agent: BaseClaude`) without a registry entry. This pass
-— run after workflows/sensors are loaded and *before* `resolve_refs` and `cross_check`
-— does:
+`on: Sentry.IssueCreated`) without declaring it or authoring a sensor. This pass — run
+after workflows/sensors are loaded and *before* `resolve_refs` and `cross_check` — does:
 
   1. Guards the reserved namespaces: a user-declared event or user sensor under any
      `BUILTIN_PROVIDERS` prefix is an error (E215). The platform owns producers there.
@@ -13,8 +11,9 @@ name a platform-shipped agent (`agent: BaseClaude`) without a registry entry. Th
      a built-in `Sensor` on the provider's webhook path (so the event has a producer —
      no W501).
   3. Reports an unknown reserved-prefix trigger (E112) with that provider's catalog.
-  4. For each built-in agent (`BaseClaude`/`BaseCodex`) a step names and the project didn't
-     declare, registers it so `cross_check`'s X2 resolves it like any registered agent.
+
+Agents are never injected — every agent is declared explicitly in `registry.yml`
+(`loopy init` scaffolds one per supported runtime); an unregistered `agent:` is E501.
 
 Validation of the reserved namespaces lives entirely here; `cross_check` skips its
 E504 registration check for reserved-prefix events (this pass owns them).
@@ -23,15 +22,12 @@ E504 registration check for reserved-prefix events (this pass owns them).
 from __future__ import annotations
 
 from loopy_core.builtins import (
-    BUILTIN_AGENT_SANDBOX,
-    BUILTIN_AGENTS,
-    is_builtin_agent,
     is_reserved,
     provider_for,
 )
 from loopy_core.compile import codes
 from loopy_core.compile.diagnostics import DiagnosticCollector
-from loopy_core.registry.model import Agent, Event, Harness, Registry
+from loopy_core.registry.model import Event, Registry
 from loopy_core.registry.types import desugar
 from loopy_core.sensors.model import Sensor, SensorTrigger
 from loopy_core.span import Span, span_at
@@ -46,10 +42,9 @@ def inject_builtins(
     sensors: list[Sensor],
     diags: DiagnosticCollector,
 ) -> list[Sensor]:
-    """Register referenced built-in events + agents into `registry` and return the synthesized
+    """Register referenced built-in events into `registry` and return the synthesized
     built-in sensors to append to the project's sensor list."""
     _guard_reserved(registry, workflows, sensors, diags)
-    _inject_agents(registry, workflows)
 
     # Collect referenced built-in trigger events, keeping a span for diagnostics.
     referenced: dict[str, Span] = {}
@@ -88,25 +83,6 @@ def inject_builtins(
             )
         )
     return built
-
-
-def _inject_agents(registry: Registry, workflows: dict[str, Workflow]) -> None:
-    """Register each built-in agent (`BaseClaude`/`BaseCodex`) a step names but the project didn't
-    declare. A user agent of the same name wins (we only fill the gap), so `agent: BaseClaude`
-    resolves in X2 with zero registry config. Unknown agents still fall through to E501."""
-    for workflow in workflows.values():
-        for step in workflow.steps.values():
-            name = step.agent
-            if name is None or not is_builtin_agent(name) or name in registry.agents:
-                continue
-            spec = BUILTIN_AGENTS[name]
-            registry.agents[name] = Agent(
-                name=name,
-                harness=Harness(runtime=spec["runtime"], model=spec["model"]),
-                sandbox=BUILTIN_AGENT_SANDBOX,
-                skills=[],  # skills are project-specific; a built-in ships none (avoids E503)
-                span=_BUILTIN_SPAN,
-            )
 
 
 def _event(name: str, contract: dict[str, str], diags: DiagnosticCollector) -> Event:

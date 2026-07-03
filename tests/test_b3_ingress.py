@@ -106,7 +106,7 @@ def test_receiver_publishes_valid_event_and_acks():
 def _manifest() -> Manifest:
     return Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "registry": {"sandboxes": {}, "agents": {}, "events": {"Thing": {"fields": {}}}},
             "workflows": {
                 "w": {
@@ -242,7 +242,7 @@ def test_failed_run_does_not_strand_siblings():
     # One event fans out to two workflows; the first fails, the second must still run.
     m = Manifest.model_validate(
         {
-            "schema_version": "1",
+            "schema_version": "2",
             "registry": {"sandboxes": {}, "agents": {}, "events": {"Thing": {"fields": {}}}},
             "workflows": {
                 "boom": {"entry": "s", "steps": {"s": _wstep("boom/s", "Thing")}},

@@ -95,6 +95,20 @@
       </div>
     </main>
 
+    <!-- right side panel — the markdown body of the selected workflow step -->
+    <aside class="step-panel" id="step-panel" role="dialog" aria-label="Step detail" hidden>
+      <div class="step-panel-head">
+        <div class="step-panel-title">
+          <div class="lui-eyebrow" id="step-panel-wf"></div>
+          <h2 id="step-panel-name"></h2>
+        </div>
+        <button class="lui-btn step-panel-close" id="step-panel-close" aria-label="Close step detail">
+          Close
+        </button>
+      </div>
+      <div class="step-panel-body" id="step-panel-body"></div>
+    </aside>
+
     <script src="/static/app.js"></script>
   </body>
 </html>
