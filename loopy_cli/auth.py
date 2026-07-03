@@ -467,8 +467,10 @@ SENTRY_DEFAULT_BASE = "https://sentry.io"
 SENTRY_HOOK_PATH = "/hooks/sentry"
 # The token needs org-write to create an integration; a CI Organization Auth Token doesn't.
 _SENTRY_TOKEN_HELP = (
-    "Get one in Sentry: User Settings -> Auth Tokens -> Create New Token, scope 'org:write'.\n"
-    "  (Organization Auth Tokens are CI-scoped and can't create integrations.)"
+    "Get one in Sentry: Settings -> Developer Settings -> Personal Tokens -> Create New "
+    "Token, scope 'org:write'.\n"
+    "  (Not the sibling 'Organization Tokens': those are CI-scoped and can't create "
+    "integrations.)"
 )
 
 
@@ -646,9 +648,10 @@ def _fail_sentry(exc) -> None:  # -> NoReturn
     """Turn a Sentry API error into a clean CLI exit, with scope guidance on a 403."""
     if getattr(exc, "status", None) == 403:
         typer.echo(
-            "error: the token can't create an integration (403). Use a User Auth Token or an\n"
-            "  internal-integration token with 'org:write' — an Organization Auth Token is\n"
-            "  CI-scoped and won't work. Or run `loopy auth sentry --manual`.",
+            "error: the token can't create an integration (403). Use a Personal Token (Settings\n"
+            "  -> Developer Settings -> Personal Tokens) or an internal-integration token with\n"
+            "  'org:write' — the sibling 'Organization Tokens' type is CI-scoped and won't work.\n"
+            "  Or run `loopy auth sentry --manual`.",
             err=True,
         )
     else:
