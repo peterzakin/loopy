@@ -297,7 +297,7 @@ Two other differences from `loopy auth github` remain:
 
 ```
 loopy auth sentry
-  [--webhook-url <url>]            # public base URL; default $SENTRY_PUBLIC_URL, else prompted
+  [--webhook-url <url>]            # override; default: $LOOPY_PUBLIC_URL + /hooks/sentry
   [--org <slug>]                   # default: $SENTRY_ORG, else auto-detected from the token
   [--name loopy]                   # integration name (default: loopy[-org])
   [--sentry-url https://sentry.io] # base URL; override for self-hosted ($SENTRY_URL)
@@ -322,13 +322,19 @@ is a bare `loopy auth sentry`.
 
 ### The hosted URL
 
-Sentry must reach the webhook over **public HTTPS**, and `loopy run` binds `127.0.0.1:8000` —
-so the URL cannot be inferred; the user supplies it. It resolves `--webhook-url` →
-**`$SENTRY_PUBLIC_URL`** → interactive prompt. `SENTRY_PUBLIC_URL` is the project's public base
-URL (the command appends `/hooks/sentry` if the path is absent); putting it in the environment
-or `loopy.env` makes `auth sentry` and a later `--update` fully non-interactive, and fits the
-existing convention of env-carried config (`SENTRY_ORG`, `SENTRY_URL`). Three cases the prompt
-text must handle:
+Sentry must reach the webhook over **public HTTPS**, and `loopy run` binds `127.0.0.1:8000` (its
+internal address, `loopy_runtime/config.py`) — the public URL is a separate fact a tunnel or
+proxy determines, so it can't be computed from the bind host/port.
+
+**This is a loopy-level value, not a Sentry one.** The externally-reachable base of the loopy
+webhook server is the same for every provider — each just appends its own `/hooks/<provider>`
+path (`/hooks/github`, `/hooks/sentry`, ...). So the plan introduces **`LOOPY_PUBLIC_URL`** (a
+sibling of the existing `--host`/`--port`/`REDIS_URL` config in `config.py`), and the Sentry
+webhook URL is *computed* as `${LOOPY_PUBLIC_URL}/hooks/sentry` — not a `SENTRY_`-prefixed
+variable. Resolution order: `--webhook-url` (explicit override, for the rare split-host case) →
+`$LOOPY_PUBLIC_URL` + `/hooks/sentry` → interactive prompt. With `LOOPY_PUBLIC_URL` in
+`loopy.env`, both `auth sentry` and a later `--update` run with no prompt, and every future
+provider's onboarding reuses it for free. Three cases the prompt text must handle:
 
 - **Deployed:** the user knows their host; suggest the shape `https://<host>/hooks/sentry`.
 - **Local dev:** no public URL exists. Reject localhost/http answers with the fix spelled out:
@@ -349,8 +355,8 @@ checks the secret side.
    `GET {sentry_url}/api/0/organizations/{org}/` to confirm it's valid for the org.
 2. Idempotency guard: `SENTRY_WEBHOOK_SECRET` already in `loopy.env` and no `--force` → error
    (mirrors the `GITHUB_APP_ID` guard in `run_github_auth`).
-3. Resolve the webhook URL (`--webhook-url` → `$SENTRY_PUBLIC_URL` → prompt, with the tunnel
-   guidance above).
+3. Resolve the webhook URL (`--webhook-url` → `$LOOPY_PUBLIC_URL` + `/hooks/sentry` → prompt,
+   with the tunnel guidance above).
 4. `POST {sentry_url}/api/0/organizations/{org}/sentry-apps/` with
    `{ name, isInternal: true, webhookUrl, scopes: ["event:read"], events: ["issue"] }`.
    Suffix the name on collision (as `default_app_name` does for GitHub). **On 403, emit the
@@ -386,6 +392,9 @@ securely prompts for a Client Secret from an integration created in the UI, writ
 
 ### Wiring
 
+- Add **`LOOPY_PUBLIC_URL`** as shared, provider-agnostic config in `loopy_runtime/config.py`
+  (alongside `--host`/`--port`/`REDIS_URL`), so it is defined once and every provider's webhook
+  URL is computed from it — this is not Sentry-specific and shouldn't live in the Sentry code.
 - Add a `sentry` command to the existing `auth_app` Typer group in `loopy_cli/auth.py`; defer
   heavy HTTP imports into the body, matching the module's convention.
 - `loopy init`: add `SENTRY_AUTH_TOKEN` to the environment credentials the wizard already
