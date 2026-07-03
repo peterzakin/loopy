@@ -8,12 +8,12 @@ defaults:
     model: claude-sonnet-4-6
     harness: claude-code
 
-# Sandbox — compute + egress. `image:` is the declarative build; `network:` the egress allowlist.
+# Sandbox — compute + egress. `image:` is the declarative build. Egress is open by default;
+# add `network: [...]` to restrict it to an allowlist of hosts.
 sandboxes:
   default:
     provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/daytona, user: daytona }
-    network: [github.com]
     env_file: secrets/base.env   # referenced, gitignored; resolved by the backend at run time
     repos: [acme/runbooks]          # cloned into the workspace at acquire time (auth injected)
 
