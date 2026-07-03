@@ -21,6 +21,7 @@ run/step outputs are *not* redacted, so a non-loopback bind must pass one. `/`, 
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -28,7 +29,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from loopy_runtime.contract import StateStore
-from loopy_runtime.dashboard.auth import AdminAuth
+from loopy_runtime.dashboard.auth import AdminAuth, is_loopback_host
 from loopy_runtime.dashboard.views import (
     VALID_RUN_STATES,
     build_meta,
@@ -97,3 +98,33 @@ def create_app(
     # Mounted last so it doesn't shadow the API routes above.
     app.mount("/static", StaticFiles(directory=_STATIC), name="static")
     return app
+
+
+def mount_admin(
+    parent: FastAPI,
+    store: StateStore,
+    manifest: Manifest | None = None,
+    *,
+    host: str,
+    env: Mapping[str, str],
+) -> str | None:
+    """Mount the dashboard under `/admin` on the engine's webhook server.
+
+    This is what makes the admin URL deterministic across providers: webhooks and dashboard
+    share one hostname and one port, path-routed — deliveries at `$LOOPY_PUBLIC_URL/hooks/*`,
+    the dashboard at `$LOOPY_PUBLIC_URL/admin` — with no reverse proxy or second service.
+
+    Mirrors `loopy admin`'s own bind policy: a loopback bind mounts it open (the dev loop);
+    a non-loopback bind mounts it only when `LOOPY_ADMIN_TOKEN` is configured, and otherwise
+    doesn't mount at all — fail-closed by absence, so the engine still serves webhooks but
+    run data is never exposed openly. Returns a short description of the mount ("open
+    (loopback)" / "bearer auth"), or None when not mounted.
+    """
+    if is_loopback_host(host):
+        auth = None  # loopback is trusted, same as local `loopy admin`
+    else:
+        auth = AdminAuth.from_env(env)
+        if auth is None:
+            return None
+    parent.mount("/admin", create_app(store, manifest, auth=auth))
+    return "open (loopback)" if auth is None else "bearer auth"

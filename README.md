@@ -381,25 +381,28 @@ volume; the one-shot `loopy trigger` path is in-memory and isn't recorded.) The 
 ### Watching a hosted control plane
 
 The loopback dashboard needs no auth. The moment it leaves the box it does: run and step outputs
-are not redacted, so a non-loopback `loopy admin` refuses to start without a bearer token
-(fail-closed), and the same token lets you watch production runs from your laptop without the
-browser ever holding a credential:
+are not redacted, so remote access is bearer-token-gated end to end. The engine serves the
+dashboard itself, path-routed off the one public URL — webhook deliveries at
+`$LOOPY_PUBLIC_URL/hooks/*`, the dashboard at `$LOOPY_PUBLIC_URL/admin` — so there's no second
+service to deploy and the admin endpoint is deterministic on every provider:
 
 ```bash
 # mint one high-entropy token (the loopy_sk_ prefix makes leaks greppable)
 python -c "import secrets; print('loopy_sk_' + secrets.token_urlsafe(32))"
 
-# control plane (co-located with `loopy run`, sharing its durable state DB):
-#   set LOOPY_ADMIN_TOKEN in the platform env, then expose the dashboard
-loopy admin --host 0.0.0.0        # honors $PORT; every /api route requires the bearer
+# control plane: set LOOPY_ADMIN_TOKEN in the platform env. `loopy run` then mounts the
+# dashboard at /admin behind it. Without the token, a non-loopback bind serves webhooks
+# but no /admin at all (fail-closed by absence).
 
-# laptop: put the same token in loopy.env, then run the local client
-loopy admin --remote https://loopy.example.com   # serves the UI, proxies /api with the token
+# laptop: put the same token (and LOOPY_PUBLIC_URL) in loopy.env, then:
+loopy admin --remote              # proxies /api to $LOOPY_PUBLIC_URL/admin with the token
 ```
 
 `--remote` runs a small local proxy: the token stays in that process (read from `loopy.env` or
 the environment — never a query param, cookie, or browser variable), every request crosses as
-`Authorization: Bearer` over TLS, and the server compares it in constant time. Rotation is
+`Authorization: Bearer` over TLS, and the server compares it in constant time. Pass an explicit
+URL (`loopy admin --remote https://…`) to point somewhere other than the derived default, e.g.
+a standalone `loopy admin --host 0.0.0.0` serving a copy of the state DB. Rotation is
 overlap-based: the server also accepts `LOOPY_ADMIN_TOKEN_NEXT`, so you can roll both sides
 without a lockout. Plain HTTP to a non-loopback remote is refused.
 

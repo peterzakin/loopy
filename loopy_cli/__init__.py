@@ -1414,11 +1414,27 @@ def run(
 
         scheduler.register_cron(entry.id, entry.trigger.expr, entry.trigger.tz, _fire)
 
+    # The admin dashboard rides the same server as the webhooks, path-routed: deliveries
+    # at /hooks/*, dashboard at /admin — so one public URL covers both and the admin
+    # endpoint is deterministic ($LOOPY_PUBLIC_URL/admin) on every provider. Open on a
+    # loopback bind; behind LOOPY_ADMIN_TOKEN otherwise; not mounted at all on a
+    # non-loopback bind without a token (fail-closed by absence).
+    from loopy_runtime.dashboard.app import mount_admin
+
+    admin_mounted = mount_admin(sensor_runner.app, state, m, host=cfg.host, env=os.environ)
+
     if sensor_runner.webhook_paths:
         typer.echo(
             f"serving {len(sensor_runner.webhook_paths)} webhook(s) on {cfg.host}:{cfg.port}: "
             f"{', '.join(sensor_runner.webhook_paths)}"
         )
+        if admin_mounted:
+            typer.echo(f"admin dashboard at /admin ({admin_mounted})")
+        else:
+            typer.echo(
+                "note: LOOPY_ADMIN_TOKEN not set — /admin dashboard not mounted on this "
+                "non-loopback bind (set it to watch runs remotely)"
+            )
         # With LOOPY_PUBLIC_URL set (loopy.env, prompted at `loopy init`), print the full
         # delivery URL per sensor — the exact strings to paste into each source's webhook
         # settings. Without it, point at the setting instead of leaving the user to guess
@@ -1429,6 +1445,8 @@ def run(
                 "public delivery URLs: "
                 + ", ".join(f"{public_base}{p}" for p in sensor_runner.webhook_paths)
             )
+            if admin_mounted:
+                typer.echo(f"public admin URL: {public_base}/admin")
         else:
             typer.echo(
                 "note: LOOPY_PUBLIC_URL not set — set it in loopy.env to print each "
@@ -1592,12 +1610,32 @@ def _admin_port(flag: int | None) -> int:
     return 9000
 
 
+def _admin_remote_url(target: str | None) -> str:
+    """Resolve the control-plane URL for `loopy admin --remote`.
+
+    An explicit target wins; bare `--remote` derives the deterministic admin endpoint from
+    `LOOPY_PUBLIC_URL` — the engine mounts the dashboard at `/admin` on the same server that
+    receives webhook deliveries, so one public URL covers both."""
+    if target:
+        return target
+    public = os.environ.get("LOOPY_PUBLIC_URL", "").strip().rstrip("/")
+    if not public:
+        typer.echo(
+            "error: bare --remote derives the URL from LOOPY_PUBLIC_URL, which is not set. "
+            "Set it in the environment or loopy.env, or pass the URL: "
+            "`loopy admin --remote https://loopy.example.com/admin`.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    return f"{public}/admin"
+
+
 @app.command()
 def admin(
-    db: Path | None = typer.Argument(
+    target: str | None = typer.Argument(
         None,
-        help="State DB written by `loopy run` (default .loopy/state.db). "
-        "Not allowed with --remote.",
+        help="State DB written by `loopy run` (default .loopy/state.db) — or, with --remote, "
+        "the control-plane URL (default $LOOPY_PUBLIC_URL/admin).",
     ),
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address."),
     port: int | None = typer.Option(
@@ -1609,11 +1647,12 @@ def admin(
         help="Compiled manifest for the templates/registry/schedules views (default manifest.json; "
         "skipped if absent).",
     ),
-    remote: str | None = typer.Option(
-        None,
+    remote: bool = typer.Option(
+        False,
         "--remote",
-        help="URL of a remote control plane. Serves the UI locally and proxies /api to it, "
-        "authenticating with LOOPY_ADMIN_TOKEN from the environment or loopy.env.",
+        help="View a remote control plane: serve the UI locally and proxy /api to it, "
+        "authenticating with LOOPY_ADMIN_TOKEN from the environment or loopy.env. The URL "
+        "defaults to $LOOPY_PUBLIC_URL/admin (where `loopy run` mounts the dashboard).",
     ),
 ) -> None:
     """Serve the read-only control-plane dashboard.
@@ -1623,13 +1662,14 @@ def admin(
     `loopy admin` in another. When `manifest.json` is present it also powers the
     workflow-template, registry, and schedule views; the run views work without it.
 
-    Remote client (`--remote <url>`): a local proxy that serves the UI and forwards /api to a
+    Remote client (`--remote`): a local proxy that serves the UI and forwards /api to a
     cloud-hosted control plane with a bearer token from LOOPY_ADMIN_TOKEN — the browser never
-    holds the credential.
+    holds the credential. The URL is $LOOPY_PUBLIC_URL/admin unless given explicitly.
 
     Exposed server (`--host 0.0.0.0`, e.g. on the control plane itself): requires
     LOOPY_ADMIN_TOKEN in the environment and puts every /api route behind it; refuses to start
-    without one, because run/step outputs are not redacted.
+    without one, because run/step outputs are not redacted. (`loopy run` also mounts this
+    dashboard at /admin on its own webhook server, under the same rules.)
     """
     import uvicorn
 
@@ -1642,16 +1682,9 @@ def admin(
         os.environ.setdefault(key, value)
     port = _admin_port(port)
 
-    if remote is not None:
+    if remote:
         from loopy_runtime.dashboard.proxy import create_proxy_app, validate_remote_url
 
-        if db is not None:
-            typer.echo(
-                "error: --remote and a local state DB are mutually exclusive — the data "
-                "comes from the remote control plane.",
-                err=True,
-            )
-            raise typer.Exit(code=1)
         if not is_loopback_host(host):
             typer.echo(
                 "error: --remote runs a local proxy that holds the admin token; it binds "
@@ -1660,7 +1693,7 @@ def admin(
             )
             raise typer.Exit(code=1)
         try:
-            url = validate_remote_url(remote)
+            url = validate_remote_url(_admin_remote_url(target))
         except ValueError as exc:
             typer.echo(f"error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
@@ -1700,7 +1733,7 @@ def admin(
             )
             raise typer.Exit(code=1)
 
-    db = db if db is not None else Path(".loopy/state.db")
+    db = Path(target) if target else Path(".loopy/state.db")
     try:
         store = SqliteStateStore(db, read_only=True)  # raises if the DB doesn't exist yet
     except FileNotFoundError as exc:

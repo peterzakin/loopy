@@ -14,7 +14,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from loopy_runtime.dashboard.app import create_app
+from loopy_runtime.dashboard.app import create_app, mount_admin
 from loopy_runtime.dashboard.auth import (
     TOKEN_PREFIX,
     AdminAuth,
@@ -33,7 +33,7 @@ def _clean_env(monkeypatch):
     """Keep the admin env keys out of (and cleaned from) the real process env — the CLI
     command setdefaults values from loopy.env into os.environ, which monkeypatch alone
     would not undo."""
-    keys = ("LOOPY_ADMIN_TOKEN", "LOOPY_ADMIN_TOKEN_NEXT", "PORT")
+    keys = ("LOOPY_ADMIN_TOKEN", "LOOPY_ADMIN_TOKEN_NEXT", "LOOPY_PUBLIC_URL", "PORT")
     for key in keys:
         monkeypatch.delenv(key, raising=False)
     yield
@@ -120,6 +120,38 @@ def test_api_open_without_auth_config():
     assert _client(None).get("/api/runs").status_code == 200
 
 
+# ── /admin mounted on the engine's webhook server ───────────────────────────────────
+def _engine_with_admin(host: str, env: dict) -> tuple[TestClient, str | None]:
+    from fastapi import FastAPI
+
+    parent = FastAPI()  # stands in for the sensor runner's webhook app
+    mounted = mount_admin(parent, InMemoryStateStore(), host=host, env=env)
+    return TestClient(parent), mounted
+
+
+def test_engine_mounts_admin_open_on_loopback():
+    client, mounted = _engine_with_admin("127.0.0.1", {})
+    assert mounted == "open (loopback)"
+    assert client.get("/admin/api/runs").status_code == 200
+    assert client.get("/admin/healthz").json() == {"ok": True}
+
+
+def test_engine_skips_admin_mount_without_token_on_non_loopback():
+    # fail-closed by absence: the engine still serves webhooks, but /admin does not exist
+    client, mounted = _engine_with_admin("0.0.0.0", {})
+    assert mounted is None
+    assert client.get("/admin/api/runs").status_code == 404
+
+
+def test_engine_mounts_admin_behind_bearer_on_non_loopback():
+    client, mounted = _engine_with_admin("0.0.0.0", {"LOOPY_ADMIN_TOKEN": TOKEN})
+    assert mounted == "bearer auth"
+    assert client.get("/admin/api/runs").status_code == 401
+    resp = client.get("/admin/api/runs", headers={"Authorization": f"Bearer {TOKEN}"})
+    assert resp.status_code == 200
+    assert client.get("/admin/healthz").status_code == 200  # probes stay open
+
+
 # ── the fail-closed serve entry (`loopy admin`) ──────────────────────────────────────
 def _invoke(args, monkeypatch, tmp_path):
     from typer.testing import CliRunner
@@ -172,13 +204,39 @@ def test_remote_refuses_without_token(monkeypatch, tmp_path):
     assert "LOOPY_ADMIN_TOKEN" in result.output
 
 
-def test_remote_and_db_are_mutually_exclusive(monkeypatch, tmp_path):
+def test_remote_with_a_db_path_errors_clearly(monkeypatch, tmp_path):
+    # With --remote the positional is the control-plane URL, so a DB path is rejected as
+    # not-a-URL rather than silently proxied to.
     monkeypatch.setenv("LOOPY_ADMIN_TOKEN", TOKEN)
-    result = _invoke(
-        ["admin", "some.db", "--remote", "https://cp.example.com"], monkeypatch, tmp_path
-    )
+    result = _invoke(["admin", "some.db", "--remote"], monkeypatch, tmp_path)
     assert result.exit_code == 1
-    assert "mutually exclusive" in result.output
+    assert "full http(s) URL" in result.output
+
+
+def test_bare_remote_derives_url_from_loopy_public_url(monkeypatch):
+    from loopy_cli import _admin_remote_url
+
+    monkeypatch.setenv("LOOPY_PUBLIC_URL", "https://loopy.example.com/")
+    assert _admin_remote_url(None) == "https://loopy.example.com/admin"
+    # an explicit target always wins over the derivation
+    assert _admin_remote_url("https://other.example.com") == "https://other.example.com"
+
+
+def test_bare_remote_requires_loopy_public_url(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOOPY_ADMIN_TOKEN", TOKEN)
+    result = _invoke(["admin", "--remote"], monkeypatch, tmp_path)
+    assert result.exit_code == 1
+    assert "LOOPY_PUBLIC_URL" in result.output
+
+
+def test_bare_remote_derivation_feeds_the_tls_guard(monkeypatch, tmp_path):
+    # A plain-HTTP LOOPY_PUBLIC_URL is refused, which also proves the bare --remote path
+    # really derived its URL from the env var.
+    monkeypatch.setenv("LOOPY_ADMIN_TOKEN", TOKEN)
+    monkeypatch.setenv("LOOPY_PUBLIC_URL", "http://cp.example.com")
+    result = _invoke(["admin", "--remote"], monkeypatch, tmp_path)
+    assert result.exit_code == 1
+    assert "plain HTTP" in result.output
 
 
 def test_remote_refuses_plain_http_to_the_network(monkeypatch, tmp_path):
@@ -226,6 +284,21 @@ def test_proxy_injects_bearer_and_forwards_query():
     assert resp.status_code == 200
     assert seen["auth"] == f"Bearer {TOKEN}"
     assert seen["url"] == "https://cp.example.com/api/runs?state=failed&limit=5"
+
+
+def test_proxy_forwards_under_a_base_path():
+    # the derived $LOOPY_PUBLIC_URL/admin base: /api/* must land under /admin/api/*
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(200, json={})
+
+    app = create_proxy_app(
+        "https://loopy.example.com/admin", TOKEN, transport=httpx.MockTransport(handler)
+    )
+    assert TestClient(app).get("/api/meta").status_code == 200
+    assert seen["url"] == "https://loopy.example.com/admin/api/meta"
 
 
 def test_proxy_serves_the_ui_shell_locally_and_proxies_static():

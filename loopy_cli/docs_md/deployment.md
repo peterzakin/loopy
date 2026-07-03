@@ -28,6 +28,20 @@ per-provider configuration, not loopy code.
 | Port | `$PORT` (fallback `--port`) | injected | injected | containerPort | flag/env |
 | Persistence | `StateStore` (SQLite file) | persistent disk | volume | PVC | disk |
 
+## One public URL, path-routed
+
+The engine's webhook server carries the dashboard too: deliveries arrive at
+`$LOOPY_PUBLIC_URL/hooks/*` and the dashboard is mounted at `$LOOPY_PUBLIC_URL/admin`. One
+process, one port, one hostname — no reverse proxy, no second service, and the admin
+endpoint is deterministic on every provider. The mount follows the bind:
+
+- **Loopback bind** (the dev loop): `/admin` is open, like local `loopy admin`.
+- **Non-loopback bind with `LOOPY_ADMIN_TOKEN` set:** `/admin` requires
+  `Authorization: Bearer <token>`, verified in constant time before any handler runs.
+  `GET /admin/healthz` stays open — liveness only, no data — for platform probes.
+- **Non-loopback bind without a token:** `/admin` is not mounted at all. Webhooks still
+  serve; run data is never exposed openly (fail-closed by absence).
+
 ## The admin dashboard's three modes
 
 `loopy admin` serves the read-only dashboard. Which mode you get follows from the bind and
@@ -35,25 +49,24 @@ flags — there is no separate "secure" binary:
 
 1. **Local (default).** Binds loopback, no auth, reads `.loopy/state.db` directly. Unchanged
    from the dev loop: `loopy run` in one terminal, `loopy admin` in another.
-2. **Exposed server** (`--host 0.0.0.0`, on the control plane). Requires
-   `LOOPY_ADMIN_TOKEN` in the environment; every `/api/*` route then demands
-   `Authorization: Bearer <token>`, verified in constant time before any handler runs.
-   Run it co-located with `loopy run` against the same durable state DB (SQLite is one
-   writer plus readers on one host). `GET /healthz` stays open — liveness only, no data —
-   for platform probes.
-3. **Remote client** (`--remote <url>`, on your laptop). A local loopback proxy that serves
+2. **Remote client** (`--remote`, on your laptop). A local loopback proxy that serves
    the dashboard UI and forwards `/api/*` (and `/static`) to the control plane, injecting
    the bearer from `LOOPY_ADMIN_TOKEN` (environment or `loopy.env`). The browser never
-   holds the credential. Mutually exclusive with the local DB argument.
+   holds the credential. Bare `--remote` targets `$LOOPY_PUBLIC_URL/admin` (where the
+   engine mounts the dashboard); pass a URL as the positional argument to override.
+3. **Exposed server** (`--host 0.0.0.0`). The standalone flavor of the `/admin` mount, for
+   split deployments where the dashboard runs apart from the engine against the same
+   durable state DB (SQLite is one writer plus readers on one host). Same rules: requires
+   `LOOPY_ADMIN_TOKEN`, refuses to start without it, open `/healthz`.
 
 ```bash
 # mint one token, set it in two places
 python -c "import secrets; print('loopy_sk_' + secrets.token_urlsafe(32))"
 #   control plane: LOOPY_ADMIN_TOKEN in the platform env
-#   laptop:        LOOPY_ADMIN_TOKEN in loopy.env (gitignored, never deployed)
+#   laptop:        LOOPY_ADMIN_TOKEN (+ LOOPY_PUBLIC_URL) in loopy.env (gitignored)
 
-loopy admin --host 0.0.0.0                        # control plane; honors $PORT
-loopy admin --remote https://loopy.example.com    # laptop
+loopy run …                # control plane: webhooks at /hooks/*, dashboard at /admin
+loopy admin --remote       # laptop: proxies /api to $LOOPY_PUBLIC_URL/admin
 ```
 
 ## The auth mechanism and its guardrails
