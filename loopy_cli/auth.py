@@ -648,9 +648,10 @@ def _fail_sentry(exc) -> None:  # -> NoReturn
     """Turn a Sentry API error into a clean CLI exit, with scope guidance on a 403."""
     if getattr(exc, "status", None) == 403:
         typer.echo(
-            "error: the token can't create an integration (403). Use a User Auth Token or an\n"
-            "  internal-integration token with 'org:write' — an Organization Auth Token is\n"
-            "  CI-scoped and won't work. Or run `loopy auth sentry --manual`.",
+            "error: the token can't create an integration (403). Use a Personal Token (Settings\n"
+            "  -> Developer Settings -> Personal Tokens) or an internal-integration token with\n"
+            "  'org:write' — the sibling 'Organization Tokens' type is CI-scoped and won't work.\n"
+            "  Or run `loopy auth sentry --manual`.",
             err=True,
         )
     else:
