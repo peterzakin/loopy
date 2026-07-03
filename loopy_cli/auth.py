@@ -467,8 +467,10 @@ SENTRY_DEFAULT_BASE = "https://sentry.io"
 SENTRY_HOOK_PATH = "/hooks/sentry"
 # The token needs org-write to create an integration; a CI Organization Auth Token doesn't.
 _SENTRY_TOKEN_HELP = (
-    "Get one in Sentry: User Settings -> Auth Tokens -> Create New Token, scope 'org:write'.\n"
-    "  (Organization Auth Tokens are CI-scoped and can't create integrations.)"
+    "Get one in Sentry: Settings -> Developer Settings -> Personal Tokens -> Create New "
+    "Token, scope 'org:write'.\n"
+    "  (Not the sibling 'Organization Tokens': those are CI-scoped and can't create "
+    "integrations.)"
 )
 
 

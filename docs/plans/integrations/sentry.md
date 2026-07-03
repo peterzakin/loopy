@@ -341,10 +341,11 @@ three steps, so the command works for both "already exported" and "first time, n
 
 1. **Environment:** `$SENTRY_AUTH_TOKEN`, if set.
 2. **Prompt:** a hidden-input prompt (`typer.prompt(..., hide_input=True)`).
-3. **Instruct:** the prompt is preceded by exactly where to get one — *Sentry → User Settings →
-   Auth Tokens → Create New Token, with `org:write` (Organization: Read & Write). Not the
-   org-settings "Auth Tokens" page: those are CI-scoped and cannot create integrations.* The
-   specificity matters; the two pages look alike and the wrong one 403s.
+3. **Instruct:** the prompt is preceded by exactly where to get one — *Sentry → Settings →
+   Developer Settings → Personal Tokens → Create New Token, with `org:write` (Organization:
+   Read & Write). Not the sibling "Organization Tokens": those are CI-scoped and cannot create
+   integrations.* The specificity matters; the two token types sit side by side and the wrong
+   one 403s.
 
 `--org` falls back to `$SENTRY_ORG`, then to auto-detection: `GET /api/0/organizations/` with
 the token — one org means use it silently; several means prompt with the list. The common case
