@@ -341,7 +341,7 @@ provider's onboarding reuses it for free. Three cases the prompt text must handl
   run a tunnel (`cloudflared tunnel --url http://127.0.0.1:8000` or `ngrok http 8000`) and give
   Sentry the tunnel URL + `/hooks/sentry`.
 - **It changes later** (tunnel → prod, host move): `loopy auth sentry --update` PUTs the new
-  URL to `/api/0/sentry-apps/{slug}/` using the stored `SENTRY_INTEGRATION_SLUG` — no
+  URL to `/api/0/sentry-apps/{slug}/` using the stored `SENTRY_APP_SLUG` — no
   re-create, secret unchanged.
 
 **Sentry does not validate the URL.** Unlike Slack's challenge handshake, creation succeeds
@@ -361,7 +361,7 @@ checks the secret side.
    `{ name, isInternal: true, webhookUrl, scopes: ["event:read"], events: ["issue"] }`.
    Suffix the name on collision (as `default_app_name` does for GitHub). **On 403, emit the
    scope-caveat message and stop.**
-5. **Immediately** write `SENTRY_WEBHOOK_SECRET` + `SENTRY_INTEGRATION_SLUG` to `loopy.env`
+5. **Immediately** write `SENTRY_WEBHOOK_SECRET` + `SENTRY_APP_SLUG` to `loopy.env`
    (`write_control_plane_env` + `_ensure_gitignored`, reused from `auth.py`) — before any
    verify step. The `clientSecret` appears **only** in this create response and is masked on
    every later read; a crash between create and write would orphan it. If the command ever
