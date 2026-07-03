@@ -1,6 +1,8 @@
 # Design: provision the Loopy engine on AWS from an operator's keys
 
-Status: proposed · Scope: `loopy_cli` (new `deploy aws` command), `loopy_cli/deploy`, docs
+Status: implemented (`loopy_cli/aws.py`, `loopy_cli/deploy/aws-stack.json`,
+`loopy_cli/deploy/aws-userdata.sh`; tests in `tests/test_deploy_aws.py`) ·
+Scope: `loopy_cli` (`deploy aws` command), `loopy_cli/deploy`, docs
 
 ## Problem
 
@@ -77,61 +79,95 @@ The stack, in one region, using the account's default VPC and one public subnet:
   engine reaches the GitHub and Daytona APIs.
 - **`AWS::CloudFront::Distribution`** — the public HTTPS endpoint. Default
   `*.cloudfront.net` viewer cert (no ACM cert, no domain); a custom origin
-  pointing at the Elastic IP over HTTP on `8000`; a cache policy of
-  `CachingDisabled` and an origin-request policy that forwards all viewer headers
-  and methods, so POST webhooks and `X-Hub-Signature-256` pass through untouched.
+  pointing at the EIP's EC2 public DNS name over HTTP on the engine port
+  (CloudFront origins take a DNS name, never a bare IP — every EIP has one, in
+  EC2's fixed `ec2-<ip-dashes>.<zone>.amazonaws.com` scheme); the managed
+  `CachingDisabled` cache policy and `AllViewer` origin-request policy, so POST
+  webhooks and `X-Hub-Signature-256` pass through untouched.
 - **`AWS::EC2::EIP` + `AWS::EC2::EIPAssociation`** — a stable origin address that
-  survives a stop/start (the distribution's origin is pinned to it).
+  survives a stop/start (the distribution's origin is pinned to its DNS name).
 - **`AWS::EC2::Volume` + `AWS::EC2::VolumeAttachment`** — the `/state` data
   volume (default 8 GiB gp3). `DeletionPolicy` is `Delete` by default; the docs
   tell operators to snapshot before teardown if they want the history.
 - **`AWS::IAM::Role` + `AWS::IAM::InstanceProfile`** — an instance role whose
-  only permission is `ssm:GetParameter*` on this stack's parameter path
-  (`/loopy/<stack>/*`) plus `kms:Decrypt` for the SecureString key.
-- **`AWS::SSM::Parameter` (SecureString) x N** — one per secret listed below,
-  including `LOOPY_PUBLIC_URL`, written once the distribution domain is known.
+  permissions are `ssm:GetParameter*` on this stack's parameter path
+  (`/loopy/<stack>/*`), `kms:Decrypt` via the SSM service, `s3:GetObject` on the
+  stack's project tarball, plus `AmazonSSMManagedInstanceCore` so the box is
+  reachable through Session Manager (no SSH port exists).
 - **Outputs** — the distribution's `*.cloudfront.net` domain (the public URL the
-  CLI prints and webhooks target) and the Elastic IP.
+  CLI prints and webhooks target), the Elastic IP, and the instance id.
 
-**User-data responsibilities** (cloud-init, idempotent): install Docker and the
-compose plugin; mount the `/state` volume; pull the SSM parameters and write
-`loopy.env` and the sandbox `env_file`; fetch the project and `manifest.json`
-(from S3 or a git ref supplied by the CLI); and bring up the compose stack pinned
-to this Loopy version (reusing `Dockerfile.pypi`), serving plain HTTP on `:8000`.
-There is no TLS on the instance and no ACME client: CloudFront owns the cert.
+Two pieces live outside the template, both CLI-side, both deliberate:
 
-**A note on the chicken-and-egg.** `LOOPY_PUBLIC_URL` is the distribution's own
-domain, which CloudFormation only knows after the distribution is created. The
-command resolves it from the stack output and writes it to the
-`LOOPY_PUBLIC_URL` SSM parameter, so a first boot that races the distribution
-picks it up on the engine's next start. `Fn::GetAtt DomainName` is available to
-the template itself, so the parameter can also be set in-stack without a second
-pass.
+- **Secrets are `put_parameter` calls, not template resources.** CloudFormation
+  cannot create `SecureString` parameters, and routing secret values through the
+  template body would put them in the CloudFormation console anyway. The CLI
+  pushes each env file (`loopy.env`, every sandbox `env_file`) verbatim as one
+  SecureString at `/loopy/<stack>/files/<relpath>` (Intelligent-Tiering, so a
+  file past 4 KB — the GitHub App key case — still fits), and `--destroy` deletes
+  the path before deleting the stack.
+- **The project travels via a small deploy bucket.** User-data needs the project
+  (manifest + sensors) before any stack resource can carry it, so the CLI ensures
+  `loopy-deploy-<account>-<region>` (private, public access blocked), uploads the
+  tarball (secret env files excluded — they ride SSM), and the instance role reads
+  exactly that key. The bucket is kept on `--destroy`: it is a few kilobytes and
+  reused by the next deploy.
 
-## The `loopy deploy aws` command (shape)
+**User-data responsibilities** (`loopy_cli/deploy/aws-userdata.sh`, rendered by
+the CLI, run once by cloud-init): install Docker; wait for, format-if-blank, and
+mount the `/state` volume; fetch the project tarball from S3; pull each env file
+back from SSM to its project-relative path; poll SSM for the public URL (see
+below) and append `LOOPY_PUBLIC_URL` to `loopy.env`; build the engine image from
+the pinned PyPI release (the `Dockerfile.pypi` recipe, no source checkout); and
+run the same collapsed topology as the bundled compose file with plain
+`docker run` — a `redis:7-alpine` container (append-only, `/state/redis`) and the
+engine (`--in-process --bus redis --state sqlite --state-path /state/state.db`,
+project mounted read-only), both `--restart unless-stopped` so a reboot recovers
+the stack. There is no TLS on the instance and no ACME client: CloudFront owns
+the cert.
+
+**Two passes, because CloudFront origins need a DNS name.** The origin is the
+EIP's public DNS, which only exists once the address does — and a template
+cannot string-transform an IP into that name. So every deploy applies the stack
+twice with the same body: pass 1 with `OriginDomain=""` (a template condition
+gates the distribution off), pass 2 with the computed name, which creates the
+distribution on first deploy and is a no-op update after that (the distribution
+and its URL are stable). The command then writes `https://<domain>` to the
+`/loopy/<stack>/public-url` SSM parameter; a first boot that races the
+distribution polls for it, and starts the engine regardless after a timeout —
+the URL only gates printing delivery URLs, not serving.
+
+## The `loopy deploy aws` command
 
 - **Inputs:** `--region`, `--profile` (or the standard AWS env vars, resolved by
-  boto3's default chain), `--instance-type` (default `t3.small`),
-  `--state-size-gb` (default 8), and the secret set (read from the project's
-  `loopy.env` and sandbox `env_file`, or prompted, then written to SSM). No
-  `--domain`: the operator brings none.
-- **Create/update:** package the project, put the secrets to SSM, then
-  `create_stack` (or `update_stack` if the stack exists), waiting on the stack
-  event stream and surfacing failures.
-- **After apply:** read the distribution domain from the stack output, ensure the
-  `LOOPY_PUBLIC_URL` parameter holds `https://<domain>`, and print that URL to
-  register webhooks against. Note that a fresh CloudFront distribution takes a few
-  minutes to deploy globally before the URL answers.
-- **`--destroy`:** `delete_stack`, with a reminder to snapshot `/state` first.
+  boto3's default chain), `--stack` (default `loopy-engine` — the idempotency
+  key), `--instance-type` (default `t3.small`), `--state-size-gb` (default 8),
+  `--port` (default 8000), and the manifest/`--root` pair `loopy run` takes
+  (compile-on-demand included). The secret set is read from the project's
+  `loopy.env` and sandbox `env_file`s and written to SSM. No `--domain`: the
+  operator brings none.
+- **Create/update:** preflight (`manifest` under root, `loopy.env` present),
+  push secrets, upload the tarball, then `create_stack` or `update_stack` with
+  waiters; on failure the first failed-resource reasons from the event stream
+  are surfaced (a failed first create rolls back and deletes itself).
+- **After apply:** print the `https://<id>.cloudfront.net` URL, the origin IP,
+  and the follow-ups (`loopy webhooks github`, `loopy admin --remote`). A fresh
+  distribution takes a few minutes to deploy globally before the URL answers.
+- **`--destroy`:** delete the `/loopy/<stack>/*` parameters, then `delete_stack`
+  and wait, with a reminder that `/state` (run history) goes with it.
 
 ## IAM the operator's provisioning identity needs
 
 The credentials passed to `loopy deploy aws` (a deploy user, not the instance
 role) need: CloudFormation (`cloudformation:*Stack*`), EC2 (instance, security
-group, EIP, volume, and their describes), CloudFront (create/update/delete the
-distribution), IAM (create/pass the instance role and profile), and SSM
-(`ssm:PutParameter` / `DeleteParameter` on `/loopy/<stack>/*`). Documenting this
-lets an operator scope a least-privilege deploy user rather than using root keys.
+group, EIP, volume, their describes, and `DescribeManagedPrefixLists` for the
+CloudFront prefix-list lookup), CloudFront (create/update/delete the
+distribution), IAM (create/pass the instance role and profile), SSM
+(`ssm:PutParameter` / `GetParametersByPath` / `DeleteParameters` on
+`/loopy/<stack>/*`), S3 on the deploy bucket (`CreateBucket` / `HeadBucket` /
+`PutObject` on `loopy-deploy-<account>-<region>`), and `sts:GetCallerIdentity`.
+Documenting this lets an operator scope a least-privilege deploy user rather
+than using root keys.
 
 ## Reuse
 

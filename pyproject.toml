@@ -37,6 +37,10 @@ loopy = "loopy_cli:app"
 redis = [
     "redis>=5.0",
 ]
+# `loopy deploy aws` — provisions the engine's hosting stack via CloudFormation.
+aws = [
+    "boto3>=1.34",
+]
 
 [dependency-groups]
 dev = [
