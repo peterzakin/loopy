@@ -34,17 +34,28 @@ below are chosen so that later generalization is additive, not a rewrite.
 
 ## Events (contract)
 
-Ship two solid events in v1; discriminate purely on the **body** (no header plumbing needed),
-mirroring how the GitHub mappers key off which object is present.
+Three events, discriminated purely on the **body** (no header plumbing needed), mirroring how
+the GitHub mappers key off which object is present.
 
 - `Sentry.IssueCreated` — `data.issue` present, `action == "created"`. The flagship: a new
   issue appears → triage/fix.
 - `Sentry.IssueResolved` — `data.issue` present, `action == "resolved"`. Closes the loop /
   confirm step.
+- `Sentry.AlertTriggered` — `data.event` present, `action == "triggered"`: an issue-alert rule
+  (`event_alert`) fired. Fields come from the error event (`issue_id`, `title`, `culprit`,
+  `level`, `url`) plus `rule` (the rule that fired — the value that distinguishes an alert from
+  a plain new issue). `project` is omitted here: the event payload carries a numeric project id,
+  not the slug the issue events expose, so a same-named field would mean two different things.
 
-`Sentry.AlertTriggered` (issue-alert `event_alert` / `metric_alert`) is a **documented
-follow-on within this same plan**, deferred only because its payload fields need validation
-against a live alert delivery; adding it is a contract + mapper entry, no framework change.
+> **Payload provenance.** The `event_alert` shape is reconciled from Sentry's webhook docs, not
+> a live capture (docs.sentry.io blocks automated fetches). The mapper reads defensively
+> (`.get` chains, `triggered_rule`/`triggering_rules` fallback, `web_url`→`url` fallback) and
+> the test pins a docs-derived fixture; reconcile against a real delivery if a field drifts.
+
+**Deferred: `Sentry.MetricAlert`** (`metric_alert` resource — a threshold crossing). It's a
+genuinely different payload (no single error event; `action` is `critical`/`warning`/`resolved`)
+and needs the paid Performance features, so it's a *separate* future event rather than folded
+into `AlertTriggered`. Adding it is a contract + mapper entry, no framework change.
 
 ## Minimal generalization (the GitHub-only bits Sentry must touch)
 
@@ -123,6 +134,11 @@ SENTRY_EVENTS: dict[str, dict[str, str]] = {
     "Sentry.IssueResolved": {         # data.issue present, action == "resolved"
         "issue_id": "str", "title": "str", "project": "str", "url": "url",
     },
+    "Sentry.AlertTriggered": {        # data.event present, action == "triggered"
+        "issue_id": "str", "title": "str", "culprit": "str",
+        "level": "enum[debug, info, warning, error, fatal]",
+        "rule": "str", "url": "url",  # no project: the event carries a numeric id, not a slug
+    },
 }
 ```
 
@@ -153,7 +169,19 @@ def _issue_resolved(body):
             "project": (d.get("project") or {}).get("slug", ""),
             "url": d.get("web_url") or d.get("url", "")}
 
-MAPPERS = {"Sentry.IssueCreated": _issue_created, "Sentry.IssueResolved": _issue_resolved}
+def _alert_triggered(body):  # event_alert: an issue-alert rule fired
+    data = body.get("data") or {}
+    event = data.get("event")
+    if body.get("action") != "triggered" or not event:
+        return None
+    return {"issue_id": str(event.get("issue_id") or event.get("groupID") or ""),
+            "title": event.get("title") or "", "culprit": event.get("culprit") or "",
+            "level": event.get("level") or "error",
+            "rule": data.get("triggered_rule") or "",  # + triggering_rules[] fallback
+            "url": event.get("web_url") or event.get("url", "")}
+
+MAPPERS = {"Sentry.IssueCreated": _issue_created, "Sentry.IssueResolved": _issue_resolved,
+           "Sentry.AlertTriggered": _alert_triggered}
 ```
 
 > Field paths (`data.issue.web_url`, `level`, `culprit`, `project.slug`) vary by payload

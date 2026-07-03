@@ -225,9 +225,9 @@ triggered by a `poll` or a `webhook`.
 > `on: Sentry.IssueCreated`) with no `registry.yml` entry and no `sensors/` file; the compiler
 > injects the contract and a `/hooks/<provider>` sensor for you. Catalog:
 > `Github.PullRequestOpened`, `PullRequestMerged`, `IssueOpened`, `IssueCommentCreated`,
-> `Push`; `Sentry.IssueCreated`, `IssueResolved`. The `Github.` and `Sentry.` namespaces are
-> reserved. See [`examples/github/`](examples/github/). Write your own `@sensor` (below) for
-> any source the built-ins don't cover.
+> `Push`; `Sentry.IssueCreated`, `IssueResolved`, `AlertTriggered`. The `Github.` and
+> `Sentry.` namespaces are reserved. See [`examples/github/`](examples/github/). Write your
+> own `@sensor` (below) for any source the built-ins don't cover.
 
 > **Both `poll` and `webhook` are supported.** `loopy run` hosts each `@sensor(webhook=...)` as an
 > HTTP route and fans one path out to every sensor on it (GitHub posts every event type to a single

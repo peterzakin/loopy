@@ -57,6 +57,33 @@ def issue_payload(action: str) -> dict:
     }
 
 
+def event_alert_payload() -> dict:
+    """A representative `event_alert` delivery (an issue-alert rule firing).
+
+    Shape reconciled from Sentry's webhook docs; `data.event` is a full error event and
+    `data.triggered_rule` names the rule. Reconcile field paths against a live delivery if
+    Sentry's payload drifts (the mapper reads defensively, so extras are ignored)."""
+    return {
+        "action": "triggered",
+        "installation": {"uuid": "a0d64dfe-0000-0000-0000-000000000000"},
+        "data": {
+            "event": {
+                "event_id": "0b3b0adc94f74b1b9bde9d3f9b2b0f6e",
+                "issue_id": "1170820242",
+                "project": 1,  # a numeric id here, not a slug — why the contract omits project
+                "title": "ReferenceError: widget is not defined",
+                "culprit": "app/views.py in get_widgets",
+                "level": "error",
+                "web_url": "https://sentry.io/organizations/acme/issues/1170820242/events/0b3b/",
+                "url": "https://sentry.io/api/0/projects/acme/backend/events/0b3b/",
+                "issue_url": "https://sentry.io/api/0/organizations/acme/issues/1170820242/",
+            },
+            "triggered_rule": "High error rate",
+        },
+        "actor": {"type": "application", "id": "sentry", "name": "Sentry"},
+    }
+
+
 # ── compile-time injection ──────────────────────────────────────────────────
 
 
@@ -156,15 +183,38 @@ def test_issue_resolved_maps_exactly_its_contract_fields():
     assert fields["issue_id"] == "1170820242"
 
 
+def test_alert_triggered_maps_exactly_its_contract_fields():
+    fields = MAPPERS["Sentry.AlertTriggered"](event_alert_payload())
+    assert fields is not None
+    assert set(fields) == set(SENTRY_EVENTS["Sentry.AlertTriggered"])
+    assert fields["issue_id"] == "1170820242"
+    assert fields["title"] == "ReferenceError: widget is not defined"
+    assert fields["level"] == "error"
+    assert fields["rule"] == "High error rate"
+    assert fields["url"].endswith("/events/0b3b/")
+
+
+def test_alert_rule_falls_back_to_legacy_triggering_rules():
+    """Older payloads carry `triggering_rules` (a list) instead of `triggered_rule`."""
+    payload = event_alert_payload()
+    del payload["data"]["triggered_rule"]
+    payload["data"]["triggering_rules"] = ["Legacy rule"]
+    assert MAPPERS["Sentry.AlertTriggered"](payload)["rule"] == "Legacy rule"
+
+
 def test_mappers_ignore_unrelated_deliveries():
     """Each mapper returns None for a delivery that isn't its concern (the fan-out contract)."""
     # The other event's action.
     assert MAPPERS["Sentry.IssueCreated"](issue_payload("resolved")) is None
     assert MAPPERS["Sentry.IssueResolved"](issue_payload("created")) is None
-    # A non-issue delivery (e.g. an installation event) carries no data.issue.
+    # An issue delivery is not an alert (no data.event); an alert is not an issue.
+    assert MAPPERS["Sentry.AlertTriggered"](issue_payload("created")) is None
+    assert MAPPERS["Sentry.IssueCreated"](event_alert_payload()) is None
+    assert MAPPERS["Sentry.IssueResolved"](event_alert_payload()) is None
+    # A non-issue, non-alert delivery (e.g. an installation event).
     installation = {"action": "created", "data": {"installation": {"uuid": "x"}}}
     assert MAPPERS["Sentry.IssueCreated"](installation) is None
-    assert MAPPERS["Sentry.IssueResolved"](installation) is None
+    assert MAPPERS["Sentry.AlertTriggered"](installation) is None
 
 
 def test_null_permalink_falls_back_to_empty_url():

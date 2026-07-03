@@ -89,7 +89,10 @@ GITHUB_EVENTS: dict[str, dict[str, str]] = {
 
 
 # event name -> {field: terse type}. Kept in lockstep with the Sentry MAPPERS (runtime).
-# Both events map Sentry's `issue` resource webhook, discriminated by the body's `action`.
+# IssueCreated/Resolved map the `issue` resource; AlertTriggered maps the `event_alert`
+# resource (an issue-alert rule firing). All three discriminate on the body alone. A
+# future `Sentry.MetricAlert` would map the `metric_alert` resource — a different payload
+# shape, so a separate event rather than folding it into AlertTriggered.
 SENTRY_EVENTS: dict[str, dict[str, str]] = {
     "Sentry.IssueCreated": {
         "issue_id": "str",
@@ -104,6 +107,19 @@ SENTRY_EVENTS: dict[str, dict[str, str]] = {
         "title": "str",
         "project": "str",  # project slug
         "url": "url",  # permalink to the issue ("" when Sentry omits it)
+    },
+    # An issue-alert rule fired (`Sentry-Hook-Resource: event_alert`, action "triggered").
+    # Fields come from `data.event` (a full error event); `rule` is the alert that fired,
+    # the value that distinguishes an alert from a plain new issue. `project` is omitted:
+    # the event payload carries a numeric project id, not the slug the issue events expose,
+    # and a same-named field with a different meaning would be a trap.
+    "Sentry.AlertTriggered": {
+        "issue_id": "str",
+        "title": "str",
+        "culprit": "str",
+        "level": "enum[debug, info, warning, error, fatal]",
+        "rule": "str",  # name of the alert rule that fired ("" if Sentry omits it)
+        "url": "url",  # permalink to the event/issue ("" when Sentry omits it)
     },
 }
 
