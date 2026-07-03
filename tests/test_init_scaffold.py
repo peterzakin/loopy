@@ -228,6 +228,7 @@ def test_init_wizard_step_order(tmp_path, monkeypatch):
         loopy_cli, "offer_github_webhooks", lambda target: calls.append("webhooks")
     )
     # Keep the rest of the interactive wizard quiet.
+    monkeypatch.setattr(loopy_cli, "_write_admin_token", lambda target: None)
     monkeypatch.setattr(loopy_cli, "_offer_ambient_anthropic_key", lambda target: None)
     monkeypatch.setattr(loopy_cli, "_offer_ambient_daytona_creds", lambda target: None)
     monkeypatch.setattr(loopy_cli, "_offer_redis_bus", lambda target: None)
@@ -497,6 +498,40 @@ def test_redis_offer_does_not_clobber_existing(tmp_path, monkeypatch):
     loopy_cli._offer_redis_bus(target)
 
     assert load_control_plane_env(target)["REDIS_URL"] == "redis://existing:6379"
+
+
+def test_admin_token_minted_into_loopy_env(tmp_path):
+    """`init` mints a LOOPY_ADMIN_TOKEN with no prompt (it's pure entropy) and records it in
+    loopy.env, replacing the scaffold's commented stub in place so no misleading stub lingers."""
+    from loopy_runtime.dashboard.auth import TOKEN_PREFIX
+    from loopy_runtime.secrets import ADMIN_TOKEN_ENV
+
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo", repos=["me/app"])
+    # The scaffold ships the token commented out (a plain scaffold has no active token).
+    assert "# LOOPY_ADMIN_TOKEN=" in (target / "loopy.env").read_text()
+    assert ADMIN_TOKEN_ENV not in load_control_plane_env(target)
+
+    loopy_cli._write_admin_token(target)
+
+    token = load_control_plane_env(target)[ADMIN_TOKEN_ENV]
+    assert token.startswith(TOKEN_PREFIX) and len(token) > len(TOKEN_PREFIX)
+    # The commented stub was replaced in place, not left lingering above the real value.
+    assert "# LOOPY_ADMIN_TOKEN=" not in (target / "loopy.env").read_text()
+
+
+def test_admin_token_does_not_clobber_existing(tmp_path):
+    """A token already in loopy.env (e.g. re-init over a live deployment) is left untouched —
+    re-minting would rotate the running control plane's token out from under it."""
+    from loopy_runtime.secrets import ADMIN_TOKEN_ENV, write_control_plane_env
+
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo", repos=["me/app"])
+    write_control_plane_env(target, {ADMIN_TOKEN_ENV: "loopy_sk_alreadyset"})
+
+    loopy_cli._write_admin_token(target)
+
+    assert load_control_plane_env(target)[ADMIN_TOKEN_ENV] == "loopy_sk_alreadyset"
 
 
 def test_public_url_offer_writes_url_when_provided(tmp_path, monkeypatch):

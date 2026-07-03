@@ -199,6 +199,14 @@ _LOOPY_ENV = """\
 # built-in GitHub sensor: <base>/hooks/github); `loopy run` prints the full delivery URLs at
 # startup. Leave unset if nothing external delivers webhooks yet.
 # LOOPY_PUBLIC_URL=
+
+# --- Admin dashboard bearer token ---
+# `loopy init` mints one for you and writes it here (uncommented, below). It gates the /admin
+# dashboard on any non-loopback bind — `loopy admin` and `loopy run` refuse to expose run data
+# openly without it. Local (loopback) dev ignores it. When you deploy, copy this exact value
+# into the platform environment (Fly/Render/Railway secrets) so the server and your `loopy
+# admin --remote` client share the same token. Rotate via LOOPY_ADMIN_TOKEN_NEXT.
+# LOOPY_ADMIN_TOKEN=
 """
 
 _GITIGNORE = """\

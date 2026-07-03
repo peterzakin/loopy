@@ -389,14 +389,14 @@ dashboard itself, path-routed off the one public URL — webhook deliveries at
 service to deploy and the admin endpoint is deterministic on every provider:
 
 ```bash
-# mint one high-entropy token (the loopy_sk_ prefix makes leaks greppable)
-python -c "import secrets; print('loopy_sk_' + secrets.token_urlsafe(32))"
+# `loopy init` already minted LOOPY_ADMIN_TOKEN into loopy.env (the loopy_sk_ prefix makes
+# leaks greppable). One value, used in two places:
 
-# control plane: set LOOPY_ADMIN_TOKEN in the platform env. `loopy run` then mounts the
-# dashboard at /admin behind it. Without the token, a non-loopback bind serves webhooks
-# but no /admin at all (fail-closed by absence).
+# control plane: copy that value into LOOPY_ADMIN_TOKEN in the platform env. `loopy run` then
+# mounts the dashboard at /admin behind it. Without the token, a non-loopback bind serves
+# webhooks but no /admin at all (fail-closed by absence).
 
-# laptop: put the same token (and LOOPY_PUBLIC_URL) in loopy.env, then:
+# laptop: the token (and LOOPY_PUBLIC_URL) are already in loopy.env, then:
 loopy admin --remote              # proxies /api to $LOOPY_PUBLIC_URL/admin with the token
 ```
 

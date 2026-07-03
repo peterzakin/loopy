@@ -60,10 +60,10 @@ flags — there is no separate "secure" binary:
    `LOOPY_ADMIN_TOKEN`, refuses to start without it, open `/healthz`.
 
 ```bash
-# mint one token, set it in two places
-python -c "import secrets; print('loopy_sk_' + secrets.token_urlsafe(32))"
-#   control plane: LOOPY_ADMIN_TOKEN in the platform env
-#   laptop:        LOOPY_ADMIN_TOKEN (+ LOOPY_PUBLIC_URL) in loopy.env (gitignored)
+# `loopy init` already minted LOOPY_ADMIN_TOKEN into loopy.env (gitignored) — one value,
+# set it in two places:
+#   control plane: copy that value into LOOPY_ADMIN_TOKEN in the platform env
+#   laptop:        LOOPY_ADMIN_TOKEN (+ LOOPY_PUBLIC_URL) already in loopy.env
 
 loopy run …                # control plane: webhooks at /hooks/*, dashboard at /admin
 loopy admin --remote       # laptop: proxies /api to $LOOPY_PUBLIC_URL/admin
