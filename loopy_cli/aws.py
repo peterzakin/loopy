@@ -19,8 +19,8 @@ and pulled back to the same project-relative path by user-data on the instance â
 CLI-side `put_parameter`, because CloudFormation cannot create SecureStrings. The
 project itself (minus those files) travels as a tarball via a small deploy bucket.
 
-boto3 is an optional extra (`pip install "loopy-computer[aws]"`), imported lazily so
-the rest of the CLI never loads it.
+boto3 is a core dependency (like the Daytona SDK), imported lazily inside the
+command body so `loopy compile` and the rest of the CLI never load it.
 """
 
 from __future__ import annotations
@@ -53,13 +53,13 @@ TARBALL_EXCLUDE_DIRS = {".git", ".loopy", "__pycache__"}
 
 
 def _require_boto3():
-    """Import boto3 lazily with an actionable message (mirrors the Daytona provider)."""
+    """Import boto3 lazily (a core dep, so only a broken install fails here)."""
     try:
         import boto3
-    except ImportError as exc:
+    except ImportError as exc:  # pragma: no cover - core dep; only a broken install hits
         raise RuntimeError(
-            "boto3 is required for `loopy deploy aws`; install it with "
-            'pip install "loopy-computer[aws]"'
+            "boto3 failed to import; it ships as a core dependency of loopy-computer â€” "
+            "reinstall with `pip install loopy-computer`"
         ) from exc
     return boto3
 

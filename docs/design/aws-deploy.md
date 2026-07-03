@@ -38,9 +38,10 @@ Three constraints frame the design:
    `delete_stack` through boto3. The stack name (derived from the project, e.g.
    `loopy-engine-<project>`) is the idempotency key: a first run creates, a
    re-run updates, and a bad template rolls back on its own. Teardown is one
-   `delete_stack`. This adds `boto3` as an optional extra (`loopy-computer[aws]`),
-   asks nothing of the operator beyond AWS credentials, and needs no external
-   binary (unlike Terraform or CDK).
+   `delete_stack`. `boto3` is a core dependency (like the Daytona SDK, imported
+   lazily so `loopy compile` stays runtime-free), so the command asks nothing of
+   the operator beyond AWS credentials and needs no external binary (unlike
+   Terraform or CDK).
 
 2. **Single EC2 + the bundled compose stack, behind CloudFront for the cert.**
    The instance runs the same `redis` + `loopy` compose stack the CLI already

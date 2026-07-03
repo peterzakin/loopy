@@ -888,6 +888,7 @@ name = "loopy-computer"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "boto3" },
     { name = "croniter" },
     { name = "datamodel-code-generator" },
     { name = "daytona" },
@@ -904,9 +905,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-aws = [
-    { name = "boto3" },
-]
 redis = [
     { name = "redis" },
 ]
@@ -920,7 +918,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "boto3", marker = "extra == 'aws'", specifier = ">=1.34" },
+    { name = "boto3", specifier = ">=1.34" },
     { name = "croniter", specifier = ">=2.0" },
     { name = "datamodel-code-generator", specifier = ">=0.25" },
     { name = "daytona", specifier = ">=0.180" },
@@ -936,7 +934,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
     { name = "uvicorn", specifier = ">=0.29" },
 ]
-provides-extras = ["redis", "aws"]
+provides-extras = ["redis"]
 
 [package.metadata.requires-dev]
 dev = [

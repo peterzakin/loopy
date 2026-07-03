@@ -259,8 +259,9 @@ def test_apply_stack_surfaces_other_update_errors():
 # ── CLI wiring ───────────────────────────────────────────────────────────────────────
 
 
-def test_deploy_aws_help_needs_no_boto3():
-    """Registration is weightless: help renders without the optional [aws] extra."""
+def test_deploy_aws_help_does_not_touch_boto3():
+    """Registration is weightless: help renders without importing/using boto3
+    (it's a core dep but imported lazily inside the command body)."""
     result = runner.invoke(app, ["deploy", "aws", "--help"])
     assert result.exit_code == 0
     assert "CloudFront" in result.output
