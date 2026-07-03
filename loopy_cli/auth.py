@@ -474,11 +474,14 @@ def _project_env(root: str | Path) -> dict[str, str]:
 def _sentry_webhook_url(flag: str | None, env: dict[str, str]) -> str:
     """Resolve the public webhook URL: --webhook-url -> $LOOPY_PUBLIC_URL -> prompt.
 
-    A bare base (no path) gets `/hooks/sentry` appended; Sentry must reach it over public
-    HTTPS, so a localhost/non-https answer is rejected with tunnel guidance."""
+    The public base is shared, provider-agnostic config (`loopy_runtime.config`); here we
+    just append `/hooks/sentry` and check it's reachable. Sentry must reach it over public
+    HTTPS, so a localhost/non-https answer is warned about (not fatal — the user may tunnel)."""
     import urllib.parse
 
-    base = flag or env.get("LOOPY_PUBLIC_URL")
+    from loopy_runtime import config
+
+    base = config.resolve_public_url(flag, env=env)
     if not base:
         typer.echo(
             "\n  Sentry delivers webhooks to a public HTTPS URL. In local dev, expose "
@@ -493,9 +496,7 @@ def _sentry_webhook_url(flag: str | None, env: dict[str, str]) -> str:
             typer.style("  warning:", fg=typer.colors.YELLOW)
             + f" {base} isn't public HTTPS; Sentry won't reach it until you tunnel/deploy."
         )
-    if parts.path.rstrip("/") == "":
-        base = urllib.parse.urlunsplit(parts._replace(path=SENTRY_HOOK_PATH))
-    return base
+    return config.hook_url(base, SENTRY_HOOK_PATH)
 
 
 def _resolve_sentry_org(token: str, org: str | None, base_url: str, env: dict[str, str]) -> str:

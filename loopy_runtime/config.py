@@ -17,6 +17,8 @@ single-process bus.
 from __future__ import annotations
 
 import os
+import urllib.parse
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from loopy_runtime.bus.factory import VALID_BUS  # single source of truth for bus names
@@ -100,3 +102,38 @@ def resolve_redis_url(flag: str | None) -> str:
     over both.
     """
     return flag or os.environ.get("REDIS_URL") or DEFAULT_REDIS_URL
+
+
+# The public, externally-reachable base URL of the loopy webhook server — the outward
+# counterpart to the internal `--host`/`--port` bind address. It is provider-agnostic: every
+# built-in provider's ingress hangs off it (`<public>/hooks/github`, `<public>/hooks/sentry`,
+# …), so it lives here as shared config rather than in any one provider's onboarding. Set via
+# `LOOPY_PUBLIC_URL` (a tunnel URL in dev, the deployed host in prod); there's no default,
+# since a public URL can't be inferred from the bind address a proxy sits in front of.
+PUBLIC_URL_ENV = "LOOPY_PUBLIC_URL"
+
+
+def resolve_public_url(
+    flag: str | None = None, *, env: Mapping[str, str] | None = None
+) -> str | None:
+    """Resolve the public base URL: explicit `flag` > `LOOPY_PUBLIC_URL` > None.
+
+    `env` defaults to the process environment; callers with a merged `loopy.env` view (e.g. the
+    auth flow) pass it so a value stored in `loopy.env` is honored. Returns None when unset —
+    the caller decides whether to prompt or error.
+    """
+    source = env if env is not None else os.environ
+    return flag or source.get(PUBLIC_URL_ENV)
+
+
+def hook_url(base: str, path: str) -> str:
+    """Compose a provider's webhook URL from the public base and a `/hooks/<provider>` path.
+
+    A bare base (no path, or just `/`) gets `path` appended; a base that already carries a path
+    is returned unchanged, so a caller may pass a full `.../hooks/sentry` URL as an override.
+    Does not validate the scheme/host — that's the caller's concern (it may want to prompt).
+    """
+    parts = urllib.parse.urlsplit(base)
+    if parts.path.rstrip("/") == "":
+        return urllib.parse.urlunsplit(parts._replace(path=path))
+    return base

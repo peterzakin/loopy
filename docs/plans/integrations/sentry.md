@@ -427,12 +427,18 @@ Done in this change:
 - The `sentry` command is added to the `auth_app` Typer group in `loopy_cli/auth.py`, with
   heavy HTTP imports deferred into the body per the module's convention; `run_sentry_auth` is
   the plain-function core (callable in-process, like `run_github_auth`).
-- `LOOPY_PUBLIC_URL` is read here to compute the webhook URL. (It is consumed as an env var
-  today; promoting it to a first-class field in `loopy_runtime/config.py` alongside
-  `--host`/`--port`/`REDIS_URL` is a small follow-up, since only `auth sentry` reads it so far.)
+- `LOOPY_PUBLIC_URL` lives in `loopy_runtime/config.py` as shared, provider-agnostic config
+  (`resolve_public_url` + a `hook_url(base, path)` composer), alongside `--host`/`--port`/
+  `REDIS_URL`. It is the public counterpart to the internal bind address, and every provider's
+  ingress hangs off it (`<public>/hooks/github`, `<public>/hooks/sentry`), so it is *not*
+  Sentry-specific. `auth sentry` consumes it today; the GitHub webhook-URL step (below) is its
+  next consumer.
 
 Still open (small follow-ups, not blocking the command):
 
+- `loopy auth github`: now that `LOOPY_PUBLIC_URL` is shared config, have the GitHub flow print
+  (or register) its webhook URL via `config.hook_url(public, "/hooks/github")` so the user
+  isn't left to hand-construct it — the second consumer that motivated hoisting the value.
 - `loopy init`: detect `SENTRY_AUTH_TOKEN` / `LOOPY_PUBLIC_URL` in the environment (alongside
   `ANTHROPIC_API_KEY` / `DAYTONA_API_KEY`) and offer to run `auth sentry` when a workflow
   triggers on `Sentry.*`.
