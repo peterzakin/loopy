@@ -1,0 +1,37 @@
+# dep-upkeep — a scheduled maintenance loop. Every night, one agent looks for outdated or
+# vulnerable dependencies and opens a single pull request that bumps them.
+#
+#   cron("0 3 * * *")  ─▶  dep-upkeep/bump  (Upkeeper)  ─▶  DepsBumped
+#                          finds outdated deps · edits manifests · opens a PR
+#
+# Like `standup`, the trigger is the clock (a built-in `cron(...)` schedule, no sensor). Unlike
+# it, this one WRITES: the agent edits the repo and pushes a branch, so the sandbox needs git
+# write access (a GitHub App via `loopy auth github`, or a token with contents+pull_requests).
+
+# Defaults — every agent inherits these; override a field only when needed.
+defaults:
+  agent:
+    sandbox: BaseSandbox
+    model: claude-sonnet-4-6
+    harness: claude-code
+
+# Sandbox — compute + egress. `gh` is on PATH so the agent can open the PR via the injected
+# token; egress is limited to github.com + the model API.
+sandboxes:
+  BaseSandbox:
+    provider: daytona
+    image: { debian_slim: "3.12", apt: [git, gh], workdir: /home/loopy, user: loopy }
+    network: [github.com, api.anthropic.com]
+    env_file: secrets/base.env          # gitignored; resolved by the backend at run time
+    repos: [octocat/Hello-World]       # cloned into the workspace at acquire time (auth injected)
+
+# Agents — capability comes from the sandbox + the injected GitHub token + budget.
+agents:
+  Upkeeper: {}   # finds outdated deps and opens the bump PR
+
+# Events — only the OUTBOUND event the step emits needs declaring; the `cron(...)` trigger is
+# built in. A downstream workflow could subscribe to `DepsBumped` to ping a channel.
+events:
+  DepsBumped:
+    pr_url: url
+    packages: int

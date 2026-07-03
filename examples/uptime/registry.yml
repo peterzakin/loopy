@@ -1,0 +1,40 @@
+# uptime — the smallest example of a SENSOR turning a signal into an event. A poll sensor
+# checks a health endpoint every few minutes and emits an `Incident` only when it's down; a
+# second workflow reacts by opening a GitHub issue.
+#
+#   health_check (poll 5m)  ─▶  Incident  ─▶  respond/open-issue  (Responder)  ─▶  Acknowledged
+#          emits only on failure                opens a GitHub issue for the outage
+#
+# This is the one place these small examples write a real (tiny) sensor: `sensors/sensors.py`
+# holds a poll sensor that returns None on a healthy check (emitting nothing) and an Incident
+# when the endpoint is down. That conditional emit is the whole point of the sensor layer.
+
+# Defaults — every agent inherits these; override a field only when needed.
+defaults:
+  agent:
+    sandbox: BaseSandbox
+    model: claude-sonnet-4-6
+    harness: claude-code
+
+# Sandbox — the responder opens an issue via `gh`, so egress is github.com + the model API.
+# (The poll sensor runs in the engine, not the sandbox, so its egress isn't configured here.)
+sandboxes:
+  BaseSandbox:
+    provider: daytona
+    image: { debian_slim: "3.12", apt: [git, gh], workdir: /home/loopy, user: loopy }
+    network: [github.com, api.anthropic.com]
+    env_file: secrets/base.env          # gitignored; resolved by the backend at run time
+    repos: [octocat/Hello-World]       # the repo issues are opened in (auth injected)
+
+# Agents — capability comes from the sandbox + the injected GitHub token + budget.
+agents:
+  Responder: {}   # opens a GitHub issue for the outage
+
+# Events — the bus contract. `Incident` is emitted by the poll sensor and consumed by the
+# respond workflow; `Acknowledged` is the terminal announcement.
+events:
+  Incident:
+    url: url
+    status: int
+  Acknowledged:
+    issue_url: url
