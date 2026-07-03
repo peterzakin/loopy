@@ -7,7 +7,7 @@
     loopy admin     serve the read-only dashboard over the run-state DB `loopy run` writes
     loopy demo      serve the dashboard against in-memory fake data (dev-only; safe to delete)
     loopy help      show this overview, or help for one command (`loopy help run`)
-    loopy docs      print the authoring reference (or `loopy docs errors`) as markdown
+    loopy docs      print the authoring reference (or `deployment`/`errors`) as markdown
 
 Heavy deps are imported lazily per command so `loopy compile` stays runtime-free.
 """
@@ -105,7 +105,7 @@ def help(  # noqa: A001 - the command is literally named `help`; shadowing the b
 # context. Topics map to files in docs_md/, except `errors`, which renders the live
 # diagnostic catalog from loopy_core so it can never drift from the compiler.
 _DOCS_DIR = Path(__file__).resolve().parent / "docs_md"
-_DOCS_TOPICS = ("authoring", "errors")
+_DOCS_TOPICS = ("authoring", "deployment", "errors")
 
 
 def _render_error_catalog() -> str:
@@ -128,15 +128,18 @@ def _render_error_catalog() -> str:
 @app.command()
 def docs(
     topic: str = typer.Argument(
-        "authoring", help="What to print: `authoring` (the full reference) or `errors`."
+        "authoring",
+        help="What to print: `authoring` (the full reference), `deployment` (hosting the "
+        "control plane + admin auth), or `errors`.",
     ),
 ) -> None:
     """Print loopy's documentation as markdown, for agents and offline reading.
 
     `loopy docs` prints the full authoring reference (workflows, steps, registry, sensors,
-    secrets — everything needed to write a project); `loopy docs errors` prints the
-    diagnostic-code catalog. Output is plain markdown on stdout, so it pipes cleanly into
-    a pager, a file, or an agent's context.
+    secrets — everything needed to write a project); `loopy docs deployment` prints the
+    hosting contract (env vars, $PORT, TLS at the ingress, admin-dashboard auth); `loopy
+    docs errors` prints the diagnostic-code catalog. Output is plain markdown on stdout, so
+    it pipes cleanly into a pager, a file, or an agent's context.
     """
     if topic == "errors":
         typer.echo(_render_error_catalog())
@@ -1573,32 +1576,131 @@ def trigger(
         raise typer.Exit(code=1)
 
 
+def _admin_port(flag: int | None) -> int:
+    """Resolve the dashboard port: `--port` flag > platform-injected `$PORT` > 9000.
+
+    Honoring `$PORT` is half of the provider-agnostic serve contract (the other half is the
+    env-var token) — Render/Fly/Railway all tell the process where to bind this way."""
+    if flag is not None:
+        return flag
+    raw = os.environ.get("PORT", "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            typer.echo(f"warning: ignoring non-numeric $PORT={raw!r}", err=True)
+    return 9000
+
+
 @app.command()
 def admin(
-    db: Path = typer.Argument(
-        Path(".loopy/state.db"), help="State DB written by `loopy run` (default .loopy/state.db)."
+    db: Path | None = typer.Argument(
+        None,
+        help="State DB written by `loopy run` (default .loopy/state.db). "
+        "Not allowed with --remote.",
     ),
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address."),
-    port: int = typer.Option(9000, "--port", help="Port to serve the dashboard on."),
+    port: int | None = typer.Option(
+        None, "--port", help="Port to serve the dashboard on (default $PORT, then 9000)."
+    ),
     manifest: Path = typer.Option(
         Path("manifest.json"),
         "--manifest",
         help="Compiled manifest for the templates/registry/schedules views (default manifest.json; "
         "skipped if absent).",
     ),
+    remote: str | None = typer.Option(
+        None,
+        "--remote",
+        help="URL of a remote control plane. Serves the UI locally and proxies /api to it, "
+        "authenticating with LOOPY_ADMIN_TOKEN from the environment or loopy.env.",
+    ),
 ) -> None:
-    """Serve the read-only control-plane dashboard over the run-state DB.
+    """Serve the read-only control-plane dashboard.
 
-    Pairs with `loopy run` (which defaults to that same DB): no flags needed in the common case —
-    `loopy run` in one terminal, `loopy admin` in another. When `manifest.json` is present it also
-    powers the workflow-template, registry, and schedule views; the run views work without it.
+    Local (default): reads the run-state DB `loopy run` writes. Pairs with `loopy run` (which
+    defaults to that same DB): no flags needed in the common case — `loopy run` in one terminal,
+    `loopy admin` in another. When `manifest.json` is present it also powers the
+    workflow-template, registry, and schedule views; the run views work without it.
+
+    Remote client (`--remote <url>`): a local proxy that serves the UI and forwards /api to a
+    cloud-hosted control plane with a bearer token from LOOPY_ADMIN_TOKEN — the browser never
+    holds the credential.
+
+    Exposed server (`--host 0.0.0.0`, e.g. on the control plane itself): requires
+    LOOPY_ADMIN_TOKEN in the environment and puts every /api route behind it; refuses to start
+    without one, because run/step outputs are not redacted.
     """
     import uvicorn
+
+    from loopy_runtime.dashboard.auth import AdminAuth, is_loopback_host
+    from loopy_runtime.secrets import ADMIN_TOKEN_ENV, load_control_plane_env
+
+    # The admin token rides the control-plane env channel: `loopy.env` on a laptop, the
+    # platform's process env in production. setdefault — the real environment always wins.
+    for key, value in load_control_plane_env(Path.cwd()).items():
+        os.environ.setdefault(key, value)
+    port = _admin_port(port)
+
+    if remote is not None:
+        from loopy_runtime.dashboard.proxy import create_proxy_app, validate_remote_url
+
+        if db is not None:
+            typer.echo(
+                "error: --remote and a local state DB are mutually exclusive — the data "
+                "comes from the remote control plane.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        if not is_loopback_host(host):
+            typer.echo(
+                "error: --remote runs a local proxy that holds the admin token; it binds "
+                "loopback only (drop --host, or harden the control plane itself instead).",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        try:
+            url = validate_remote_url(remote)
+        except ValueError as exc:
+            typer.echo(f"error: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        token = os.environ.get(ADMIN_TOKEN_ENV, "").strip()
+        if not token:
+            typer.echo(
+                f"error: --remote needs {ADMIN_TOKEN_ENV} in the environment or loopy.env — "
+                "the same token the control plane was deployed with.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        port = _resolve_dashboard_port(host, port)
+        typer.echo(f"loopy dashboard → http://{host}:{port}  (remote {url})")
+        config = uvicorn.Config(
+            create_proxy_app(url, token), host=host, port=port, log_level="warning"
+        )
+        _serve_dashboard(config)  # pragma: no cover - long-lived server
+        return
 
     from loopy_runtime.dashboard.app import create_app
     from loopy_runtime.manifest_model import load_manifest
     from loopy_runtime.state.sqlite import SqliteStateStore
 
+    # Fail-closed (checked before anything else): run/step outputs are not redacted, so a
+    # bind that leaves loopback must carry bearer auth or not start at all.
+    auth = None
+    if not is_loopback_host(host):
+        auth = AdminAuth.from_env(os.environ)
+        if auth is None:
+            typer.echo(
+                f"error: refusing to bind {host} without {ADMIN_TOKEN_ENV}: run and step "
+                "outputs are not redacted. Set it in the platform environment (generate one "
+                "with `python -c \"import secrets; print('loopy_sk_' + "
+                "secrets.token_urlsafe(32))\"`), and put the same value in the operator's "
+                "loopy.env.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+    db = db if db is not None else Path(".loopy/state.db")
     try:
         store = SqliteStateStore(db, read_only=True)  # raises if the DB doesn't exist yet
     except FileNotFoundError as exc:
@@ -1616,8 +1718,11 @@ def admin(
 
     port = _resolve_dashboard_port(host, port)
     extra = "" if loaded is None else f"  (manifest {manifest})"
-    typer.echo(f"loopy dashboard → http://{host}:{port}  (reading {db}){extra}")
-    config = uvicorn.Config(create_app(store, loaded), host=host, port=port, log_level="warning")
+    guard = "" if auth is None else "  (bearer auth on /api)"
+    typer.echo(f"loopy dashboard → http://{host}:{port}  (reading {db}){extra}{guard}")
+    config = uvicorn.Config(
+        create_app(store, loaded, auth=auth), host=host, port=port, log_level="warning"
+    )
     _serve_dashboard(config)  # pragma: no cover - long-lived server
 
 

@@ -378,6 +378,47 @@ volume; the one-shot `loopy trigger` path is in-memory and isn't recorded.) The 
 (`--bus inproc|redis`, `--state`, `--state-path`, `--host`/`--port`, `--detach`) are covered by
 `loopy run --help`.
 
+### Watching a hosted control plane
+
+The loopback dashboard needs no auth. The moment it leaves the box it does: run and step outputs
+are not redacted, so a non-loopback `loopy admin` refuses to start without a bearer token
+(fail-closed), and the same token lets you watch production runs from your laptop without the
+browser ever holding a credential:
+
+```bash
+# mint one high-entropy token (the loopy_sk_ prefix makes leaks greppable)
+python -c "import secrets; print('loopy_sk_' + secrets.token_urlsafe(32))"
+
+# control plane (co-located with `loopy run`, sharing its durable state DB):
+#   set LOOPY_ADMIN_TOKEN in the platform env, then expose the dashboard
+loopy admin --host 0.0.0.0        # honors $PORT; every /api route requires the bearer
+
+# laptop: put the same token in loopy.env, then run the local client
+loopy admin --remote https://loopy.example.com   # serves the UI, proxies /api with the token
+```
+
+`--remote` runs a small local proxy: the token stays in that process (read from `loopy.env` or
+the environment — never a query param, cookie, or browser variable), every request crosses as
+`Authorization: Bearer` over TLS, and the server compares it in constant time. Rotation is
+overlap-based: the server also accepts `LOOPY_ADMIN_TOKEN_NEXT`, so you can roll both sides
+without a lockout. Plain HTTP to a non-loopback remote is refused.
+
+The serve contract is deliberately provider-agnostic — a process env var, `$PORT`, TLS
+terminated at the platform ingress, and durable run state behind the `StateStore` protocol —
+so nothing in loopy branches on the hosting provider:
+
+| Concern | loopy depends on | Render | Fly / Railway | k8s | Bare VM |
+|---|---|---|---|---|---|
+| Secret | `LOOPY_ADMIN_TOKEN` from env | dashboard env var | `fly secrets` / env | Secret → env | env / `loopy.env` |
+| TLS | terminated by the ingress | auto on `*.onrender.com` | auto | Ingress + cert-manager | nginx/caddy |
+| Port | `$PORT` (fallback `--port`) | injected | injected | containerPort | flag/env |
+| Persistence | `StateStore` (SQLite file) | persistent disk | volume | PVC | disk |
+
+`GET /healthz` is open (liveness only, no data) for platform probes. The full design, including
+the guardrails and the OIDC upgrade path, is in
+[`docs/design/admin-auth.md`](docs/design/admin-auth.md); `loopy docs deployment` prints the
+same contract offline.
+
 ## License
 
 Loopy is open source under the [Apache License 2.0](LICENSE). You're free to use, modify, and

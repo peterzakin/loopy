@@ -9,7 +9,9 @@ Three surfaces, one parser:
   * **Control-plane env** — infra creds the *engine itself* needs (`REDIS_URL`,
     `DAYTONA_API_KEY`/`DAYTONA_API_URL`) in `loopy.env` at the project root
     (`load_control_plane_env`). A local-dev convenience; in production these come from the
-    platform's process env.
+    platform's process env. The admin-dashboard bearer token (`LOOPY_ADMIN_TOKEN`, plus
+    `LOOPY_ADMIN_TOKEN_NEXT` during rotation) rides the same channel — see
+    `docs/design/admin-auth.md`.
 """
 
 from __future__ import annotations
@@ -27,6 +29,14 @@ SENSOR_ENV_FILE = "sensors/.env"
 # Explicitly named (not a bare `.env`) so its scope is unambiguous: connection strings /
 # provider keys only, never agent or sensor secrets.
 CONTROL_PLANE_ENV_FILE = "loopy.env"
+
+# Recognized control-plane env keys for the admin dashboard's bearer auth
+# (`docs/design/admin-auth.md`). On an operator's laptop these live in `loopy.env`; on a
+# hosted control plane they come from the platform's process env (which always wins — the
+# caller merges the dotenv with `setdefault`). `*_NEXT` is the rotation overlap slot: the
+# server accepts both while the laptop and the platform env roll to the new value.
+ADMIN_TOKEN_ENV = "LOOPY_ADMIN_TOKEN"
+ADMIN_TOKEN_NEXT_ENV = "LOOPY_ADMIN_TOKEN_NEXT"
 
 
 def _parse_dotenv(text: str) -> dict[str, str]:
@@ -137,8 +147,9 @@ def load_control_plane_env(root: str | Path) -> dict[str, str]:
     """Load the control-plane dotenv (`loopy.env` under the project root) into an env map.
 
     Holds the infra creds the engine itself needs — `REDIS_URL`,
-    `DAYTONA_API_KEY`/`DAYTONA_API_URL`. Returns an empty map when the file is absent. The caller
-    merges these into the process env
+    `DAYTONA_API_KEY`/`DAYTONA_API_URL` — plus the admin-dashboard bearer token
+    (`LOOPY_ADMIN_TOKEN`/`LOOPY_ADMIN_TOKEN_NEXT`). Returns an empty map when the file is
+    absent. The caller merges these into the process env
     with `setdefault` (non-override), so a value set in the real/platform environment always
     wins: this file is a local-dev convenience, not the production mechanism. Provider keys and
     connection strings only — keep agent secrets (sandbox `env_file`) and sensor secrets
