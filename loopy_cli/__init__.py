@@ -446,6 +446,8 @@ def init(
     typer.echo()
 
     # Offer to close the remaining gaps the scaffold leaves on purpose before reporting what's left.
+    # The admin token needs no prompt — it's pure entropy, so `init` just mints and records it.
+    _write_admin_token(target)
     _offer_ambient_anthropic_key(target)
     _offer_ambient_daytona_creds(target)
     _offer_redis_bus(target)
@@ -627,6 +629,46 @@ def _offer_redis_bus(target: Path) -> None:
         "  "
         + typer.style("✓", fg=typer.colors.GREEN)
         + " wrote REDIS_URL to loopy.env — `loopy run` will use the Redis bus automatically"
+    )
+    typer.echo()
+
+
+def _write_admin_token(target: Path) -> None:
+    """Mint the admin-dashboard bearer token and write it into `loopy.env`.
+
+    Unlike the other setup steps this needs no prompt: the token is pure entropy from the
+    CSPRNG (no external account to reach, no browser), so there is nothing to ask — `init`
+    just mints one and records it, replacing the scaffold's commented `# LOOPY_ADMIN_TOKEN=`
+    stub in place. It gates the /admin dashboard on any non-loopback bind; local (loopback)
+    dev ignores it, so writing it now is harmless and means the operator never has to hand-run
+    a `secrets.token_urlsafe` incantation and get the `loopy_sk_` prefix right. Skips silently
+    when `loopy.env` already has one (e.g. re-init) so we never rotate it out from under a
+    running deployment.
+    """
+    from loopy_runtime.dashboard.auth import generate_admin_token
+    from loopy_runtime.secrets import (
+        ADMIN_TOKEN_ENV,
+        load_control_plane_env,
+        write_control_plane_env,
+    )
+
+    # Already configured (e.g. re-init over an existing tree) — never clobber a live token.
+    if load_control_plane_env(target).get(ADMIN_TOKEN_ENV):
+        return
+
+    write_control_plane_env(target, {ADMIN_TOKEN_ENV: generate_admin_token()})
+    typer.echo(
+        "  "
+        + typer.style("✓", fg=typer.colors.GREEN)
+        + f" minted {ADMIN_TOKEN_ENV} in loopy.env — gates the /admin dashboard on a "
+        "non-loopback bind"
+    )
+    typer.echo(
+        typer.style(
+            "    On deploy, copy the same value into the platform environment "
+            "(Fly/Render/Railway secrets).",
+            fg=typer.colors.BRIGHT_BLACK,
+        )
     )
     typer.echo()
 
@@ -1741,10 +1783,9 @@ def admin(
         if auth is None:
             typer.echo(
                 f"error: refusing to bind {host} without {ADMIN_TOKEN_ENV}: run and step "
-                "outputs are not redacted. Set it in the platform environment (generate one "
-                "with `python -c \"import secrets; print('loopy_sk_' + "
-                "secrets.token_urlsafe(32))\"`), and put the same value in the operator's "
-                "loopy.env.",
+                f"outputs are not redacted. `loopy init` mints a {ADMIN_TOKEN_ENV} into "
+                "loopy.env; set that same value in the platform environment. (No project yet? "
+                "Run `loopy init`.)",
                 err=True,
             )
             raise typer.Exit(code=1)

@@ -93,8 +93,10 @@ Two rules keep it agnostic:
 ## Auth mechanism, in detail
 
 - **Issuance.** The token is a high-entropy random string, `secrets.token_urlsafe(32)`
-  (256 bits), with a `loopy_sk_` prefix so secret scanners can match it. Set once in the
-  control plane's platform env and once in the operator's `loopy.env`.
+  (256 bits), with a `loopy_sk_` prefix so secret scanners can match it. `loopy init` mints
+  one (via `generate_admin_token`) and writes it into the operator's `loopy.env`, so there is
+  no hand-run incantation; the operator copies that same value into the control plane's
+  platform env on deploy.
 - **Transmission.** `Authorization: Bearer <token>`, TLS only. Never a query param (leaks
   into access logs), never a cookie (drags in CSRF).
 - **Verification (edge).** A FastAPI dependency wraps the whole `/api/*` router and runs
