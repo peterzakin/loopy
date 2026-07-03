@@ -26,6 +26,16 @@ def test_docs_default_prints_authoring_reference():
     assert "inherits nothing from your shell" in result.output
 
 
+def test_docs_deployment_prints_the_serve_contract():
+    result = runner.invoke(app, ["docs", "deployment"])
+    assert result.exit_code == 0, result.output
+    # The load-bearing pieces: the env-var contract, rotation, and the fail-closed rule.
+    assert "LOOPY_ADMIN_TOKEN" in result.output
+    assert "LOOPY_ADMIN_TOKEN_NEXT" in result.output
+    assert "Fail-closed" in result.output
+    assert "$PORT" in result.output
+
+
 def test_docs_errors_renders_every_code():
     result = runner.invoke(app, ["docs", "errors"])
     assert result.exit_code == 0, result.output

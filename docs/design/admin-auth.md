@@ -142,17 +142,24 @@ Two rules keep it agnostic:
   - **local** (today): loopback, no auth, reads SQLite directly — unchanged.
   - **remote-exposed**: bound to `$PORT`/`0.0.0.0`, auth required, reading the same **durable**
     `StateStore` the engine writes.
-- Decision to confirm: expose it via a hardened `loopy admin` (non-loopback bind flips on
-  auth + fail-closed) co-run with `loopy run` against a shared durable store, vs. a
-  `--dashboard` flag on `loopy run`. Recommended: hardened `loopy admin`, co-located with the
-  engine in one container sharing a persistent volume (SQLite WAL = one writer + readers on
-  one host). Multi-instance deployments need a networked `StateStore` (Postgres) — a separate
+- ~~Decision to confirm~~ **Decided:** the engine itself mounts the dashboard at `/admin` on
+  its webhook server, path-routed off the one public URL — deliveries at
+  `$LOOPY_PUBLIC_URL/hooks/*`, dashboard at `$LOOPY_PUBLIC_URL/admin`. One process, one
+  port, one hostname, so the admin endpoint is deterministic on every provider (Render
+  exposes a single port per service; no reverse proxy or second service needed) and the
+  engine's own store object serves the views. Mount policy mirrors `loopy admin`: open on a
+  loopback bind; behind `LOOPY_ADMIN_TOKEN` on a non-loopback bind; **not mounted at all**
+  on a non-loopback bind without a token (fail-closed by absence — webhooks still serve).
+  The standalone hardened `loopy admin --host 0.0.0.0` remains for split deployments.
+  Multi-instance deployments need a networked `StateStore` (Postgres) — a separate
   workstream, out of scope here.
 
 ### Phase 3 — Client-side remote mode (BFF proxy)
-- `loopy admin --remote <url>`: start a local loopback server that serves the static UI and
-  proxies `/api/*` + `/static` to `<url>` with `Authorization: Bearer` from
-  `LOOPY_ADMIN_TOKEN`. Mutually exclusive with the local `db` argument.
+- `loopy admin --remote [url]`: start a local loopback server that serves the static UI and
+  proxies `/api/*` + `/static` to the remote with `Authorization: Bearer` from
+  `LOOPY_ADMIN_TOKEN`. Bare `--remote` derives the URL deterministically as
+  `$LOOPY_PUBLIC_URL/admin` (see the Phase 2 decision); an explicit URL wins. In remote mode
+  the positional argument is the URL, not a local `db` path.
 - Clean errors: 401 → "auth failed, check LOOPY_ADMIN_TOKEN"; connection/TLS errors →
   actionable; refuse to start if the token env var is unset.
 - Tests: header injection, 401 surfaced as an actionable message, refusal without token.

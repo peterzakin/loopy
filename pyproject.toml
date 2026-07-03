@@ -22,6 +22,8 @@ dependencies = [
     "jsonschema>=4.21",
     "fastapi>=0.110",
     "uvicorn>=0.29",
+    # `loopy admin --remote` proxies the dashboard API to a remote control plane.
+    "httpx>=0.27",
     "pyjwt[crypto]>=2.8",
     # Daytona is the default sandbox provider (agents run in remote cloud sandboxes,
     # never silently on the host), so its SDK is a core dependency — not an optional extra.
