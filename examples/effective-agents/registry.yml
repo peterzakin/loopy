@@ -26,14 +26,13 @@ defaults:
     model: claude-sonnet-4-6
     harness: claude-code
 
-# One sandbox for the whole project. These patterns are text-in/text-out, so the only
-# egress they need is the model API; no repo is cloned. (Swap in `docker` for a fully local
-# run, or add tools to `apt:`/`network:` if a worker needs to run code.)
+# One sandbox for the whole project. These patterns are text-in/text-out and clone no repo.
+# (Swap in `docker` for a fully local run, or add tools to `apt:` if a worker needs to run
+# code. Egress is open by default; add `network: [...]` to restrict it.)
 sandboxes:
   BaseSandbox:
     provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
-    network: [api.anthropic.com]
     env_file: secrets/base.env   # gitignored; supplies ANTHROPIC_API_KEY
 
 # Agents — one per role the patterns call for. Capability is the sandbox + skills + budget;

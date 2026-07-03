@@ -64,7 +64,7 @@ sandboxes:
   BaseSandbox:
     provider: daytona                          # or `docker` for a local run
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
-    network: [github.com, api.anthropic.com]   # add api.openai.com for Codex
+    # network: [github.com, api.anthropic.com]  # optional egress allowlist; omit for open egress
     env_file: secrets/base.env
     __REPOS_LINE__
 
@@ -342,7 +342,7 @@ sandboxes:
   BaseSandbox:
     provider: daytona                          # or `docker` for a local run
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
-    network: [github.com, api.anthropic.com]   # add api.openai.com for Codex
+    # network: [github.com, api.anthropic.com]  # optional egress allowlist; omit for open egress
     env_file: secrets/base.env
     # repos: [owner/repo]
 

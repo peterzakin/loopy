@@ -22,17 +22,16 @@ defaults:
     harness: claude-code
 
 sandboxes:
-  # Reading desk — reading, ideating, and writing. Needs the paper source and the model API,
-  # plus GitHub to push the research log. No heavy compute.
+  # Reading desk — reading, ideating, and writing. Reads papers, hits the model API, and
+  # pushes the research log to GitHub. No heavy compute.
   Reading:
     provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/daytona, user: daytona }
-    network: [export.arxiv.org, arxiv.org, github.com, api.anthropic.com]
     env_file: secrets/base.env       # gitignored; ANTHROPIC_API_KEY (+ GITHUB_TOKEN if no App)
     repos: [you/research-log]        # the writeup target — point this at a repo you can push to
 
-  # Lab — where experiments actually run. Python + pip, and egress to fetch packages. Keep
-  # experiments small (see the experiment-hygiene skill); this is a sandbox, not a cluster.
+  # Lab — where experiments actually run. Python + pip to fetch packages. Keep experiments
+  # small (see the experiment-hygiene skill); this is a sandbox, not a cluster.
   Lab:
     provider: daytona
     image:
@@ -40,7 +39,6 @@ sandboxes:
       apt: [git, python3, python3-pip, python3-venv]
       workdir: /home/daytona
       user: daytona
-    network: [github.com, api.anthropic.com, pypi.org, files.pythonhosted.org]
     env_file: secrets/base.env
     repos: [you/research-log]
 
