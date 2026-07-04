@@ -260,15 +260,61 @@ def _put_secret_files(ssm, stack: str, root: Path, rels: list[str]) -> None:
         )
 
 
-def _stack_exists(cf, stack: str) -> bool:
+# Terminal states a stack can be stuck in that block a fresh deploy: a create that rolled
+# back but wasn't cleaned up, or a failed rollback/delete. None can be updated — CloudFormation
+# only allows deleting them — and a rolled-back stack has no EIP output, so the update path
+# would `KeyError` on `PublicIp`. The deploy deletes such a stack and recreates instead.
+DEAD_STACK_STATUSES = frozenset(
+    {
+        "ROLLBACK_COMPLETE",
+        "ROLLBACK_FAILED",
+        "CREATE_FAILED",
+        "DELETE_FAILED",
+        "UPDATE_ROLLBACK_FAILED",
+    }
+)
+
+
+def _stack_status(cf, stack: str) -> str | None:
+    """The stack's `StackStatus`, or None if it doesn't exist."""
     try:
         response = cf.describe_stacks(StackName=stack)
     except Exception:  # noqa: BLE001 - ClientError ValidationError == "does not exist"
-        return False
-    status = response["Stacks"][0]["StackStatus"]
-    if status == "REVIEW_IN_PROGRESS":  # a never-executed change set, not a real stack
+        return None
+    return response["Stacks"][0]["StackStatus"]
+
+
+def _stack_exists(cf, stack: str) -> bool:
+    status = _stack_status(cf, stack)
+    if status is None or status == "REVIEW_IN_PROGRESS":  # absent, or a never-executed change set
         return False
     return True
+
+
+def _clear_unusable_stack(cf, stack: str, *, echo=None) -> None:
+    """Delete a stack stuck in a terminal failed state (or wait out a running delete).
+
+    CloudFormation only allows deleting a rolled-back/failed stack, never updating it, and a
+    rolled-back stack has no outputs — so the deploy's update path would `KeyError` on the EIP.
+    Clearing it here makes the subsequent apply a clean create. A healthy or absent stack is
+    left untouched; only the failure states in `DEAD_STACK_STATUSES` (plus an in-flight delete)
+    are acted on.
+    """
+    echo = echo or typer.echo
+    status = _stack_status(cf, stack)
+    if status in DEAD_STACK_STATUSES:
+        echo(
+            f"deploy: existing stack {stack} is in {status} (a prior deploy failed); "
+            "deleting it so this is a clean create…"
+        )
+        cf.delete_stack(StackName=stack)
+    elif status == "DELETE_IN_PROGRESS":
+        echo(f"deploy: stack {stack} is finishing an earlier delete; waiting for it…")
+    else:
+        return
+    cf.get_waiter("stack_delete_complete").wait(
+        StackName=stack, WaiterConfig={"Delay": 15, "MaxAttempts": 120}
+    )
 
 
 def _apply_stack(cf, stack: str, template_body: str, parameters: dict[str, str]) -> None:
@@ -547,6 +593,11 @@ def aws(
         "CloudFrontPrefixListId": _cloudfront_prefix_list_id(ec2),
         "EnginePort": str(engine_port),
     }
+
+    # A stack left in a failed/rolled-back state (a prior deploy that rolled back without
+    # cleaning up, a stuck delete) can't be updated and has no EIP output for the update path
+    # to read. Clear it first so this deploy is a clean create rather than a KeyError.
+    _clear_unusable_stack(cf, stack)
 
     # An existing stack already has its EIP (and distribution), so apply once at the final
     # state — never blank the OriginDomain, which would tear the distribution down and mint a

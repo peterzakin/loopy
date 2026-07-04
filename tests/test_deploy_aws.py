@@ -22,6 +22,7 @@ from loopy_cli import app
 from loopy_cli.aws import (
     TEMPLATE_PATH,
     _apply_stack,
+    _clear_unusable_stack,
     _delete_stack_secrets,
     _put_secret_files,
     _refresh_instance,
@@ -421,6 +422,51 @@ class _DeletedStackCf:
                 }
             ]
         }
+
+
+class _StatusCf:
+    """A CloudFormation whose stack sits in one fixed status; records delete calls."""
+
+    def __init__(self, status: str | None):
+        self._status = status
+        self.deleted = 0
+
+    def describe_stacks(self, StackName):  # noqa: N803
+        if self._status is None:
+            raise RuntimeError(f"Stack with id {StackName} does not exist")
+        return {"Stacks": [{"StackStatus": self._status, "Outputs": []}]}
+
+    def delete_stack(self, StackName):  # noqa: N803
+        self.deleted += 1
+
+    def get_waiter(self, name):
+        return _FakeWaiter()
+
+
+def test_clear_unusable_stack_deletes_a_rolled_back_stack():
+    """A ROLLBACK_COMPLETE leftover can't be updated (and has no EIP output), so the deploy
+    must delete it before creating — otherwise the update path KeyErrors on 'PublicIp'."""
+    cf = _StatusCf("ROLLBACK_COMPLETE")
+    _clear_unusable_stack(cf, "loopy-engine", echo=lambda *_: None)
+    assert cf.deleted == 1
+
+
+def test_clear_unusable_stack_waits_out_a_running_delete_without_redeleting():
+    cf = _StatusCf("DELETE_IN_PROGRESS")
+    _clear_unusable_stack(cf, "loopy-engine", echo=lambda *_: None)
+    assert cf.deleted == 0  # already deleting; we just wait
+
+
+def test_clear_unusable_stack_leaves_a_healthy_stack_untouched():
+    cf = _StatusCf("CREATE_COMPLETE")
+    _clear_unusable_stack(cf, "loopy-engine", echo=lambda *_: None)
+    assert cf.deleted == 0
+
+
+def test_clear_unusable_stack_noop_when_absent():
+    cf = _StatusCf(None)
+    _clear_unusable_stack(cf, "loopy-engine", echo=lambda *_: None)
+    assert cf.deleted == 0
 
 
 def test_apply_stack_reports_failure_reason_by_stack_id_after_rollback():
