@@ -541,15 +541,26 @@ def aws(
     existed = _stack_exists(cf, stack)
     if existed:
         origin = eip_public_dns(_stack_outputs(cf, stack)["PublicIp"], resolved_region)
-        typer.echo(f"deploy: updating stack {stack} in {resolved_region}…")
+        typer.echo(
+            f"deploy: updating stack {stack} in {resolved_region} "
+            "(this can take a few minutes; longer if it replaces the instance)…"
+        )
         _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": origin})
     else:
         _require_default_vpc(ec2)  # fail fast before provisioning if the region has none
-        typer.echo(f"deploy: creating stack {stack} in {resolved_region} (instance + address)…")
+        typer.echo(
+            "deploy: this is a first deploy — it runs several minutes end to end (instance boot, "
+            "image build, then CloudFront). Safe to leave it; the URL is printed when it's live."
+        )
+        typer.echo(
+            f"deploy: creating stack {stack} in {resolved_region} "
+            "(instance + address; ~2-4 min)…"
+        )
         _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": ""})
         origin = eip_public_dns(_stack_outputs(cf, stack)["PublicIp"], resolved_region)
         typer.echo(
-            f"deploy: fronting {origin} with CloudFront (a fresh distribution takes a few minutes)…"
+            f"deploy: fronting {origin} with CloudFront "
+            "(a fresh distribution takes ~5-10 min to deploy globally)…"
         )
         _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": origin})
 
@@ -584,7 +595,10 @@ def aws(
     # once). Re-run its deploy script in place so it picks up what we just pushed. A fresh
     # instance is doing this via user-data already, so only existing stacks need the nudge.
     if existed:
-        typer.echo("deploy: refreshing the engine in place (re-fetch project + secrets, restart)…")
+        typer.echo(
+            "deploy: refreshing the engine in place (re-fetch project + secrets, restart; "
+            "usually under a minute, a cold image build a few minutes)…"
+        )
         _refresh_instance(ssm, outputs["InstanceId"])
 
     stack_flag = f" --stack {stack}" if stack != "loopy-engine" else ""
@@ -593,7 +607,10 @@ def aws(
     # "Stack complete" only means the instance launched. Wait for the engine to actually answer
     # through CloudFront (user-data's image build + a fresh distribution's edge propagation both
     # trail CREATE_COMPLETE) so the printed URL works when the user hits it.
-    typer.echo(f"deploy: waiting for the engine to answer at {public_url}/healthz…")
+    typer.echo(
+        f"deploy: waiting for the engine to answer at {public_url}/healthz "
+        "(first boot builds the image and the CDN propagates; up to ~10 min)…"
+    )
     serving = wait_until_serving(public_url)
 
     typer.echo("")

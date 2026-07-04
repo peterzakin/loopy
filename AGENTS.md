@@ -40,4 +40,11 @@ uv run loopy <cmd>               # exercise the CLI from source
   together — they are three renderings of the same contract.
 - Heavy deps are imported lazily inside CLI command bodies so `loopy compile` stays
   runtime-free; keep new imports out of `loopy_cli/__init__.py`'s module top.
+- **Signal slow steps.** Any CLI step that can run longer than a couple of seconds
+  (network provisioning, image builds, waiters, polling) must announce that it's working
+  *before* it blocks, and give a rough time estimate wherever one exists — e.g.
+  `creating stack … (instance + address; ~2-4 min)`, `a fresh CloudFront distribution
+  takes ~5-10 min`, `up to ~10 min`. Never leave the user staring at a silent cursor
+  unsure whether it hung. Prefer an honest range over false precision, and say when a
+  step is safe to leave unattended.
 - Add a regression test alongside any bug fix.
