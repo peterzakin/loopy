@@ -212,13 +212,13 @@ def test_scaffold_still_refuses_dir_with_unrelated_file(tmp_path):
 
 
 def test_init_wizard_step_order(tmp_path, monkeypatch):
-    """Bring-your-own mode: pick the deploy mode first, then collect the public URL, then
+    """Bring-your-own: pick the deploy target first, then collect the public URL, then
     authenticate, then ask which repo(s) to work on. Webhook registration is no longer an
     inline offer — it's an explicit next step surfaced by the closing report."""
     calls: list[str] = []
 
     monkeypatch.setattr(
-        loopy_cli, "_choose_deploy_mode", lambda target: (calls.append("mode"), "byo")[1]
+        loopy_cli, "_choose_deploy_target", lambda target: (calls.append("target"), "byo")[1]
     )
     monkeypatch.setattr(
         loopy_cli, "_offer_public_webhook_url", lambda target: calls.append("url")
@@ -242,17 +242,17 @@ def test_init_wizard_step_order(tmp_path, monkeypatch):
 
     loopy_cli.init("demo", directory=tmp_path)
 
-    assert calls == ["mode", "url", "auth", "repos"]
+    assert calls == ["target", "url", "auth", "repos"]
     assert (tmp_path / "demo" / "registry.yml").is_file()
 
 
-def test_init_provisioned_mode_skips_url_prompt(tmp_path, monkeypatch):
-    """Provisioned mode: no public URL exists yet (`loopy deploy aws` mints it), so `init`
-    must not prompt for LOOPY_PUBLIC_URL — that would ask for something unknowable."""
-    monkeypatch.setattr(loopy_cli, "_choose_deploy_mode", lambda target: "provisioned")
+def test_init_bootstrap_target_skips_url_prompt(tmp_path, monkeypatch):
+    """Bootstrap target: no public URL exists yet (`loopy deploy bootstrap` mints it), so
+    `init` must not prompt for LOOPY_PUBLIC_URL — that would ask for something unknowable."""
+    monkeypatch.setattr(loopy_cli, "_choose_deploy_target", lambda target: "bootstrap")
 
     def _no_url_prompt(target):
-        raise AssertionError("provisioned mode must not prompt for the public URL")
+        raise AssertionError("the bootstrap target must not prompt for the public URL")
 
     monkeypatch.setattr(loopy_cli, "_offer_public_webhook_url", _no_url_prompt)
     monkeypatch.setattr(loopy_cli, "_offer_github_auth", lambda target: False)
@@ -284,7 +284,7 @@ def test_init_provisioned_mode_skips_url_prompt(tmp_path, monkeypatch):
 def test_init_without_github_auth_scaffolds_minimal(tmp_path, monkeypatch):
     """No git auth ⇒ the minimal registry (no workflow), and the repo prompt is skipped
     entirely — naming repos a repo-less project can't reach would be misleading."""
-    monkeypatch.setattr(loopy_cli, "_choose_deploy_mode", lambda target: "byo")
+    monkeypatch.setattr(loopy_cli, "_choose_deploy_target", lambda target: "byo")
     monkeypatch.setattr(loopy_cli, "_offer_public_webhook_url", lambda target: None)
     # Auth declined / not completed.
     monkeypatch.setattr(loopy_cli, "_offer_github_auth", lambda target: False)

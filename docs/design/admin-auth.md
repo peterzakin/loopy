@@ -27,7 +27,7 @@ handler.
    credential.
 2. **Client is a backend-for-frontend proxy, not a `RemoteStateStore`.** The `/api/*`
    surface is view-shaped (built by `build_run_detail` / `build_workflows` /
-   `build_sensors`), not raw-store-shaped, so `loopy admin --remote <url>` runs a small local
+   `build_sensors`), not raw-store-shaped, so `loopy admin byo --url <url>` runs a small local
    process that serves the static UI and **proxies** `/api/*` + `/static` to `<url>`,
    injecting the bearer header. This holds the token in a local process (from `loopy.env`),
    keeps it out of the browser (no XSS exposure), and avoids duplicating the view logic.
@@ -47,7 +47,7 @@ handler.
 ## Topology
 
 ```
-browser ──▶ localhost:9000  (local `loopy admin --remote` process)
+browser ──▶ localhost:9000  (local `loopy admin byo` process)
                  │  reads LOOPY_ADMIN_TOKEN from loopy.env, injects it
                  ▼
             proxy ──HTTPS, Authorization: Bearer──▶ control plane /api/*
@@ -152,16 +152,16 @@ Two rules keep it agnostic:
   engine's own store object serves the views. Mount policy mirrors `loopy admin`: open on a
   loopback bind; behind `LOOPY_ADMIN_TOKEN` on a non-loopback bind; **not mounted at all**
   on a non-loopback bind without a token (fail-closed by absence — webhooks still serve).
-  The standalone hardened `loopy admin --host 0.0.0.0` remains for split deployments.
+  The standalone hardened `loopy admin local --host 0.0.0.0` remains for split deployments.
   Multi-instance deployments need a networked `StateStore` (Postgres) — a separate
   workstream, out of scope here.
 
 ### Phase 3 — Client-side remote mode (BFF proxy)
-- `loopy admin --remote [url]`: start a local loopback server that serves the static UI and
+- `loopy admin byo` (or `bootstrap`): start a local loopback server that serves the static UI and
   proxies `/api/*` + `/static` to the remote with `Authorization: Bearer` from
-  `LOOPY_ADMIN_TOKEN`. Bare `--remote` derives the URL deterministically as
-  `$LOOPY_PUBLIC_URL/admin` (see the Phase 2 decision); an explicit URL wins. In remote mode
-  the positional argument is the URL, not a local `db` path.
+  `LOOPY_ADMIN_TOKEN`. `byo` derives the URL deterministically as
+  `$LOOPY_PUBLIC_URL/admin` (see the Phase 2 decision); an explicit `--url` wins. The
+  positional argument is the deploy target, never a URL or a local `db` path.
 - Clean errors: 401 → "auth failed, check LOOPY_ADMIN_TOKEN"; connection/TLS errors →
   actionable; refuse to start if the token env var is unset.
 - Tests: header injection, 401 surfaced as an actionable message, refusal without token.

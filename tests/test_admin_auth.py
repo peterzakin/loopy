@@ -33,7 +33,15 @@ def _clean_env(monkeypatch):
     """Keep the admin env keys out of (and cleaned from) the real process env — the CLI
     command setdefaults values from loopy.env into os.environ, which monkeypatch alone
     would not undo."""
-    keys = ("LOOPY_ADMIN_TOKEN", "LOOPY_ADMIN_TOKEN_NEXT", "LOOPY_PUBLIC_URL", "PORT")
+    keys = (
+        "LOOPY_ADMIN_TOKEN",
+        "LOOPY_ADMIN_TOKEN_NEXT",
+        "LOOPY_PUBLIC_URL",
+        "PORT",
+        "LOOPY_DEPLOY_TARGET",
+        "LOOPY_BOOTSTRAP_INSTANCE_ID",
+        "LOOPY_BOOTSTRAP_ENGINE_PORT",
+    )
     for key in keys:
         monkeypatch.delenv(key, raising=False)
     yield
@@ -163,7 +171,7 @@ def _invoke(args, monkeypatch, tmp_path):
 
 
 def test_admin_refuses_non_loopback_bind_without_token(monkeypatch, tmp_path):
-    result = _invoke(["admin", "--host", "0.0.0.0"], monkeypatch, tmp_path)
+    result = _invoke(["admin", "local", "--host", "0.0.0.0"], monkeypatch, tmp_path)
     assert result.exit_code == 1
     assert "LOOPY_ADMIN_TOKEN" in result.output and "refusing" in result.output
 
@@ -172,16 +180,62 @@ def test_admin_non_loopback_proceeds_with_token(monkeypatch, tmp_path):
     # With a token configured the fail-closed gate opens; the next failure is the missing DB,
     # which proves the auth check ran (it comes first) and passed.
     monkeypatch.setenv("LOOPY_ADMIN_TOKEN", TOKEN)
-    result = _invoke(["admin", "--host", "0.0.0.0"], monkeypatch, tmp_path)
+    result = _invoke(["admin", "local", "--host", "0.0.0.0"], monkeypatch, tmp_path)
     assert result.exit_code == 1
     assert "no state DB" in result.output and "LOOPY_ADMIN_TOKEN" not in result.output
 
 
 def test_admin_reads_token_from_loopy_env(monkeypatch, tmp_path):
     (tmp_path / "loopy.env").write_text(f"LOOPY_ADMIN_TOKEN={TOKEN}\n")
-    result = _invoke(["admin", "--host", "0.0.0.0"], monkeypatch, tmp_path)
+    result = _invoke(["admin", "local", "--host", "0.0.0.0"], monkeypatch, tmp_path)
     assert result.exit_code == 1
     assert "no state DB" in result.output  # past the gate — the dotenv supplied the token
+
+
+# ── `loopy admin <target>` resolution ────────────────────────────────────────────────
+def test_bare_admin_defaults_to_local(monkeypatch, tmp_path):
+    # `local` is the default: bare `loopy admin` pairs with a local `loopy run`. With no
+    # DB yet, the next failure is the missing state DB — proving it resolved to local.
+    result = _invoke(["admin"], monkeypatch, tmp_path)
+    assert result.exit_code == 1
+    assert "no state DB" in result.output
+
+
+def test_bare_admin_hints_recorded_target_when_local_db_missing(monkeypatch, tmp_path):
+    # A project set up for a hosted target, run with bare `loopy admin`: it still defaults
+    # to local, but the missing-DB error points at the target the project actually uses.
+    (tmp_path / "loopy.env").write_text("LOOPY_DEPLOY_TARGET=bootstrap\n")
+    result = _invoke(["admin"], monkeypatch, tmp_path)
+    assert result.exit_code == 1
+    assert "no state DB" in result.output
+    assert "'bootstrap'" in result.output and "loopy admin bootstrap" in result.output
+
+
+def test_unknown_target_rejected_with_db_hint(monkeypatch, tmp_path):
+    # The positional used to be the state-DB path; a path-looking value gets pointed at --db.
+    result = _invoke(["admin", "some.db"], monkeypatch, tmp_path)
+    assert result.exit_code == 1
+    assert "unknown deploy target" in result.output and "--db" in result.output
+
+
+def test_unknown_target_rejected_plain(monkeypatch, tmp_path):
+    result = _invoke(["admin", "render"], monkeypatch, tmp_path)
+    assert result.exit_code == 1
+    assert "unknown deploy target 'render'" in result.output
+    assert "--db" not in result.output
+
+
+def test_local_rejects_url_flag(monkeypatch, tmp_path):
+    result = _invoke(["admin", "local", "--url", "https://cp.example.com"], monkeypatch, tmp_path)
+    assert result.exit_code == 1
+    assert "--url" in result.output and "local" in result.output
+
+
+def test_remote_target_rejects_db_flag(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOOPY_ADMIN_TOKEN", TOKEN)
+    result = _invoke(["admin", "byo", "--db", "some.db"], monkeypatch, tmp_path)
+    assert result.exit_code == 1
+    assert "--db" in result.output and "local" in result.output
 
 
 def test_admin_port_resolution(monkeypatch):
@@ -197,64 +251,80 @@ def test_admin_port_resolution(monkeypatch):
     assert _admin_port(None) == 9000
 
 
-# ── `loopy admin --remote` CLI guards ───────────────────────────────────────────────
-def test_remote_refuses_without_token(monkeypatch, tmp_path):
-    result = _invoke(["admin", "--remote", "https://cp.example.com"], monkeypatch, tmp_path)
+# ── `loopy admin byo` / `loopy admin bootstrap` proxy guards ────────────────────────
+def test_byo_refuses_without_token(monkeypatch, tmp_path):
+    result = _invoke(["admin", "byo", "--url", "https://cp.example.com"], monkeypatch, tmp_path)
     assert result.exit_code == 1
     assert "LOOPY_ADMIN_TOKEN" in result.output
 
 
-def test_remote_with_a_db_path_errors_clearly(monkeypatch, tmp_path):
-    # With --remote the positional is the control-plane URL, so a DB path is rejected as
-    # not-a-URL rather than silently proxied to.
-    monkeypatch.setenv("LOOPY_ADMIN_TOKEN", TOKEN)
-    result = _invoke(["admin", "some.db", "--remote"], monkeypatch, tmp_path)
-    assert result.exit_code == 1
-    assert "full http(s) URL" in result.output
-
-
-def test_bare_remote_derives_url_from_loopy_public_url(monkeypatch):
-    from loopy_cli import _admin_remote_url
+def test_byo_derives_url_from_loopy_public_url(monkeypatch):
+    from loopy_cli import _admin_byo_url
 
     monkeypatch.setenv("LOOPY_PUBLIC_URL", "https://loopy.example.com/")
-    assert _admin_remote_url(None) == "https://loopy.example.com/admin"
-    # an explicit target always wins over the derivation
-    assert _admin_remote_url("https://other.example.com") == "https://other.example.com"
+    assert _admin_byo_url() == "https://loopy.example.com/admin"
 
 
-def test_bare_remote_requires_loopy_public_url(monkeypatch, tmp_path):
+def test_byo_requires_loopy_public_url(monkeypatch, tmp_path):
     monkeypatch.setenv("LOOPY_ADMIN_TOKEN", TOKEN)
-    result = _invoke(["admin", "--remote"], monkeypatch, tmp_path)
+    result = _invoke(["admin", "byo"], monkeypatch, tmp_path)
     assert result.exit_code == 1
     assert "LOOPY_PUBLIC_URL" in result.output
 
 
-def test_bare_remote_derivation_feeds_the_tls_guard(monkeypatch, tmp_path):
-    # A plain-HTTP LOOPY_PUBLIC_URL is refused, which also proves the bare --remote path
-    # really derived its URL from the env var.
+def test_byo_derivation_feeds_the_tls_guard(monkeypatch, tmp_path):
+    # A plain-HTTP LOOPY_PUBLIC_URL is refused, which also proves the byo path really
+    # derived its URL from the env var.
     monkeypatch.setenv("LOOPY_ADMIN_TOKEN", TOKEN)
     monkeypatch.setenv("LOOPY_PUBLIC_URL", "http://cp.example.com")
-    result = _invoke(["admin", "--remote"], monkeypatch, tmp_path)
+    result = _invoke(["admin", "byo"], monkeypatch, tmp_path)
     assert result.exit_code == 1
     assert "plain HTTP" in result.output
 
 
-def test_remote_refuses_plain_http_to_the_network(monkeypatch, tmp_path):
+def test_byo_refuses_plain_http_to_the_network(monkeypatch, tmp_path):
     monkeypatch.setenv("LOOPY_ADMIN_TOKEN", TOKEN)
-    result = _invoke(["admin", "--remote", "http://cp.example.com"], monkeypatch, tmp_path)
+    result = _invoke(["admin", "byo", "--url", "http://cp.example.com"], monkeypatch, tmp_path)
     assert result.exit_code == 1
     assert "plain HTTP" in result.output
 
 
-def test_remote_refuses_non_loopback_proxy_bind(monkeypatch, tmp_path):
+def test_proxy_refuses_non_loopback_bind(monkeypatch, tmp_path):
     monkeypatch.setenv("LOOPY_ADMIN_TOKEN", TOKEN)
     result = _invoke(
-        ["admin", "--remote", "https://cp.example.com", "--host", "0.0.0.0"],
+        ["admin", "byo", "--url", "https://cp.example.com", "--host", "0.0.0.0"],
         monkeypatch,
         tmp_path,
     )
     assert result.exit_code == 1
     assert "loopback" in result.output
+
+
+def test_bootstrap_derives_tunnel_url_from_recorded_config(monkeypatch, tmp_path):
+    from loopy_cli import _admin_bootstrap_url
+
+    monkeypatch.setenv("LOOPY_BOOTSTRAP_INSTANCE_ID", "i-0abc123")
+    monkeypatch.setenv("LOOPY_BOOTSTRAP_ENGINE_PORT", "8443")
+    assert _admin_bootstrap_url(tmp_path) == "http://localhost:8443/admin"
+
+
+def test_bootstrap_prints_tunnel_command_and_requires_token(monkeypatch, tmp_path):
+    # The tunnel command is printed (with the recorded instance id) before the token gate
+    # stops the run — so even a failed invocation tells the user how to reach the dashboard.
+    (tmp_path / "loopy.env").write_text(
+        "LOOPY_BOOTSTRAP_INSTANCE_ID=i-0abc123\nLOOPY_BOOTSTRAP_ENGINE_PORT=8000\n"
+    )
+    result = _invoke(["admin", "bootstrap"], monkeypatch, tmp_path)
+    assert result.exit_code == 1
+    assert "aws ssm start-session --target i-0abc123" in result.output
+    assert "LOOPY_ADMIN_TOKEN" in result.output
+
+
+def test_bootstrap_falls_back_to_placeholder_instance_and_default_port(monkeypatch, tmp_path):
+    result = _invoke(["admin", "bootstrap"], monkeypatch, tmp_path)
+    assert result.exit_code == 1
+    assert "--target <instance-id>" in result.output
+    assert '"portNumber":["8000"]' in result.output
 
 
 def test_validate_remote_url():

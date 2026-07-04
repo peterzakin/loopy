@@ -1,6 +1,11 @@
 """`loopy deploy` — provision hosting for the engine from an operator's cloud keys.
 
-`loopy deploy aws` stands up the design in `docs/design/aws-deploy.md`: one
+Each subcommand is one deploy target (see `loopy_cli.deploy_target`). `loopy deploy
+bootstrap` is the loopy-provisioned starter stack — named for what it is (the
+batteries-included bootstrap), not where it runs, so future custom targets can claim
+provider names like `aws` without colliding with it.
+
+The bootstrap target stands up the design in `docs/design/aws-deploy.md`: one
 CloudFormation stack holding an EC2 instance (the bundled redis+loopy stack via
 user-data), an Elastic IP, an EBS `/state` volume, and a CloudFront distribution
 that terminates TLS with a managed cert on its own `*.cloudfront.net` name — so the
@@ -35,7 +40,8 @@ from pathlib import Path
 import typer
 
 deploy_app = typer.Typer(
-    no_args_is_help=True, help="Provision hosting for the engine (`loopy deploy aws`)."
+    no_args_is_help=True,
+    help="Provision hosting for the engine on a named deploy target (`loopy deploy bootstrap`).",
 )
 
 _DEPLOY_DIR = Path(__file__).resolve().parent / "deploy"
@@ -153,7 +159,7 @@ def render_deploy_script(
 def build_engine_wheel(source: Path, out_dir: Path) -> Path:
     """Build a wheel of loopy-computer from `source` (a loopy checkout) into `out_dir`.
 
-    Backs `deploy aws --engine-source`: the instance installs the operator's exact code rather
+    Backs `deploy bootstrap --engine-source`: the instance installs the operator's exact code rather
     than the pinned PyPI release, the only way to run an *unreleased* build on AWS (the version
     string is frozen, so PyPI can't carry it). Shells out to `uv build`, the repo's build tool.
     """
@@ -239,7 +245,7 @@ def _require_default_vpc(ec2) -> None:
     response = ec2.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])
     if not response.get("Vpcs"):
         raise RuntimeError(
-            "no default VPC in this region. This deploy mode uses the default VPC's public "
+            "no default VPC in this region. The bootstrap target uses the default VPC's public "
             "subnets; recreate one (`aws ec2 create-default-vpc`) or pick a region that has "
             "it. A custom-VPC mode is not built yet."
         )
@@ -573,7 +579,7 @@ def _delete_stack_secrets(ssm, stack: str) -> int:
 
 
 @deploy_app.command()
-def aws(
+def bootstrap(
     manifest: Path = typer.Argument(
         Path("manifest.json"),
         help="A manifest.json, or a project directory to compile (default: manifest.json).",
@@ -603,13 +609,14 @@ def aws(
         False, "--destroy", help="Tear the stack down (snapshot /state first if it matters)."
     ),
 ) -> None:
-    """Provision the engine on AWS: one EC2 instance behind CloudFront's managed cert.
+    """Provision the starter stack: one EC2 instance behind CloudFront's managed cert.
 
-    You bring AWS credentials and nothing else — no domain, no DNS. The stack is an EC2
-    instance running the bundled redis+loopy stack, an Elastic IP, an EBS /state volume,
-    and a CloudFront distribution whose *.cloudfront.net name is the public HTTPS URL
-    webhooks target. Agents still run in Daytona (DAYTONA_API_KEY rides loopy.env).
-    Re-running updates the same stack; `--destroy` removes it.
+    The `bootstrap` deploy target — loopy provisions the host for you, from your AWS
+    credentials and nothing else (no domain, no DNS). The stack is an EC2 instance
+    running the bundled redis+loopy stack, an Elastic IP, an EBS /state volume, and a
+    CloudFront distribution whose *.cloudfront.net name is the public HTTPS URL webhooks
+    target. Agents still run in Daytona (DAYTONA_API_KEY rides loopy.env). Re-running
+    updates the same stack; `--destroy` removes it.
     """
     try:
         boto3 = _require_boto3()
@@ -760,8 +767,7 @@ def aws(
             "image build, then CloudFront). Safe to leave it; the URL is printed when it's live."
         )
         typer.echo(
-            f"deploy: creating stack {stack} in {resolved_region} "
-            "(instance + address; ~2-4 min)…"
+            f"deploy: creating stack {stack} in {resolved_region} (instance + address; ~2-4 min)…"
         )
         _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": ""})
         origin = eip_public_dns(_stack_outputs(cf, stack)["PublicIp"], resolved_region)
@@ -784,18 +790,30 @@ def aws(
         Overwrite=True,
     )
 
-    # Mirror the URL (and this deploy mode) into the operator's *local* loopy.env — the same
+    # Mirror the URL (and this deploy target) into the operator's *local* loopy.env — the same
     # value the instance gets via SSM. The CloudFront name only exists once the distribution
     # does, so `loopy init` couldn't record it; writing it here is what makes `loopy webhooks
     # github` runnable straight after a deploy, with no hand-copy. Idempotent (the URL is
     # stable across re-deploys). We deliberately do *not* register webhooks ourselves — that
-    # stays one explicit `loopy webhooks github` step.
-    from loopy_cli.deploy_mode import DEPLOY_MODE_ENV, MODE_PROVISIONED
+    # stays one explicit `loopy webhooks github` step. The instance id and engine port are
+    # client-side hints for `loopy admin bootstrap` (the SSM tunnel); the engine reads none
+    # of these.
+    from loopy_cli.deploy_target import (
+        BOOTSTRAP_ENGINE_PORT_ENV,
+        BOOTSTRAP_INSTANCE_ID_ENV,
+        DEPLOY_TARGET_ENV,
+        TARGET_BOOTSTRAP,
+    )
     from loopy_runtime.secrets import write_control_plane_env
 
     write_control_plane_env(
         root_abs,
-        {"LOOPY_PUBLIC_URL": public_url, DEPLOY_MODE_ENV: MODE_PROVISIONED},
+        {
+            "LOOPY_PUBLIC_URL": public_url,
+            DEPLOY_TARGET_ENV: TARGET_BOOTSTRAP,
+            BOOTSTRAP_INSTANCE_ID_ENV: outputs["InstanceId"],
+            BOOTSTRAP_ENGINE_PORT_ENV: str(engine_port),
+        },
     )
 
     # On an update, the running instance still holds the old project/secrets (user-data ran
@@ -838,15 +856,8 @@ def aws(
     typer.echo(f"  url:       wrote LOOPY_PUBLIC_URL={public_url} to loopy.env")
     typer.echo("  webhooks:  loopy webhooks github  (registers GitHub delivery to the URL above)")
     # /admin is blocked at CloudFront on this mode (the edge->origin hop is plain HTTP, so the
-    # bearer token must not travel it). Reach the dashboard over an SSM tunnel instead. Needs
-    # the Session Manager plugin (`aws ssm` port-forwarding won't run without it). The tunnel
-    # forwards the engine port to the same local port; `loopy admin` serves the UI on its own
-    # 9000. The URL must include /admin — that's where the engine mounts the dashboard (and its
-    # /api), so pointing at the bare host would 404.
-    typer.echo("  dashboard: # one-time: install the Session Manager plugin (see AWS docs)")
-    typer.echo("             aws ssm start-session --target " + instance_id + " \\")
-    typer.echo("             --document-name AWS-StartPortForwardingSession \\")
-    typer.echo(f"             --parameters '{{\"portNumber\":[\"{engine_port}\"],"
-               f'"localPortNumber":["{engine_port}"]}}\'')
-    typer.echo(f"             then: loopy admin --remote http://localhost:{engine_port}/admin")
-    typer.echo(f"  teardown:  loopy deploy aws --destroy{stack_flag}")
+    # bearer token must not travel it). Reach the dashboard over an SSM tunnel instead —
+    # `loopy admin bootstrap` prints the tunnel command (from the instance id/port recorded in
+    # loopy.env above) and proxies to it.
+    typer.echo("  dashboard: loopy admin bootstrap  (walks you through the SSM tunnel)")
+    typer.echo(f"  teardown:  loopy deploy bootstrap --destroy{stack_flag}")

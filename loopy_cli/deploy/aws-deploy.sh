@@ -1,5 +1,5 @@
 #!/bin/bash
-# Internal deployment asset — rendered by `loopy deploy aws` (every __TOKEN__ is replaced
+# Internal deployment asset — rendered by `loopy deploy bootstrap` (every __TOKEN__ is replaced
 # before submission) and stored at /opt/loopy/deploy.sh. Run on first boot by user-data and
 # again on every re-deploy by SSM RunCommand: the CLI refreshes the project tarball (S3) and
 # the secret parameters (SSM) first, then this re-fetches both and restarts the containers.
@@ -52,7 +52,7 @@ fi
 
 # ── The engine image. By default the pinned PyPI release (same recipe as the shipped
 # Dockerfile.pypi, no source checkout on the instance). With a wheel shipped by
-# `loopy deploy aws --engine-source`, it installs that instead, so an unreleased CLI can run
+# `loopy deploy bootstrap --engine-source`, it installs that instead, so an unreleased CLI can run
 # its own engine (the PyPI version string is frozen, so PyPI can't carry unreleased code). The
 # tag carries the wheel's content hash in source mode, so a changed wheel is a new tag and
 # forces a rebuild. Built once per tag, then reused across re-deploys.

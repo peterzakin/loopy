@@ -1,5 +1,5 @@
 #!/bin/bash
-# Internal deployment asset — rendered by `loopy deploy aws` and run once by cloud-init on
+# Internal deployment asset — rendered by `loopy deploy bootstrap` and run once by cloud-init on
 # the engine instance's first boot. It does the one-time host setup (Docker, the /state
 # volume) that a re-deploy must not repeat, then installs the re-runnable deploy script
 # (`aws-deploy.sh`, embedded base64 below) and runs it. Every subsequent deploy re-runs that

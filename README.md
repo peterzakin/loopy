@@ -366,14 +366,16 @@ A few things worth knowing before the first run:
 
 The dev server `loopy run --in-process` records every run to a durable on-disk store
 (`.loopy/state.db` by default), and `loopy admin` serves a small read-only dashboard over it: a
-run list with each run's step timeline, emitted events, outputs, and any failure:
+run list with each run's step timeline, emitted events, outputs, and any failure. `loopy admin`
+takes an optional deploy target to administer — it defaults to `local` (this dev loop); pass
+`byo` or `bootstrap` for a hosted control plane (below):
 
 ```bash
 loopy run --in-process manifest.json   # dev server: records runs as they execute
 loopy admin                            # in another terminal → http://127.0.0.1:9000
 ```
 
-`loopy admin` reads the same DB the dev server writes, so it needs no flags; with a
+`loopy admin` (target `local`) reads the same DB the dev server writes, so it needs no flags; with a
 `manifest.json` present it also renders the workflow, sensor, and registry views, and `loopy demo`
 serves every view against in-memory sample data. (A bare `loopy run` brings up the containerized
 stack instead, a `redis` bus container plus the engine, which keeps its state in a Docker
@@ -398,14 +400,16 @@ service to deploy and the admin endpoint is deterministic on every provider:
 # webhooks but no /admin at all (fail-closed by absence).
 
 # laptop: the token (and LOOPY_PUBLIC_URL) are already in loopy.env, then:
-loopy admin --remote              # proxies /api to $LOOPY_PUBLIC_URL/admin with the token
+loopy admin byo                   # proxies /api to $LOOPY_PUBLIC_URL/admin with the token
 ```
 
-`--remote` runs a small local proxy: the token stays in that process (read from `loopy.env` or
-the environment — never a query param, cookie, or browser variable), every request crosses as
-`Authorization: Bearer` over TLS, and the server compares it in constant time. Pass an explicit
-URL (`loopy admin --remote https://…`) to point somewhere other than the derived default, e.g.
-a standalone `loopy admin --host 0.0.0.0` serving a copy of the state DB. Rotation is
+`loopy admin byo` runs a small local proxy: the token stays in that process (read from
+`loopy.env` or the environment — never a query param, cookie, or browser variable), every
+request crosses as `Authorization: Bearer` over TLS, and the server compares it in constant
+time. (`loopy admin bootstrap` is the same proxy pointed at the provisioned stack's SSM
+tunnel — see the deploy section.) Pass an explicit URL (`loopy admin byo --url https://…`)
+to point somewhere other than the derived default, e.g. a standalone
+`loopy admin local --host 0.0.0.0` serving a copy of the state DB. Rotation is
 overlap-based: the server also accepts `LOOPY_ADMIN_TOKEN_NEXT`, so you can roll both sides
 without a lockout. Plain HTTP to a non-loopback remote is refused.
 

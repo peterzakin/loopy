@@ -35,29 +35,36 @@ The engine's webhook server carries the dashboard too: deliveries arrive at
 process, one port, one hostname — no reverse proxy, no second service, and the admin
 endpoint is deterministic on every provider. The mount follows the bind:
 
-- **Loopback bind** (the dev loop): `/admin` is open, like local `loopy admin`.
+- **Loopback bind** (the dev loop): `/admin` is open, like `loopy admin local`.
 - **Non-loopback bind with `LOOPY_ADMIN_TOKEN` set:** `/admin` requires
   `Authorization: Bearer <token>`, verified in constant time before any handler runs.
   `GET /admin/healthz` stays open — liveness only, no data — for platform probes.
 - **Non-loopback bind without a token:** `/admin` is not mounted at all. Webhooks still
   serve; run data is never exposed openly (fail-closed by absence).
 
-## The admin dashboard's three modes
+## Deploy targets, and the admin dashboard
 
-`loopy admin` serves the read-only dashboard. Which mode you get follows from the bind and
-flags — there is no separate "secure" binary:
+`loopy admin [target]` serves the read-only dashboard for one deploy target — the named
+place the engine runs. The target defaults to `local` (the dev loop); the hosted targets
+are named explicitly. Each reads run state from a different place:
 
-1. **Local (default).** Binds loopback, no auth, reads `.loopy/state.db` directly. Unchanged
-   from the dev loop: `loopy run` in one terminal, `loopy admin` in another.
-2. **Remote client** (`--remote`, on your laptop). A local loopback proxy that serves
-   the dashboard UI and forwards `/api/*` (and `/static`) to the control plane, injecting
-   the bearer from `LOOPY_ADMIN_TOKEN` (environment or `loopy.env`). The browser never
-   holds the credential. Bare `--remote` targets `$LOOPY_PUBLIC_URL/admin` (where the
-   engine mounts the dashboard); pass a URL as the positional argument to override.
-3. **Exposed server** (`--host 0.0.0.0`). The standalone flavor of the `/admin` mount, for
-   split deployments where the dashboard runs apart from the engine against the same
-   durable state DB (SQLite is one writer plus readers on one host). Same rules: requires
-   `LOOPY_ADMIN_TOKEN`, refuses to start without it, open `/healthz`.
+1. **`loopy admin` (target `local`, the default).** Binds loopback, no auth, reads
+   `.loopy/state.db` directly. The dev loop: `loopy run` in one terminal, `loopy admin` in
+   another.
+2. **`loopy admin byo`** (bring-your-own hosting, on your laptop). A local loopback proxy
+   that serves the dashboard UI and forwards `/api/*` (and `/static`) to the control
+   plane, injecting the bearer from `LOOPY_ADMIN_TOKEN` (environment or `loopy.env`). The
+   browser never holds the credential. It targets `$LOOPY_PUBLIC_URL/admin` (where the
+   engine mounts the dashboard); pass `--url` to override.
+3. **`loopy admin bootstrap`** (the provisioned starter stack). The same proxy, pointed at
+   the stack's SSM port-forward tunnel — on that stack `/admin` is blocked at the CDN edge,
+   so the dashboard is reached through the tunnel instead. It prints the ready-to-paste
+   tunnel command (from the instance id `loopy deploy bootstrap` recorded in `loopy.env`).
+
+An exposed standalone server (`loopy admin local --host 0.0.0.0`) is the split-deployment
+flavor of the `/admin` mount, where the dashboard runs apart from the engine against the
+same durable state DB (SQLite is one writer plus readers on one host). Same rules: requires
+`LOOPY_ADMIN_TOKEN`, refuses to start without it, open `/healthz`.
 
 ```bash
 # `loopy init` already minted LOOPY_ADMIN_TOKEN into loopy.env (gitignored) — one value,
@@ -66,7 +73,7 @@ flags — there is no separate "secure" binary:
 #   laptop:        LOOPY_ADMIN_TOKEN (+ LOOPY_PUBLIC_URL) already in loopy.env
 
 loopy run …                # control plane: webhooks at /hooks/*, dashboard at /admin
-loopy admin --remote       # laptop: proxies /api to $LOOPY_PUBLIC_URL/admin
+loopy admin byo            # laptop: proxies /api to $LOOPY_PUBLIC_URL/admin
 ```
 
 ## The auth mechanism and its guardrails

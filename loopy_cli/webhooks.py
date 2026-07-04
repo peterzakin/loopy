@@ -339,12 +339,12 @@ def github(
     else:
         public_url = resolve_public_url(root)
         if public_url is None:
-            from loopy_cli.deploy_mode import MODE_PROVISIONED, resolve_deploy_mode
+            from loopy_cli.deploy_target import TARGET_BOOTSTRAP, resolve_deploy_target
 
-            if resolve_deploy_mode(root) == MODE_PROVISIONED:
+            if resolve_deploy_target(root) == TARGET_BOOTSTRAP:
                 hint = (
-                    "no public base URL yet — run `loopy deploy aws` first; it provisions the "
-                    "host and writes LOOPY_PUBLIC_URL for you (or pass --url)."
+                    "no public base URL yet — run `loopy deploy bootstrap` first; it provisions "
+                    "the host and writes LOOPY_PUBLIC_URL for you (or pass --url)."
                 )
             else:
                 hint = (

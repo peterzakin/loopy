@@ -4,7 +4,7 @@
     loopy doctor    preflight a project for its first run (placeholders, repo, git auth)
     loopy run       start the server: host sensor webhooks; events drive workflow runs
     loopy trigger   fire one event at the manifest and run it to completion (for testing)
-    loopy admin     serve the read-only dashboard over the run-state DB `loopy run` writes
+    loopy admin     serve the read-only dashboard for a deploy target (local|byo|bootstrap)
     loopy demo      serve the dashboard against in-memory fake data (dev-only; safe to delete)
     loopy help      show this overview, or help for one command (`loopy help run`)
     loopy docs      print the authoring reference (or `deployment`/`errors`) as markdown
@@ -25,8 +25,8 @@ from pathlib import Path
 import typer
 
 from loopy_cli.auth import auth_app
-from loopy_cli.aws import deploy_app
-from loopy_cli.deploy_mode import MODE_BYO
+from loopy_cli.bootstrap import deploy_app
+from loopy_cli.deploy_target import TARGET_BYO
 from loopy_cli.integrations import integrations_command
 from loopy_cli.webhooks import (
     normalize_public_url,
@@ -50,9 +50,10 @@ app.add_typer(webhooks_app, name="webhooks")
 # which are used, whether each signing secret is configured, and per-provider setup.
 app.command(name="integrations")(integrations_command)
 
-# `loopy deploy ...` — provision hosting for the engine from an operator's cloud keys
-# (`loopy deploy aws` drives one CloudFormation stack; see docs/design/aws-deploy.md).
-# boto3 is imported inside the command body, keeping this registration weightless.
+# `loopy deploy <target>` — provision hosting for the engine from an operator's cloud
+# keys. One subcommand per deploy target: `loopy deploy bootstrap` is the provisioned
+# starter stack (one CloudFormation stack; see docs/design/aws-deploy.md). boto3 is
+# imported inside the command body, keeping this registration weightless.
 app.add_typer(deploy_app, name="deploy")
 
 
@@ -296,7 +297,7 @@ def _print_workflow_diagram(name: str, wf) -> None:  # noqa: ANN001
         for ni, step_name in enumerate(gen):
             step = wf.steps[step_name]
             if multi:
-                glyph = ("└─●" if ni == len(gen) - 1 else "├─●")
+                glyph = "└─●" if ni == len(gen) - 1 else "├─●"
             else:
                 glyph = "  ●" if forked else "●"
             raw = f"{glyph} {step_name}"
@@ -418,12 +419,12 @@ def init(
 
     target = (directory / name).resolve()
 
-    # The deployment mode comes first: it decides where the public webhook URL comes from,
+    # The deploy target comes first: it decides where the public webhook URL comes from,
     # the one setup step that can't follow a single order (a provisioned host mints its URL
-    # only at deploy time). Bring-your-own means we can record the URL now; provisioned means
-    # `loopy deploy aws` writes it back later, so there's nothing to ask here.
-    mode = _choose_deploy_mode(target)
-    if mode == MODE_BYO:
+    # only at deploy time). Bring-your-own means we can record the URL now; the bootstrap
+    # target means `loopy deploy bootstrap` writes it back later, so there's nothing to ask.
+    deploy_target = _choose_deploy_target(target)
+    if deploy_target == TARGET_BYO:
         _offer_public_webhook_url(target)
 
     # Wire git auth *before* asking which repo(s) the agent works on. `loopy auth github` creates
@@ -464,7 +465,7 @@ def init(
     _offer_redis_bus(target)
     # Webhook registration is deliberately *not* offered here — it's one explicit
     # `loopy webhooks github` step, surfaced as a next step below once a public URL exists
-    # (in provisioned mode that URL doesn't arrive until `loopy deploy aws`).
+    # (on the bootstrap target that URL doesn't arrive until `loopy deploy bootstrap`).
 
     # A repo-less scaffold is deliberately bare — no starter workflow. Repeat the warning the
     # user already confirmed past, and point at the way out.
@@ -474,7 +475,7 @@ def init(
     # A clean compile is *not* a runnable project: the scaffold ships placeholders on purpose
     # (a fake API key, maybe no git auth). Run the same checks as `loopy doctor` so the user
     # sees the *actual* remaining gaps — anything resolved above is already gone.
-    _report_remaining_setup(target, name, mode)
+    _report_remaining_setup(target, name, deploy_target)
 
 
 def _prompt_for_repos() -> list[str]:
@@ -601,9 +602,7 @@ def _offer_ambient_daytona_creds(target: Path) -> None:
 
     write_control_plane_env(target, updates)
     wrote = " + ".join(updates)
-    typer.echo(
-        "  " + typer.style("✓", fg=typer.colors.GREEN) + f" wrote {wrote} to loopy.env"
-    )
+    typer.echo("  " + typer.style("✓", fg=typer.colors.GREEN) + f" wrote {wrote} to loopy.env")
     typer.echo()
 
 
@@ -683,32 +682,33 @@ def _write_admin_token(target: Path) -> None:
     typer.echo()
 
 
-def _choose_deploy_mode(target: Path) -> str:
-    """Ask how the engine will be hosted, and record it as `LOOPY_DEPLOY_MODE`.
+def _choose_deploy_target(target: Path) -> str:
+    """Ask how the engine will be hosted, and record it as `LOOPY_DEPLOY_TARGET`.
 
     This is the fork the rest of onboarding hinges on, because the public webhook URL can't
     be collected in a single linear order — a provisioned host doesn't mint its URL until
     deploy time:
 
-    - bring-your-own: you have a URL now (a domain, a dev tunnel, or a platform hostname like
-      Render's). `init` prompts for it next and webhook delivery is wired right after.
-    - provision on AWS: `loopy deploy aws` stands up the host and its `*.cloudfront.net` URL,
-      then writes `LOOPY_PUBLIC_URL` back for you. `init` skips the URL prompt entirely.
+    - `byo` (bring-your-own): you have a URL now (a domain, a dev tunnel, or a platform
+      hostname like Render's). `init` prompts for it next and webhook delivery is wired
+      right after.
+    - `bootstrap` (the provisioned starter stack): `loopy deploy bootstrap` stands up the
+      host and its `*.cloudfront.net` URL from your AWS credentials, then writes
+      `LOOPY_PUBLIC_URL` back for you. `init` skips the URL prompt entirely.
 
-    Recorded in `loopy.env` so `webhooks`/`doctor` can phrase their guidance for the right
-    path; the engine never reads it. Re-init keeps an existing choice (never clobbers), and
+    Recorded in `loopy.env` so `webhooks`/`admin` can phrase their guidance for the right
+    target; the engine never reads it. Re-init keeps an existing choice (never clobbers), and
     anything but an explicit "2" falls back to bring-your-own (the safe default: it just
     prompts for a URL, and blank is a first-class answer there).
     """
-    from loopy_cli.deploy_mode import (
-        DEPLOY_MODE_ENV,
-        MODE_BYO,
-        MODE_PROVISIONED,
-        resolve_deploy_mode,
+    from loopy_cli.deploy_target import (
+        DEPLOY_TARGET_ENV,
+        TARGET_BOOTSTRAP,
+        resolve_deploy_target,
     )
     from loopy_runtime.secrets import write_control_plane_env
 
-    existing = resolve_deploy_mode(target)
+    existing = resolve_deploy_target(target)
     if existing:
         return existing
 
@@ -717,20 +717,22 @@ def _choose_deploy_mode(target: Path) -> str:
         "    1) I'll provide the public URL — a domain, a dev tunnel, or a platform like Render"
     )
     typer.echo(
-        "    2) Provision it on AWS for me — one command stands up the host and mints the URL"
+        "    2) Provision a starter stack for me — `loopy deploy bootstrap` stands up the "
+        "host on AWS and mints the URL"
     )
     choice = typer.prompt("  Choose 1 or 2", default="1").strip()
-    mode = MODE_PROVISIONED if choice == "2" else MODE_BYO
-    write_control_plane_env(target, {DEPLOY_MODE_ENV: mode})
+    chosen = TARGET_BOOTSTRAP if choice == "2" else TARGET_BYO
+    write_control_plane_env(target, {DEPLOY_TARGET_ENV: chosen})
 
-    if mode == MODE_PROVISIONED:
+    if chosen == TARGET_BOOTSTRAP:
         typer.echo(
             "  "
             + typer.style("✓", fg=typer.colors.GREEN)
-            + " provisioned mode — `loopy deploy aws` sets LOOPY_PUBLIC_URL for you at deploy."
+            + " bootstrap target — `loopy deploy bootstrap` sets LOOPY_PUBLIC_URL for you "
+            "at deploy."
         )
     typer.echo()
-    return mode
+    return chosen
 
 
 def _offer_public_webhook_url(target: Path) -> None:
@@ -812,13 +814,13 @@ def _offer_github_auth(target: Path) -> bool:
     return bool(load_control_plane_env(target).get("GITHUB_APP_ID"))
 
 
-def _report_remaining_setup(target: Path, name: str, mode: str) -> None:
+def _report_remaining_setup(target: Path, name: str, deploy_target: str) -> None:
     """Compile the fresh project and print the gaps still blocking a first run (doctor's checks).
 
     Replaces the old static checklist: because the wizard may have already set the key or wired
     auth, we report the *actual* remaining findings instead of a fixed list the user has to
-    re-verify by hand. Then we point at the next commands, ordered for the chosen deployment
-    mode — provisioned hosting deploys before it can register webhooks, bring-your-own can
+    re-verify by hand. Then we point at the next commands, ordered for the chosen deploy
+    target — the bootstrap target deploys before it can register webhooks, bring-your-own can
     register straight away.
     """
     from loopy_core.compile.pipeline import compile_project
@@ -847,7 +849,7 @@ def _report_remaining_setup(target: Path, name: str, mode: str) -> None:
         )
         typer.echo()
 
-    from loopy_cli.deploy_mode import MODE_PROVISIONED
+    from loopy_cli.deploy_target import TARGET_BOOTSTRAP
 
     typer.echo("  Then:")
     typer.echo(typer.style(f"    cd {name}", fg=typer.colors.BRIGHT_WHITE))
@@ -855,11 +857,11 @@ def _report_remaining_setup(target: Path, name: str, mode: str) -> None:
         typer.style("    loopy doctor", fg=typer.colors.BRIGHT_WHITE)
         + typer.style("          # re-check the above any time", fg=typer.colors.BRIGHT_BLACK)
     )
-    if mode == MODE_PROVISIONED:
+    if deploy_target == TARGET_BOOTSTRAP:
         typer.echo(
-            typer.style("    loopy deploy aws", fg=typer.colors.BRIGHT_WHITE)
+            typer.style("    loopy deploy bootstrap", fg=typer.colors.BRIGHT_WHITE)
             + typer.style(
-                "      # provision the host; sets LOOPY_PUBLIC_URL for you",
+                "  # provision the host; sets LOOPY_PUBLIC_URL for you",
                 fg=typer.colors.BRIGHT_BLACK,
             )
         )
@@ -1769,36 +1771,74 @@ def _admin_port(flag: int | None) -> int:
     return 9000
 
 
-def _admin_remote_url(target: str | None) -> str:
-    """Resolve the control-plane URL for `loopy admin --remote`.
-
-    An explicit target wins; bare `--remote` derives the deterministic admin endpoint from
+def _admin_byo_url() -> str:
+    """The byo target's control-plane URL: the deterministic admin endpoint derived from
     `LOOPY_PUBLIC_URL` — the engine mounts the dashboard at `/admin` on the same server that
     receives webhook deliveries, so one public URL covers both."""
-    if target:
-        return target
     public = os.environ.get("LOOPY_PUBLIC_URL", "").strip().rstrip("/")
     if not public:
         typer.echo(
-            "error: bare --remote derives the URL from LOOPY_PUBLIC_URL, which is not set. "
-            "Set it in the environment or loopy.env, or pass the URL: "
-            "`loopy admin --remote https://loopy.example.com/admin`.",
+            "error: `loopy admin byo` derives its URL from LOOPY_PUBLIC_URL, which is not "
+            "set. Set it in the environment or loopy.env, or pass "
+            "`--url https://loopy.example.com/admin`.",
             err=True,
         )
         raise typer.Exit(code=1)
     return f"{public}/admin"
 
 
+def _admin_bootstrap_url(root: Path) -> str:
+    """The bootstrap target's dashboard URL: the local end of its SSM port-forward tunnel.
+
+    On the bootstrap stack `/admin` is blocked at CloudFront (the edge→origin hop is plain
+    HTTP, so the bearer token must not travel it); the dashboard is reached over an SSM
+    tunnel to the engine port instead. `loopy deploy bootstrap` records the instance id and
+    engine port in loopy.env, so the tunnel command printed here is ready to paste; both
+    fall back to placeholders/defaults when the deploy predates the recording.
+    """
+    from loopy_cli.deploy_target import (
+        BOOTSTRAP_ENGINE_PORT_ENV,
+        BOOTSTRAP_INSTANCE_ID_ENV,
+        resolve_bootstrap_config,
+    )
+
+    config = resolve_bootstrap_config(root)
+    engine_port = config.get(BOOTSTRAP_ENGINE_PORT_ENV, "8000")
+    instance = config.get(BOOTSTRAP_INSTANCE_ID_ENV, "<instance-id>")
+    typer.echo("bootstrap target: the dashboard rides an SSM tunnel to the engine port.")
+    typer.echo("If it isn't up yet, start it in another terminal (needs the Session")
+    typer.echo("Manager plugin, a one-time install; see AWS docs):")
+    typer.echo(f"  aws ssm start-session --target {instance} \\")
+    typer.echo("    --document-name AWS-StartPortForwardingSession \\")
+    typer.echo(
+        f'    --parameters \'{{"portNumber":["{engine_port}"],'
+        f'"localPortNumber":["{engine_port}"]}}\''
+    )
+    return f"http://localhost:{engine_port}/admin"
+
+
 @app.command()
 def admin(
     target: str | None = typer.Argument(
         None,
-        help="State DB written by `loopy run` (default .loopy/state.db) — or, with --remote, "
-        "the control-plane URL (default $LOOPY_PUBLIC_URL/admin).",
+        help="Deploy target to administer (default `local`): `local` (the state DB `loopy "
+        "run` writes here), `byo` (your hosted control plane, at $LOOPY_PUBLIC_URL/admin), "
+        "or `bootstrap` (the provisioned stack, over its SSM tunnel).",
     ),
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address."),
     port: int | None = typer.Option(
         None, "--port", help="Port to serve the dashboard on (default $PORT, then 9000)."
+    ),
+    db: Path | None = typer.Option(
+        None,
+        "--db",
+        help="State DB to read (local target only; default .loopy/state.db).",
+    ),
+    url: str | None = typer.Option(
+        None,
+        "--url",
+        help="Control-plane URL to proxy to (byo/bootstrap targets only; overrides the "
+        "derived default).",
     ),
     manifest: Path = typer.Option(
         Path("manifest.json"),
@@ -1806,75 +1846,118 @@ def admin(
         help="Compiled manifest for the templates/registry/schedules views (default manifest.json; "
         "skipped if absent).",
     ),
-    remote: bool = typer.Option(
-        False,
-        "--remote",
-        help="View a remote control plane: serve the UI locally and proxy /api to it, "
-        "authenticating with LOOPY_ADMIN_TOKEN from the environment or loopy.env. The URL "
-        "defaults to $LOOPY_PUBLIC_URL/admin (where `loopy run` mounts the dashboard).",
-    ),
 ) -> None:
-    """Serve the read-only control-plane dashboard.
+    """Serve the read-only control-plane dashboard for one deploy target.
 
-    Local (default): reads the run-state DB `loopy run` writes. Pairs with `loopy run` (which
-    defaults to that same DB): no flags needed in the common case — `loopy run` in one terminal,
-    `loopy admin` in another. When `manifest.json` is present it also powers the
-    workflow-template, registry, and schedule views; the run views work without it.
+    Each target reads run state from a different place; the target defaults to `local`:
 
-    Remote client (`--remote`): a local proxy that serves the UI and forwards /api to a
-    cloud-hosted control plane with a bearer token from LOOPY_ADMIN_TOKEN — the browser never
-    holds the credential. The URL is $LOOPY_PUBLIC_URL/admin unless given explicitly.
+    `local` (the default): the run-state DB `loopy run` writes on this machine. Pairs with
+    `loopy run` (which defaults to that same DB): `loopy run` in one terminal, `loopy admin`
+    in another. When `manifest.json` is present it also powers the workflow-template,
+    registry, and schedule views; the run views work without it.
 
-    Exposed server (`--host 0.0.0.0`, e.g. on the control plane itself): requires
+    `byo` / `bootstrap`: a local proxy that serves the UI and forwards /api to the deployed
+    control plane with a bearer token from LOOPY_ADMIN_TOKEN — the browser never holds the
+    credential. `byo` targets $LOOPY_PUBLIC_URL/admin (where `loopy run` mounts the
+    dashboard); `bootstrap` targets the provisioned stack's SSM tunnel (it prints the tunnel
+    command). Pass --url to point either somewhere else.
+
+    Exposed server (`local --host 0.0.0.0`, e.g. on the control plane itself): requires
     LOOPY_ADMIN_TOKEN in the environment and puts every /api route behind it; refuses to start
     without one, because run/step outputs are not redacted. (`loopy run` also mounts this
     dashboard at /admin on its own webhook server, under the same rules.)
     """
     import uvicorn
 
+    from loopy_cli.deploy_target import (
+        ADMIN_TARGETS,
+        TARGET_BOOTSTRAP,
+        TARGET_BYO,
+        TARGET_LOCAL,
+        resolve_deploy_target,
+    )
     from loopy_runtime.dashboard.auth import AdminAuth, is_loopback_host
     from loopy_runtime.secrets import ADMIN_TOKEN_ENV, load_control_plane_env
 
+    root = Path.cwd()
+
     # The admin token rides the control-plane env channel: `loopy.env` on a laptop, the
     # platform's process env in production. setdefault — the real environment always wins.
-    for key, value in load_control_plane_env(Path.cwd()).items():
+    for key, value in load_control_plane_env(root).items():
         os.environ.setdefault(key, value)
     port = _admin_port(port)
 
-    if remote:
+    choices = "|".join(ADMIN_TARGETS)
+    # `local` is the default: it pairs with `loopy run` on this machine, the common dev
+    # loop, so `loopy run` in one terminal and bare `loopy admin` in another just works.
+    # The hosted targets (byo/bootstrap) proxy elsewhere, so those must be named.
+    if target is None:
+        target = TARGET_LOCAL
+
+    if target not in ADMIN_TARGETS:
+        hint = ""
+        if "/" in target or target.endswith(".db"):
+            hint = " A state DB path goes to --db: `loopy admin local --db PATH`."
+        typer.echo(
+            f"error: unknown deploy target '{target}' — expected one of: {choices}.{hint}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    if target in (TARGET_BYO, TARGET_BOOTSTRAP):
         from loopy_runtime.dashboard.proxy import create_proxy_app, validate_remote_url
 
-        if not is_loopback_host(host):
+        if db is not None:
             typer.echo(
-                "error: --remote runs a local proxy that holds the admin token; it binds "
-                "loopback only (drop --host, or harden the control plane itself instead).",
+                f"error: --db reads a local state DB, which the '{target}' target doesn't "
+                "use — drop it, or use `loopy admin local --db PATH`.",
                 err=True,
             )
             raise typer.Exit(code=1)
+        if not is_loopback_host(host):
+            typer.echo(
+                f"error: `loopy admin {target}` runs a local proxy that holds the admin "
+                "token; it binds loopback only (drop --host, or harden the control plane "
+                "itself instead).",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        if url is None:
+            url = _admin_byo_url() if target == TARGET_BYO else _admin_bootstrap_url(root)
         try:
-            url = validate_remote_url(_admin_remote_url(target))
+            url = validate_remote_url(url)
         except ValueError as exc:
             typer.echo(f"error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
         token = os.environ.get(ADMIN_TOKEN_ENV, "").strip()
         if not token:
             typer.echo(
-                f"error: --remote needs {ADMIN_TOKEN_ENV} in the environment or loopy.env — "
-                "the same token the control plane was deployed with.",
+                f"error: `loopy admin {target}` needs {ADMIN_TOKEN_ENV} in the environment "
+                "or loopy.env — the same token the control plane was deployed with.",
                 err=True,
             )
             raise typer.Exit(code=1)
         port = _resolve_dashboard_port(host, port)
-        typer.echo(f"loopy dashboard → http://{host}:{port}  (remote {url})")
+        typer.echo(f"loopy dashboard → http://{host}:{port}  ({target} → {url})")
         config = uvicorn.Config(
             create_proxy_app(url, token), host=host, port=port, log_level="warning"
         )
         _serve_dashboard(config)  # pragma: no cover - long-lived server
         return
 
+    assert target == TARGET_LOCAL
+
     from loopy_runtime.dashboard.app import create_app
     from loopy_runtime.manifest_model import load_manifest
     from loopy_runtime.state.sqlite import SqliteStateStore
+
+    if url is not None:
+        typer.echo(
+            "error: --url proxies to a deployed control plane, which the 'local' target "
+            f"doesn't do — drop it, or use `loopy admin <{TARGET_BYO}|{TARGET_BOOTSTRAP}>`.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
 
     # Fail-closed (checked before anything else): run/step outputs are not redacted, so a
     # bind that leaves loopback must carry bearer auth or not start at all.
@@ -1891,11 +1974,20 @@ def admin(
             )
             raise typer.Exit(code=1)
 
-    db = Path(target) if target else Path(".loopy/state.db")
+    db = db if db is not None else Path(".loopy/state.db")
     try:
         store = SqliteStateStore(db, read_only=True)  # raises if the DB doesn't exist yet
     except FileNotFoundError as exc:
         typer.echo(f"error: {exc}", err=True)
+        # A local DB is expected before a local run — but if the project is set up for a
+        # hosted target, the operator likely wanted that one, not the default `local`.
+        recorded = resolve_deploy_target(root)
+        if recorded:
+            typer.echo(
+                f"       (this project's deploy target is '{recorded}' — for that, run "
+                f"`loopy admin {recorded}`)",
+                err=True,
+            )
         raise typer.Exit(code=1) from exc
 
     loaded = None

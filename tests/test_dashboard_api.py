@@ -163,7 +163,7 @@ def test_admin_errors_clearly_when_db_missing(tmp_path):
 
     from loopy_cli import app
 
-    result = CliRunner().invoke(app, ["admin", str(tmp_path / "nope.db")])
+    result = CliRunner().invoke(app, ["admin", "local", "--db", str(tmp_path / "nope.db")])
     assert result.exit_code == 1
     # the friendly read-only-missing message, not a stack trace
     assert "no state DB" in result.output
