@@ -1,0 +1,261 @@
+# Design: provision the Loopy engine on AWS from an operator's keys
+
+Status: implemented (`loopy_cli/aws.py`, `loopy_cli/deploy/aws-stack.json`,
+`loopy_cli/deploy/aws-userdata.sh`, `loopy_cli/deploy/aws-deploy.sh`; tests in
+`tests/test_deploy_aws.py`) · Scope: `loopy_cli` (`deploy aws` command),
+`loopy_cli/deploy`, docs
+
+## Problem
+
+Loopy documents two ways to host the engine: the bundled `loopy run` Docker
+stack on a VM you manage, and Render (one Web Service + managed Redis + a disk).
+Both are hand-wired. We want a third path where an operator hands over AWS
+credentials and nothing else, and Loopy stands up the hosting infrastructure
+itself with one command and no manual step.
+
+Three constraints frame the design:
+
+1. **Agents stay in Daytona.** AWS hosts only the engine (the small `loopy run`
+   process: sensor webhooks, scheduler, event bus, runtime, `/admin` dashboard).
+   The sandbox side is untouched, so `DAYTONA_API_KEY` is passed to the engine as
+   an ordinary control-plane cred, exactly as on a VM or Render. We are not
+   building an AWS sandbox provider.
+2. **The engine is a single writer.** Run history is SQLite behind the
+   `StateStore` seam (`loopy_runtime/state/sqlite.py`), and the bundled compose
+   stack (`loopy_cli/deploy/docker-compose.yml`) is explicitly "single replica."
+   So the target is one instance with a durable disk, not a fleet. This is the
+   same shape Render's docs pin to one Web Service.
+3. **The operator brings no domain.** Webhooks need a valid cert, and a public CA
+   will not issue one for a bare IP or an `amazonaws.com` name. Since we refuse to
+   ask the operator for a domain, TLS has to come from an AWS endpoint that
+   carries its own trusted name. That rules out terminating TLS on the instance
+   (Caddy/Let's Encrypt would need a domain the operator controls) and points at
+   CloudFront, whose distribution serves a managed cert on `*.cloudfront.net`.
+
+This is **one deployment mode** (no domain, managed cert, CloudFront front door),
+not the only one. A bring-your-own-domain mode (ACM + ALB, or Caddy on the box)
+would terminate TLS end to end and could serve the dashboard publicly; its
+security posture differs from the tradeoffs below. The choices here apply to the
+no-domain mode.
+
+## Decisions (the proposed design)
+
+1. **CloudFormation, driven by boto3.** One template describes the stack; a new
+   `loopy deploy aws` command calls `create_stack` / `update_stack` /
+   `delete_stack` through boto3. The stack name (derived from the project, e.g.
+   `loopy-engine-<project>`) is the idempotency key: a first run creates, a
+   re-run updates, and a bad template rolls back on its own. Teardown is one
+   `delete_stack`. `boto3` is a core dependency (like the Daytona SDK, imported
+   lazily so `loopy compile` stays runtime-free), so the command asks nothing of
+   the operator beyond AWS credentials and needs no external binary (unlike
+   Terraform or CDK).
+
+2. **Single EC2 + the bundled compose stack, behind CloudFront for the cert.**
+   The instance runs the same `redis` + `loopy` compose stack the CLI already
+   ships, brought up by cloud-init user-data. An EBS data volume mounted at
+   `/state` holds the SQLite DB and the Redis append-only file across a reboot.
+   The instance does not terminate TLS: it serves plain HTTP on `:8000` and a
+   CloudFront distribution in front is the public HTTPS endpoint, terminating TLS
+   with an AWS-managed cert on its `*.cloudfront.net` name (constraint 3). This
+   reuses shipped assets, keeps the single-writer VM shape, and avoids the moving
+   parts (ALB, ElastiCache, EFS) that a managed topology would add for no benefit
+   at one replica. CloudFront is configured to forward all HTTP methods and
+   headers and cache nothing, so webhook POSTs and their signature headers reach
+   the engine unaltered; the origin is the Elastic IP, reached over HTTP.
+
+3. **Secrets in SSM Parameter Store, read via an instance role.** The
+   control-plane vs sandbox split the runtime already enforces
+   (`loopy_runtime/secrets.py`) carries over unchanged. Engine creds go into SSM
+   SecureStrings and are rendered into `loopy.env` on the instance at boot; the
+   agents' model key (`ANTHROPIC_API_KEY`) goes into a SecureString and is
+   written to the sandbox `env_file` path (e.g. `secrets/base.env`) on the
+   instance, where the engine resolves it at runtime to inject into the Daytona
+   sandbox. No secret is ever baked into the template, the AMI, or the compiled
+   manifest.
+
+## CloudFormation template inventory
+
+The stack, in one region, using the account's default VPC and one public subnet:
+
+- **`AWS::EC2::Instance`** — the engine host (default `t3.small`, overridable),
+  a recent Amazon Linux or Ubuntu AMI, with the user-data below and an
+  `IamInstanceProfile`.
+- **`AWS::EC2::SecurityGroup`** — inbound to the engine port (`8000`) only, and
+  only from CloudFront's managed prefix list
+  (`com.amazonaws.global.cloudfront.origin-facing`), so the Elastic IP is a
+  locked-down origin rather than a second public door. All egress open, since the
+  engine reaches the GitHub and Daytona APIs.
+- **`AWS::CloudFront::Distribution`** — the public HTTPS endpoint. Default
+  `*.cloudfront.net` viewer cert (no ACM cert, no domain); a custom origin
+  pointing at the EIP's EC2 public DNS name over HTTP on the engine port
+  (CloudFront origins take a DNS name, never a bare IP — every EIP has one, in
+  EC2's fixed `ec2-<ip-dashes>.<zone>.amazonaws.com` scheme); the managed
+  `CachingDisabled` cache policy and `AllViewer` origin-request policy, so POST
+  webhooks and `X-Hub-Signature-256` pass through untouched.
+- **`AWS::EC2::EIP` + `AWS::EC2::EIPAssociation`** — a stable origin address that
+  survives a stop/start (the distribution's origin is pinned to its DNS name).
+- **`AWS::EC2::Volume` + `AWS::EC2::VolumeAttachment`** — the `/state` data
+  volume (default 8 GiB gp3). `DeletionPolicy` is `Delete` by default; the docs
+  tell operators to snapshot before teardown if they want the history.
+- **`AWS::IAM::Role` + `AWS::IAM::InstanceProfile`** — an instance role whose
+  permissions are `ssm:GetParameter*` on this stack's parameter path
+  (`/loopy/<stack>/*`), `kms:Decrypt` via the SSM service, `s3:GetObject` on the
+  stack's project tarball, plus `AmazonSSMManagedInstanceCore` so the box is
+  reachable through Session Manager (no SSH port exists).
+- **Outputs** — the distribution's `*.cloudfront.net` domain (the public URL the
+  CLI prints and webhooks target), the Elastic IP, and the instance id.
+
+Two pieces live outside the template, both CLI-side, both deliberate:
+
+- **Secrets are `put_parameter` calls, not template resources.** CloudFormation
+  cannot create `SecureString` parameters, and routing secret values through the
+  template body would put them in the CloudFormation console anyway. The CLI
+  pushes each env file (`loopy.env`, every sandbox `env_file`) verbatim as one
+  SecureString at `/loopy/<stack>/files/<relpath>` (Intelligent-Tiering, so a
+  file past 4 KB — the GitHub App key case — still fits), and `--destroy` deletes
+  the path before deleting the stack.
+- **The project travels via a small deploy bucket.** User-data needs the project
+  (manifest + sensors) before any stack resource can carry it, so the CLI ensures
+  `loopy-deploy-<account>-<region>` (private, public access blocked), uploads the
+  tarball (secret env files excluded — they ride SSM), and the instance role reads
+  exactly that key. The bucket is kept on `--destroy`: it is a few kilobytes and
+  reused by the next deploy.
+
+**Two scripts, one code path.** The boot logic is split so that first boot and
+every re-deploy share it:
+
+- `aws-userdata.sh` (rendered, run once by cloud-init) does the *one-time host
+  setup* a re-deploy must not repeat: install Docker; wait for, format-if-blank,
+  and mount the `/state` volume. It then decodes the second script (embedded as
+  base64) to `/opt/loopy/deploy.sh` and runs it.
+- `aws-deploy.sh` (rendered, embedded above, also stored on the instance) is the
+  *repeatable* part: fetch the project tarball from S3; pull each env file back
+  from SSM to its project-relative path; append `LOOPY_PUBLIC_URL` to `loopy.env`;
+  build the engine image from the pinned PyPI release (skipped if that tag
+  already exists — the `Dockerfile.pypi` recipe, no source checkout); and
+  `docker rm -f` then re-run the same collapsed topology as the bundled compose
+  file — a `redis:7-alpine` container (append-only, `/state/redis`) and the
+  engine (`--in-process --bus redis --state sqlite --state-path /state/state.db`,
+  project read-only), both `--restart unless-stopped`. It re-reads whatever the
+  CLI last pushed, so it is safe to re-run. There is no TLS on the instance and
+  no ACME client: CloudFront owns the cert.
+
+**In-place updates.** Because the instance ran user-data only once, a re-deploy
+must actively refresh it. After pushing the new tarball and secrets, the CLI
+re-runs `/opt/loopy/deploy.sh` on the instance via SSM RunCommand
+(`AWS-RunShellScript`, then poll `get_command_invocation`), so the engine picks
+up the change with a container restart and no instance replacement. Only an
+already-running stack gets this nudge; a fresh instance is doing it via user-data
+already, and has not registered with SSM yet.
+
+**A fresh stack needs two passes; an update does not.** The CloudFront origin is
+the EIP's public DNS, which only exists once the address does, and a template
+cannot string-transform an IP into that name. So a *first* deploy applies the
+stack twice: pass 1 with `OriginDomain=""` (a template condition gates the
+distribution off) to create the instance and EIP, then pass 2 with the computed
+name to create the distribution. An *existing* stack already has both, so the CLI
+reads the EIP from the stack output and applies once at the final state — it must
+never blank `OriginDomain` on an update, which would tear the distribution down
+and mint a new URL. The command then writes `https://<domain>` to the
+`/loopy/<stack>/public-url` SSM parameter before the refresh, so the deploy
+script reads it; a first boot that races the distribution polls for it and starts
+the engine regardless after a timeout (the URL only gates printing delivery URLs,
+not serving).
+
+## Securing the edge-to-origin hop
+
+CloudFront terminates viewer TLS, but reaches the origin over plain HTTP (the
+origin has no trusted cert — that is the no-domain premise). So the
+CloudFront-to-instance leg is unencrypted. Two consequences, handled differently:
+
+- **Webhooks ride it in cleartext, and that is acceptable.** GitHub/Sentry
+  deliveries are HMAC-signed (`GITHUB_WEBHOOK_SECRET`), so forgery and tampering
+  are caught at the engine; the only residual is payload confidentiality (triage
+  and PR metadata, no credentials).
+- **The dashboard's bearer token must never ride it, so `/admin` is not served
+  through CloudFront.** A `viewer-request` CloudFront Function 403s `/admin` and
+  `/admin/*` at the edge. Operators reach the dashboard over an SSM port-forward
+  straight to the engine port (`aws ssm start-session
+  --document-name AWS-StartPortForwardingSession`, then `loopy admin --remote
+  http://localhost:<port>`), so `LOOPY_ADMIN_TOKEN` travels the encrypted SSM
+  channel, never the plaintext hop. The security group already admits only
+  CloudFront's ranges, so the port is not otherwise public; SSM reaches it
+  through the agent, not an open inbound rule. The downside is deliberate: the
+  dashboard is no longer "open the URL," it needs AWS access plus the tunnel.
+  This is the no-domain mode's tradeoff; a domain mode with end-to-end TLS could
+  serve `/admin` publicly behind the same bearer.
+
+## The `loopy deploy aws` command
+
+- **Inputs:** `--region`, `--profile` (or the standard AWS env vars, resolved by
+  boto3's default chain), `--stack` (default `loopy-engine` — the idempotency
+  key), `--instance-type` (default `t3.small`), `--state-size-gb` (default 8),
+  `--port` (default 8000), and the manifest/`--root` pair `loopy run` takes
+  (compile-on-demand included). The secret set is read from the project's
+  `loopy.env` and sandbox `env_file`s and written to SSM. No `--domain`: the
+  operator brings none.
+- **Create:** preflight (`manifest` under root, `loopy.env` present, and a
+  default VPC exists in the region — the template uses its public subnets, so a
+  missing one errors clearly here instead of deep in a rollback), push secrets,
+  upload the tarball, then the two-pass `create_stack` with waiters; on failure
+  the first failed-resource reasons from the event stream are surfaced (a failed
+  first create rolls back and deletes itself).
+- **Update (stack exists):** push the new secrets and tarball, `update_stack`
+  once at the final origin (a no-op if only the project changed), then re-run the
+  deploy script in place via SSM.
+- **After apply:** print the `https://<id>.cloudfront.net` URL, the origin IP,
+  and the follow-ups (`loopy webhooks github`, `loopy admin --remote`). A fresh
+  distribution takes a few minutes to deploy globally before the URL answers.
+- **`--destroy`:** delete the `/loopy/<stack>/*` parameters, then `delete_stack`
+  and wait, with a reminder that `/state` (run history) goes with it.
+
+One thing an in-place refresh cannot change is the **engine version**: a version
+bump changes the image tag, and the running instance keeps its built image. That
+is rare (it tracks the CLI's own version) and a `--destroy` + re-create picks up
+the new version cleanly; a future flag could force an image rebuild in place.
+
+## IAM the operator's provisioning identity needs
+
+The credentials passed to `loopy deploy aws` (a deploy user, not the instance
+role) need: CloudFormation (`cloudformation:*Stack*`), EC2 (instance, security
+group, EIP, volume, their describes, and `DescribeManagedPrefixLists` for the
+CloudFront prefix-list lookup), CloudFront (create/update/delete the
+distribution), IAM (create/pass the instance role and profile), SSM
+(`ssm:PutParameter` / `GetParametersByPath` / `DeleteParameters` on
+`/loopy/<stack>/*`, plus `ssm:SendCommand` / `GetCommandInvocation` for the
+in-place refresh), S3 on the deploy bucket (`CreateBucket` / `HeadBucket` /
+`PutObject` on `loopy-deploy-<account>-<region>`), and `sts:GetCallerIdentity`.
+Documenting this lets an operator scope a least-privilege deploy user rather
+than using root keys.
+
+## Reuse
+
+- `loopy_cli/deploy/docker-compose.yml` — the exact stack the instance runs.
+- `loopy_cli/deploy/Dockerfile.pypi` — the version-pinned engine image, for a
+  host with no source checkout (the same case Render hits).
+- `loopy_runtime/secrets.py` — the control-plane vs sandbox split the SSM
+  parameter layout mirrors.
+- The provider-agnostic serve contract (`$PORT`, `/healthz`, `LOOPY_PUBLIC_URL`,
+  TLS terminated at the front door) in `loopy_runtime/config.py` and the
+  dashboard: AWS is just another host that satisfies it, so nothing in the engine
+  branches on the provider. Here the front door is CloudFront rather than a
+  platform ingress, but the engine still speaks plain HTTP behind it and reads
+  `LOOPY_PUBLIC_URL` as an env var, so no engine code changes. The dashboard auth
+  model is unchanged; see [admin-auth.md](./admin-auth.md).
+
+## Non-goals and future
+
+- **No HA.** One SQLite writer, one instance. High availability waits on the
+  networked `StateStore` and durable runtime already noted as future work.
+- **Custom domain (optional).** An operator who wants a name of their own can
+  attach it to the distribution later: add an ACM cert (in `us-east-1`, as
+  CloudFront requires) and an alternate domain name, then a `CNAME` to the
+  distribution. This is additive and never required to receive webhooks, so it
+  stays out of the default path.
+- **Upgrade path.** When the networked runtime lands, the same command can target
+  a managed topology behind the identical seams: Fargate for the engine,
+  ElastiCache for the bus (`REDIS_URL`), and RDS/Postgres for the `StateStore`,
+  with an ALB behind the same CloudFront distribution. The template gains
+  resources; the engine does not change.
+- **No AWS sandbox provider.** Agents run in Daytona. This design does not touch
+  `loopy_runtime/sandbox`.

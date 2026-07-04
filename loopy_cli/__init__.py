@@ -25,6 +25,7 @@ from pathlib import Path
 import typer
 
 from loopy_cli.auth import auth_app
+from loopy_cli.aws import deploy_app
 from loopy_cli.integrations import integrations_command
 from loopy_cli.webhooks import (
     normalize_public_url,
@@ -48,6 +49,11 @@ app.add_typer(webhooks_app, name="webhooks")
 # `loopy integrations [name]` — inspect the built-in webhook providers (github, sentry):
 # which are used, whether each signing secret is configured, and per-provider setup.
 app.command(name="integrations")(integrations_command)
+
+# `loopy deploy ...` — provision hosting for the engine from an operator's cloud keys
+# (`loopy deploy aws` drives one CloudFormation stack; see docs/design/aws-deploy.md).
+# boto3 is imported inside the command body, keeping this registration weightless.
+app.add_typer(deploy_app, name="deploy")
 
 
 @app.callback()
