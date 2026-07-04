@@ -282,6 +282,19 @@ def test_serve_survives_a_failing_run():
 
 
 # ── #3: a validation failure becomes HTTP 422 at the webhook, not a 500 ───────────
+def test_healthz_is_served_at_root_without_any_webhooks():
+    """A hosted engine must answer /healthz even with zero webhook sensors — it's the
+    platform / CloudFront liveness probe and `loopy deploy`'s serve-wait target, and it
+    lives at the root (not under /admin, which the edge blocks)."""
+    from fastapi.testclient import TestClient
+
+    host = FastAPISensorRunner(LocalEventReceiver(InProcessEventBus(), CONTRACT))
+    assert host.webhook_paths == []  # no sensors registered
+    response = TestClient(host.app).get("/healthz")
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
 def test_webhook_returns_422_on_invalid_event():
     bus = InProcessEventBus()
     host = FastAPISensorRunner(LocalEventReceiver(bus, CONTRACT))

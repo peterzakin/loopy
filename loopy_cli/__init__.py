@@ -1566,17 +1566,32 @@ def run(
     # loopback bind; behind LOOPY_ADMIN_TOKEN otherwise; not mounted at all on a
     # non-loopback bind without a token (fail-closed by absence).
     from loopy_runtime.dashboard.app import mount_admin
+    from loopy_runtime.dashboard.auth import is_loopback_host
 
     admin_mounted = mount_admin(sensor_runner.app, state, m, host=cfg.host, env=os.environ)
+
+    # The HTTP server carries webhooks, the /admin dashboard, and the root /healthz. Serve it
+    # whenever any of those must be reachable: a webhook sensor, a mounted dashboard, or simply
+    # a hosted (non-loopback) bind — where a platform / CloudFront health check probes /healthz
+    # even for a poll/cron-only project. Only a purely local poll/cron project skips the port.
+    hosted = not is_loopback_host(cfg.host)
+    serve_http = bool(sensor_runner.webhook_paths) or bool(admin_mounted) or hosted
 
     if sensor_runner.webhook_paths:
         typer.echo(
             f"serving {len(sensor_runner.webhook_paths)} webhook(s) on {cfg.host}:{cfg.port}: "
             f"{', '.join(sensor_runner.webhook_paths)}"
         )
+    elif serve_http:
+        extra = " + /admin" if admin_mounted else ""
+        typer.echo(f"no webhook sensors; serving /healthz{extra} on {cfg.host}:{cfg.port}")
+    else:
+        typer.echo("no webhook sensors; web server not started (poll/cron-only)")
+
+    if serve_http:
         if admin_mounted:
             typer.echo(f"admin dashboard at /admin ({admin_mounted})")
-        else:
+        elif hosted:
             typer.echo(
                 "note: LOOPY_ADMIN_TOKEN not set — /admin dashboard not mounted on this "
                 "non-loopback bind (set it to watch runs remotely)"
@@ -1586,20 +1601,18 @@ def run(
         # settings. Without it, point at the setting instead of leaving the user to guess
         # how the local bind maps to a public endpoint.
         public_base = os.environ.get("LOOPY_PUBLIC_URL", "").strip().rstrip("/")
-        if public_base:
+        if sensor_runner.webhook_paths and public_base:
             typer.echo(
                 "public delivery URLs: "
                 + ", ".join(f"{public_base}{p}" for p in sensor_runner.webhook_paths)
             )
             if admin_mounted:
                 typer.echo(f"public admin URL: {public_base}/admin")
-        else:
+        elif sensor_runner.webhook_paths:
             typer.echo(
                 "note: LOOPY_PUBLIC_URL not set — set it in loopy.env to print each "
                 "sensor's public delivery URL (base + path)"
             )
-    else:
-        typer.echo("no webhook sensors; web server not started (poll/cron-only)")
     typer.echo(
         f"polling {len(scheduler.poll_names)} sensor(s): "
         f"{', '.join(scheduler.poll_names) or '(none)'}"
@@ -1620,10 +1633,10 @@ def run(
         poller = asyncio.create_task(scheduler.start())  # poll + cron triggers fire on their tasks
         background = [consumer, broker, poller]
         try:
-            if sensor_runner.webhook_paths:
+            if serve_http:
                 await sensor_runner.start(cfg.host, cfg.port)  # uvicorn owns the foreground
             else:
-                # Poll/cron-only (or no sensors): no inbound HTTP, so don't spin up uvicorn —
+                # Purely local poll/cron: no inbound HTTP, so don't spin up uvicorn —
                 # stay alive on the background tasks (the scheduler/consumer) until cancelled.
                 await asyncio.gather(*background)
         finally:

@@ -56,6 +56,15 @@ class FastAPISensorRunner:
     def __init__(self, receiver: EventReceiver) -> None:
         self.receiver = receiver
         self.app = FastAPI()
+
+        # A root, unauthenticated liveness endpoint, always present — so a platform / CloudFront
+        # health check (and `loopy deploy`'s serve-wait) can probe the engine even when the
+        # project has no webhook sensors. Distinct from the dashboard's health route under the
+        # /admin mount: this one is never auth-gated and never blocked at the edge.
+        @self.app.get("/healthz")
+        async def _healthz() -> dict:
+            return {"ok": True}
+
         self.webhook_paths: list[str] = []
         # Many sensors may share one path: a provider like GitHub posts every event type
         # (PR opened, PR merged, push, …) to a single URL, so we fan one delivery out to
