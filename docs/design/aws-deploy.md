@@ -1,8 +1,9 @@
 # Design: provision the Loopy engine on AWS from an operator's keys
 
 Status: implemented (`loopy_cli/aws.py`, `loopy_cli/deploy/aws-stack.json`,
-`loopy_cli/deploy/aws-userdata.sh`; tests in `tests/test_deploy_aws.py`) ·
-Scope: `loopy_cli` (`deploy aws` command), `loopy_cli/deploy`, docs
+`loopy_cli/deploy/aws-userdata.sh`, `loopy_cli/deploy/aws-deploy.sh`; tests in
+`tests/test_deploy_aws.py`) · Scope: `loopy_cli` (`deploy aws` command),
+`loopy_cli/deploy`, docs
 
 ## Problem
 
@@ -114,29 +115,46 @@ Two pieces live outside the template, both CLI-side, both deliberate:
   exactly that key. The bucket is kept on `--destroy`: it is a few kilobytes and
   reused by the next deploy.
 
-**User-data responsibilities** (`loopy_cli/deploy/aws-userdata.sh`, rendered by
-the CLI, run once by cloud-init): install Docker; wait for, format-if-blank, and
-mount the `/state` volume; fetch the project tarball from S3; pull each env file
-back from SSM to its project-relative path; poll SSM for the public URL (see
-below) and append `LOOPY_PUBLIC_URL` to `loopy.env`; build the engine image from
-the pinned PyPI release (the `Dockerfile.pypi` recipe, no source checkout); and
-run the same collapsed topology as the bundled compose file with plain
-`docker run` — a `redis:7-alpine` container (append-only, `/state/redis`) and the
-engine (`--in-process --bus redis --state sqlite --state-path /state/state.db`,
-project mounted read-only), both `--restart unless-stopped` so a reboot recovers
-the stack. There is no TLS on the instance and no ACME client: CloudFront owns
-the cert.
+**Two scripts, one code path.** The boot logic is split so that first boot and
+every re-deploy share it:
 
-**Two passes, because CloudFront origins need a DNS name.** The origin is the
-EIP's public DNS, which only exists once the address does — and a template
-cannot string-transform an IP into that name. So every deploy applies the stack
-twice with the same body: pass 1 with `OriginDomain=""` (a template condition
-gates the distribution off), pass 2 with the computed name, which creates the
-distribution on first deploy and is a no-op update after that (the distribution
-and its URL are stable). The command then writes `https://<domain>` to the
-`/loopy/<stack>/public-url` SSM parameter; a first boot that races the
-distribution polls for it, and starts the engine regardless after a timeout —
-the URL only gates printing delivery URLs, not serving.
+- `aws-userdata.sh` (rendered, run once by cloud-init) does the *one-time host
+  setup* a re-deploy must not repeat: install Docker; wait for, format-if-blank,
+  and mount the `/state` volume. It then decodes the second script (embedded as
+  base64) to `/opt/loopy/deploy.sh` and runs it.
+- `aws-deploy.sh` (rendered, embedded above, also stored on the instance) is the
+  *repeatable* part: fetch the project tarball from S3; pull each env file back
+  from SSM to its project-relative path; append `LOOPY_PUBLIC_URL` to `loopy.env`;
+  build the engine image from the pinned PyPI release (skipped if that tag
+  already exists — the `Dockerfile.pypi` recipe, no source checkout); and
+  `docker rm -f` then re-run the same collapsed topology as the bundled compose
+  file — a `redis:7-alpine` container (append-only, `/state/redis`) and the
+  engine (`--in-process --bus redis --state sqlite --state-path /state/state.db`,
+  project read-only), both `--restart unless-stopped`. It re-reads whatever the
+  CLI last pushed, so it is safe to re-run. There is no TLS on the instance and
+  no ACME client: CloudFront owns the cert.
+
+**In-place updates.** Because the instance ran user-data only once, a re-deploy
+must actively refresh it. After pushing the new tarball and secrets, the CLI
+re-runs `/opt/loopy/deploy.sh` on the instance via SSM RunCommand
+(`AWS-RunShellScript`, then poll `get_command_invocation`), so the engine picks
+up the change with a container restart and no instance replacement. Only an
+already-running stack gets this nudge; a fresh instance is doing it via user-data
+already, and has not registered with SSM yet.
+
+**A fresh stack needs two passes; an update does not.** The CloudFront origin is
+the EIP's public DNS, which only exists once the address does, and a template
+cannot string-transform an IP into that name. So a *first* deploy applies the
+stack twice: pass 1 with `OriginDomain=""` (a template condition gates the
+distribution off) to create the instance and EIP, then pass 2 with the computed
+name to create the distribution. An *existing* stack already has both, so the CLI
+reads the EIP from the stack output and applies once at the final state — it must
+never blank `OriginDomain` on an update, which would tear the distribution down
+and mint a new URL. The command then writes `https://<domain>` to the
+`/loopy/<stack>/public-url` SSM parameter before the refresh, so the deploy
+script reads it; a first boot that races the distribution polls for it and starts
+the engine regardless after a timeout (the URL only gates printing delivery URLs,
+not serving).
 
 ## The `loopy deploy aws` command
 
@@ -147,15 +165,23 @@ the URL only gates printing delivery URLs, not serving.
   (compile-on-demand included). The secret set is read from the project's
   `loopy.env` and sandbox `env_file`s and written to SSM. No `--domain`: the
   operator brings none.
-- **Create/update:** preflight (`manifest` under root, `loopy.env` present),
-  push secrets, upload the tarball, then `create_stack` or `update_stack` with
-  waiters; on failure the first failed-resource reasons from the event stream
-  are surfaced (a failed first create rolls back and deletes itself).
+- **Create:** preflight (`manifest` under root, `loopy.env` present), push
+  secrets, upload the tarball, then the two-pass `create_stack` with waiters; on
+  failure the first failed-resource reasons from the event stream are surfaced
+  (a failed first create rolls back and deletes itself).
+- **Update (stack exists):** push the new secrets and tarball, `update_stack`
+  once at the final origin (a no-op if only the project changed), then re-run the
+  deploy script in place via SSM.
 - **After apply:** print the `https://<id>.cloudfront.net` URL, the origin IP,
   and the follow-ups (`loopy webhooks github`, `loopy admin --remote`). A fresh
   distribution takes a few minutes to deploy globally before the URL answers.
 - **`--destroy`:** delete the `/loopy/<stack>/*` parameters, then `delete_stack`
   and wait, with a reminder that `/state` (run history) goes with it.
+
+One thing an in-place refresh cannot change is the **engine version**: a version
+bump changes the image tag, and the running instance keeps its built image. That
+is rare (it tracks the CLI's own version) and a `--destroy` + re-create picks up
+the new version cleanly; a future flag could force an image rebuild in place.
 
 ## IAM the operator's provisioning identity needs
 
@@ -165,7 +191,8 @@ group, EIP, volume, their describes, and `DescribeManagedPrefixLists` for the
 CloudFront prefix-list lookup), CloudFront (create/update/delete the
 distribution), IAM (create/pass the instance role and profile), SSM
 (`ssm:PutParameter` / `GetParametersByPath` / `DeleteParameters` on
-`/loopy/<stack>/*`), S3 on the deploy bucket (`CreateBucket` / `HeadBucket` /
+`/loopy/<stack>/*`, plus `ssm:SendCommand` / `GetCommandInvocation` for the
+in-place refresh), S3 on the deploy bucket (`CreateBucket` / `HeadBucket` /
 `PutObject` on `loopy-deploy-<account>-<region>`), and `sts:GetCallerIdentity`.
 Documenting this lets an operator scope a least-privilege deploy user rather
 than using root keys.

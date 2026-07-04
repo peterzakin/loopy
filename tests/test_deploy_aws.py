@@ -8,6 +8,7 @@ and the `--destroy` path through a fake session.
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import tarfile
@@ -22,10 +23,12 @@ from loopy_cli.aws import (
     _apply_stack,
     _delete_stack_secrets,
     _put_secret_files,
+    _refresh_instance,
     build_template_body,
     collect_secret_files,
     eip_public_dns,
     package_project,
+    render_deploy_script,
     render_user_data,
     stack_param_path,
 )
@@ -58,10 +61,10 @@ def _render(**overrides) -> str:
         secret_files=["loopy.env", "secrets/base.env"],
     )
     kwargs.update(overrides)
-    return render_user_data(**kwargs)
+    return render_deploy_script(**kwargs)
 
 
-def test_render_user_data_fills_every_token():
+def test_render_deploy_script_fills_every_token():
     script = _render()
     assert "__LOOPY_" not in script
     assert 'PARAM_PATH="/loopy/loopy-engine"' in script
@@ -72,7 +75,7 @@ def test_render_user_data_fills_every_token():
     assert 'fetch_secret_file "secrets/base.env"' in script
 
 
-def test_render_user_data_runs_the_same_collapsed_topology_as_compose():
+def test_render_deploy_script_runs_the_same_collapsed_topology_as_compose():
     """The instance reproduces the bundled stack: redis bus, sqlite state, project ro."""
     script = _render(manifest_rel="build/manifest.json", engine_port=9001)
     assert "--bus redis --state sqlite --state-path /state/state.db" in script
@@ -81,6 +84,26 @@ def test_render_user_data_runs_the_same_collapsed_topology_as_compose():
     assert 'ENGINE_PORT="9001"' in script
     assert "-v /opt/loopy/project:/project:ro" in script
     assert "redis-server --appendonly yes" in script
+
+
+def test_render_deploy_script_is_rerunnable():
+    """The restart path (rm -f then run) and skip-build-if-present make it safe to re-run."""
+    script = _render()
+    assert "docker rm -f loopy-redis loopy-engine" in script
+    assert 'docker image inspect "loopy-engine:$LOOPY_VERSION"' in script
+
+
+def test_render_user_data_embeds_the_deploy_script_as_base64():
+    """First-boot user-data carries the deploy script (decodable) and runs it once."""
+    deploy_script = _render()
+    user_data = render_user_data(deploy_script)
+    assert "__LOOPY_" not in user_data
+    assert "bash /opt/loopy/deploy.sh" in user_data
+    encoded = base64.b64encode(deploy_script.encode()).decode()
+    assert encoded in user_data
+    # It's the one-time host setup, not the repeatable body.
+    assert "dnf install -y docker" in user_data
+    assert "docker run -d --name loopy-engine" not in user_data
 
 
 def test_build_template_body_injects_user_data():
@@ -199,6 +222,35 @@ def test_delete_stack_secrets_chunks_by_ten():
     ssm = _FakeSsm(existing=names)
     assert _delete_stack_secrets(ssm, "s") == 23
     assert [len(chunk) for chunk in ssm.deleted] == [10, 10, 3]
+
+
+class _FakeCommandSsm:
+    """Enough SSM to drive _refresh_instance: send, then N polls to a terminal status."""
+
+    def __init__(self, statuses: list[str]):
+        self._statuses = list(statuses)
+        self.sent: list[dict] = []
+
+    def send_command(self, **kwargs):
+        self.sent.append(kwargs)
+        return {"Command": {"CommandId": "cmd-1"}}
+
+    def get_command_invocation(self, CommandId, InstanceId):  # noqa: N803
+        status = self._statuses.pop(0)
+        return {"Status": status, "StandardErrorContent": "boom" if status == "Failed" else ""}
+
+
+def test_refresh_instance_reruns_the_deploy_script_and_waits_for_success():
+    ssm = _FakeCommandSsm(["InProgress", "Success"])
+    _refresh_instance(ssm, "i-123", sleep=lambda _s: None)
+    assert ssm.sent[0]["InstanceIds"] == ["i-123"]
+    assert ssm.sent[0]["Parameters"]["commands"] == ["bash /opt/loopy/deploy.sh"]
+
+
+def test_refresh_instance_raises_on_failed_command():
+    ssm = _FakeCommandSsm(["Failed"])
+    with pytest.raises(RuntimeError, match="refresh failed on i-123: boom"):
+        _refresh_instance(ssm, "i-123", sleep=lambda _s: None)
 
 
 class _FakeWaiter:

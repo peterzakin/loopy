@@ -25,9 +25,11 @@ command body so `loopy compile` and the rest of the CLI never load it.
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import tarfile
+import time
 from pathlib import Path
 
 import typer
@@ -39,6 +41,10 @@ deploy_app = typer.Typer(
 _DEPLOY_DIR = Path(__file__).resolve().parent / "deploy"
 TEMPLATE_PATH = _DEPLOY_DIR / "aws-stack.json"
 USER_DATA_PATH = _DEPLOY_DIR / "aws-userdata.sh"
+DEPLOY_SCRIPT_PATH = _DEPLOY_DIR / "aws-deploy.sh"
+
+# Where user-data installs the re-runnable deploy script; SSM RunCommand re-runs it on update.
+INSTANCE_DEPLOY_SCRIPT = "/opt/loopy/deploy.sh"
 
 # The marker in the template's UserData the CLI swaps for the rendered boot script.
 USER_DATA_MARKER = "__LOOPY_USER_DATA__"
@@ -102,7 +108,7 @@ def collect_secret_files(root: Path, manifest_path: Path) -> list[str]:
     return rels
 
 
-def render_user_data(
+def render_deploy_script(
     *,
     region: str,
     stack: str,
@@ -112,9 +118,14 @@ def render_user_data(
     engine_port: int,
     secret_files: list[str],
 ) -> str:
-    """Fill the boot script's tokens. Pure string work, so tests cover it offline."""
+    """Fill the re-runnable deploy script's tokens (fetch project+secrets, restart the stack).
+
+    This is the code path shared by first boot and every re-deploy, so its inputs are all
+    stable per stack: it re-reads whatever the CLI last pushed to S3/SSM. Pure string work,
+    so tests cover it offline.
+    """
     fetch_lines = "\n".join(f'fetch_secret_file "{rel}"' for rel in secret_files)
-    script = USER_DATA_PATH.read_text()
+    script = DEPLOY_SCRIPT_PATH.read_text()
     replacements = {
         "__LOOPY_REGION__": region,
         "__LOOPY_PARAM_PATH__": stack_param_path(stack),
@@ -126,6 +137,20 @@ def render_user_data(
     }
     for token, value in replacements.items():
         script = script.replace(token, value)
+    if "__LOOPY_" in script:
+        raise ValueError("deploy-script render left an unfilled __LOOPY_ token")
+    return script
+
+
+def render_user_data(deploy_script: str) -> str:
+    """First-boot user-data: one-time host setup, then the deploy script embedded as base64.
+
+    The deploy script rides base64 so its quoting can't collide with cloud-init's parsing;
+    first boot decodes it to /opt/loopy/deploy.sh and runs it, and re-deploys re-run that same
+    file via SSM (never this user-data again).
+    """
+    encoded = base64.b64encode(deploy_script.encode()).decode()
+    script = USER_DATA_PATH.read_text().replace("__LOOPY_DEPLOY_SH_B64__", encoded)
     if "__LOOPY_" in script:
         raise ValueError("user-data render left an unfilled __LOOPY_ token")
     return script
@@ -279,6 +304,35 @@ def _stack_outputs(cf, stack: str) -> dict[str, str]:
     return {o["OutputKey"]: o["OutputValue"] for o in described.get("Outputs", [])}
 
 
+def _refresh_instance(ssm, instance_id: str, *, sleep=time.sleep) -> None:
+    """Re-run /opt/loopy/deploy.sh on the instance via SSM RunCommand, then wait.
+
+    This is the in-place update: the CLI has already pushed the new tarball (S3) and secrets
+    (SSM), so re-running the deploy script re-fetches both and restarts the containers — no
+    instance replacement, ~seconds of downtime. Only called for an already-running stack, where
+    the instance has had time to register with SSM; a fresh boot updates via user-data instead.
+    """
+    command = ssm.send_command(
+        InstanceIds=[instance_id],
+        DocumentName="AWS-RunShellScript",
+        Parameters={"commands": [f"bash {INSTANCE_DEPLOY_SCRIPT}"]},
+    )
+    command_id = command["Command"]["CommandId"]
+    for _ in range(120):  # ~20 min ceiling: a cold image build is the slow case
+        sleep(10)
+        try:
+            result = ssm.get_command_invocation(CommandId=command_id, InstanceId=instance_id)
+        except Exception:  # noqa: BLE001 - InvocationDoesNotExist until the agent picks it up
+            continue
+        status = result["Status"]
+        if status in ("Success", "Cancelled", "TimedOut", "Failed"):
+            if status != "Success":
+                detail = (result.get("StandardErrorContent") or "").strip()[:500]
+                raise RuntimeError(f"in-place refresh {status.lower()} on {instance_id}: {detail}")
+            return
+    raise RuntimeError(f"in-place refresh did not complete on {instance_id}")
+
+
 def _delete_stack_secrets(ssm, stack: str) -> int:
     """Remove every parameter under the stack's path; returns how many went."""
     names: list[str] = []
@@ -409,8 +463,9 @@ def aws(
     s3.put_object(Bucket=bucket, Key=key, Body=package_project(root_abs, secret_files))
     typer.echo(f"deploy: uploaded project to s3://{bucket}/{key}")
 
-    # ── pass 1: everything except the distribution (its origin DNS isn't known yet).
-    user_data = render_user_data(
+    # The deploy script (re-fetch project+secrets, restart) is shared by first boot and every
+    # re-deploy; user-data embeds it and runs it once, SSM re-runs it thereafter.
+    deploy_script = render_deploy_script(
         region=resolved_region,
         stack=stack,
         project_s3_uri=f"s3://{bucket}/{key}",
@@ -419,29 +474,38 @@ def aws(
         engine_port=engine_port,
         secret_files=secret_files,
     )
-    template_body = build_template_body(user_data)
+    template_body = build_template_body(render_user_data(deploy_script))
     base_parameters = {
         "InstanceType": instance_type,
         "StateVolumeSizeGiB": str(state_size_gb),
         "CloudFrontPrefixListId": _cloudfront_prefix_list_id(ec2),
         "EnginePort": str(engine_port),
     }
-    typer.echo(f"deploy: applying stack {stack} in {resolved_region} (instance + address)…")
-    _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": ""})
+
+    # An existing stack already has its EIP (and distribution), so apply once at the final
+    # state — never blank the OriginDomain, which would tear the distribution down and mint a
+    # new URL. A fresh stack needs two passes: the EIP's DNS name (the CloudFront origin) only
+    # exists after pass 1 creates the address.
+    existed = _stack_exists(cf, stack)
+    if existed:
+        origin = eip_public_dns(_stack_outputs(cf, stack)["PublicIp"], resolved_region)
+        typer.echo(f"deploy: updating stack {stack} in {resolved_region}…")
+        _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": origin})
+    else:
+        typer.echo(f"deploy: creating stack {stack} in {resolved_region} (instance + address)…")
+        _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": ""})
+        origin = eip_public_dns(_stack_outputs(cf, stack)["PublicIp"], resolved_region)
+        typer.echo(
+            f"deploy: fronting {origin} with CloudFront (a fresh distribution takes a few minutes)…"
+        )
+        _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": origin})
+
     outputs = _stack_outputs(cf, stack)
     public_ip = outputs["PublicIp"]
-
-    # ── pass 2: point CloudFront at the EIP's DNS name. Stable across re-deploys —
-    # the same OriginDomain makes this a no-op update.
-    origin = eip_public_dns(public_ip, resolved_region)
-    typer.echo(
-        f"deploy: fronting {origin} with CloudFront (a fresh distribution takes a few minutes)…"
-    )
-    _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": origin})
-    outputs = _stack_outputs(cf, stack)
     public_url = f"https://{outputs['DistributionDomain']}"
 
-    # The instance polls SSM for this on first boot and appends it to loopy.env.
+    # The instance reads this to append LOOPY_PUBLIC_URL to loopy.env (first boot polls for it;
+    # a re-deploy's refresh reads it straight away). Put it before the refresh below.
     ssm.put_parameter(
         Name=f"{stack_param_path(stack)}/public-url",
         Value=public_url,
@@ -449,9 +513,17 @@ def aws(
         Overwrite=True,
     )
 
+    # On an update, the running instance still holds the old project/secrets (user-data ran
+    # once). Re-run its deploy script in place so it picks up what we just pushed. A fresh
+    # instance is doing this via user-data already, so only existing stacks need the nudge.
+    if existed:
+        typer.echo("deploy: refreshing the engine in place (re-fetch project + secrets, restart)…")
+        _refresh_instance(ssm, outputs["InstanceId"])
+
     stack_flag = f" --stack {stack}" if stack != "loopy-engine" else ""
     typer.echo("")
-    typer.echo(f"deploy: done. Engine at {public_url}")
+    verb = "updated" if existed else "done"
+    typer.echo(f"deploy: {verb}. Engine at {public_url}")
     typer.echo(f"  origin:    {public_ip} (CloudFront-only ingress; direct hits are refused)")
     typer.echo(f"  webhooks:  set LOOPY_PUBLIC_URL={public_url} in loopy.env,")
     typer.echo("             then `loopy webhooks github`")
