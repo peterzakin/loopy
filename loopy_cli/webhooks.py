@@ -339,11 +339,19 @@ def github(
     else:
         public_url = resolve_public_url(root)
         if public_url is None:
-            typer.echo(
-                "error: no public base URL — set LOOPY_PUBLIC_URL in loopy.env "
-                "(`loopy init` prompts for it) or pass --url.",
-                err=True,
-            )
+            from loopy_cli.deploy_mode import MODE_PROVISIONED, resolve_deploy_mode
+
+            if resolve_deploy_mode(root) == MODE_PROVISIONED:
+                hint = (
+                    "no public base URL yet — run `loopy deploy aws` first; it provisions the "
+                    "host and writes LOOPY_PUBLIC_URL for you (or pass --url)."
+                )
+            else:
+                hint = (
+                    "no public base URL — set LOOPY_PUBLIC_URL in loopy.env "
+                    "(`loopy init` prompts for it) or pass --url."
+                )
+            typer.echo(f"error: {hint}", err=True)
             raise typer.Exit(code=1)
 
     events = github_hook_events(project.sensors)
@@ -423,80 +431,6 @@ def list_(
                 )
             )
         typer.echo()
-
-
-def offer_github_webhooks(root: Path) -> None:
-    """Offer to register GitHub webhooks when everything needed is already on hand.
-
-    Called from `loopy auth github` (after the install lands) and the `loopy init`
-    wizard (after the scaffold exists). Fires the prompt only when a compiled project
-    at `root` declares repos, an App is configured, and a public URL is known. With
-    repos and GitHub sensors but no URL, prints a pointer instead (set LOOPY_PUBLIC_URL,
-    then `loopy webhooks github`). Anything short of that — no registry yet (init runs
-    auth before scaffolding), compile errors, no App — skips silently: this is an
-    onboarding nicety and must never take auth or init down with it.
-    """
-    from loopy_core.compile.pipeline import compile_project
-    from loopy_runtime.scm.github_app import GitHubAppError, MissingCredentials
-
-    if not (Path(root) / "registry.yml").is_file():
-        return
-    result = compile_project(root)
-    if result.diagnostics.has_errors() or result.project is None:
-        return
-    project = result.project
-
-    repos = _declared_repo_slugs(project.registry)
-    if not repos:
-        return
-    try:
-        _load_creds(root)
-    except MissingCredentials:
-        return
-
-    uses_github = any(
-        s.trigger.kind == "webhook" and s.trigger.path == GITHUB_HOOK_PATH
-        for s in project.sensors
-    )
-    public_url = resolve_public_url(root)
-    if public_url is None:
-        if uses_github:
-            typer.echo(
-                "  "
-                + typer.style("ⓘ", fg=typer.colors.BLUE)
-                + " This project listens for GitHub webhooks, but no public URL is set — "
-                "built-in Github.* events won't fire until GitHub can deliver here."
-            )
-            typer.echo(
-                typer.style(
-                    "    Set LOOPY_PUBLIC_URL in loopy.env, then run `loopy webhooks github`.",
-                    fg=typer.colors.BRIGHT_BLACK,
-                )
-            )
-            typer.echo()
-        return
-
-    if not typer.confirm(
-        f"  Register GitHub webhooks now? Built-in Github.* events (PullRequestOpened, "
-        f"Push, …) only fire once GitHub can deliver to your engine — this creates a "
-        f"webhook on each repo pointing at {public_url}{GITHUB_HOOK_PATH}",
-        default=True,
-    ):
-        typer.echo("  (skipped — run `loopy webhooks github` any time)")
-        typer.echo()
-        return
-
-    events = github_hook_events(project.sensors)
-    try:
-        report = sync_github_webhooks(
-            root, repos=repos, events=events, public_url=public_url
-        )
-    except (GitHubAppError, OSError) as exc:
-        typer.echo(f"  (webhook registration didn't complete: {exc} — run `loopy webhooks github`)")
-        typer.echo()
-        return
-    render_sync_report(report)
-    typer.echo()
 
 
 def registration_findings(project, root: Path, *, control_env) -> list[Finding]:  # noqa: ANN001

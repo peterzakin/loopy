@@ -566,6 +566,20 @@ def aws(
         Overwrite=True,
     )
 
+    # Mirror the URL (and this deploy mode) into the operator's *local* loopy.env — the same
+    # value the instance gets via SSM. The CloudFront name only exists once the distribution
+    # does, so `loopy init` couldn't record it; writing it here is what makes `loopy webhooks
+    # github` runnable straight after a deploy, with no hand-copy. Idempotent (the URL is
+    # stable across re-deploys). We deliberately do *not* register webhooks ourselves — that
+    # stays one explicit `loopy webhooks github` step.
+    from loopy_cli.deploy_mode import DEPLOY_MODE_ENV, MODE_PROVISIONED
+    from loopy_runtime.secrets import write_control_plane_env
+
+    write_control_plane_env(
+        root_abs,
+        {"LOOPY_PUBLIC_URL": public_url, DEPLOY_MODE_ENV: MODE_PROVISIONED},
+    )
+
     # On an update, the running instance still holds the old project/secrets (user-data ran
     # once). Re-run its deploy script in place so it picks up what we just pushed. A fresh
     # instance is doing this via user-data already, so only existing stacks need the nudge.
@@ -594,8 +608,8 @@ def aws(
         typer.echo(f"             aws ssm start-session --target {instance_id},")
         typer.echo("             then cat /var/log/loopy-deploy.log")
     typer.echo(f"  origin:    {public_ip} (CloudFront-only ingress; direct hits are refused)")
-    typer.echo(f"  webhooks:  set LOOPY_PUBLIC_URL={public_url} in loopy.env,")
-    typer.echo("             then `loopy webhooks github`")
+    typer.echo(f"  url:       wrote LOOPY_PUBLIC_URL={public_url} to loopy.env")
+    typer.echo("  webhooks:  loopy webhooks github  (registers GitHub delivery to the URL above)")
     # /admin is blocked at CloudFront on this mode (the edge->origin hop is plain HTTP, so the
     # bearer token must not travel it). Reach the dashboard over an SSM tunnel instead.
     typer.echo("  dashboard: aws ssm start-session --target " + instance_id)

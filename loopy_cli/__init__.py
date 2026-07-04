@@ -26,10 +26,10 @@ import typer
 
 from loopy_cli.auth import auth_app
 from loopy_cli.aws import deploy_app
+from loopy_cli.deploy_mode import MODE_BYO
 from loopy_cli.integrations import integrations_command
 from loopy_cli.webhooks import (
     normalize_public_url,
-    offer_github_webhooks,
     registration_findings,
     webhooks_app,
 )
@@ -418,14 +418,19 @@ def init(
 
     target = (directory / name).resolve()
 
+    # The deployment mode comes first: it decides where the public webhook URL comes from,
+    # the one setup step that can't follow a single order (a provisioned host mints its URL
+    # only at deploy time). Bring-your-own means we can record the URL now; provisioned means
+    # `loopy deploy aws` writes it back later, so there's nothing to ask here.
+    mode = _choose_deploy_mode(target)
+    if mode == MODE_BYO:
+        _offer_public_webhook_url(target)
+
     # Wire git auth *before* asking which repo(s) the agent works on. `loopy auth github` creates
     # the App and installs it on the repos it may touch, so it reads better to authenticate and
     # install first, then name the repo(s) with that install fresh in mind — rather than naming
-    # repos into a registry before any auth exists. The public webhook URL comes first still:
-    # auth ends by offering webhook registration, which needs the URL already recorded. Both
-    # steps write loopy.env into `target`; `scaffold_project` (run below) preserves those
-    # values under its own template.
-    _offer_public_webhook_url(target)
+    # repos into a registry before any auth exists. Both steps write loopy.env into `target`;
+    # `scaffold_project` (run below) preserves those values under its own template.
     github_authed = _offer_github_auth(target)
 
     # Git auth is the gate for the starter workflow. Loopy is built around agents that clone a
@@ -457,10 +462,9 @@ def init(
     _offer_ambient_anthropic_key(target)
     _offer_ambient_daytona_creds(target)
     _offer_redis_bus(target)
-    # Webhook registration couldn't be offered during auth above (no registry existed
-    # yet); now the scaffold + repos are on disk, so offer it here when the pieces
-    # (App creds, LOOPY_PUBLIC_URL, repos) are all present. Self-gating, never raises.
-    offer_github_webhooks(target)
+    # Webhook registration is deliberately *not* offered here — it's one explicit
+    # `loopy webhooks github` step, surfaced as a next step below once a public URL exists
+    # (in provisioned mode that URL doesn't arrive until `loopy deploy aws`).
 
     # A repo-less scaffold is deliberately bare — no starter workflow. Repeat the warning the
     # user already confirmed past, and point at the way out.
@@ -470,7 +474,7 @@ def init(
     # A clean compile is *not* a runnable project: the scaffold ships placeholders on purpose
     # (a fake API key, maybe no git auth). Run the same checks as `loopy doctor` so the user
     # sees the *actual* remaining gaps — anything resolved above is already gone.
-    _report_remaining_setup(target, name)
+    _report_remaining_setup(target, name, mode)
 
 
 def _prompt_for_repos() -> list[str]:
@@ -679,6 +683,56 @@ def _write_admin_token(target: Path) -> None:
     typer.echo()
 
 
+def _choose_deploy_mode(target: Path) -> str:
+    """Ask how the engine will be hosted, and record it as `LOOPY_DEPLOY_MODE`.
+
+    This is the fork the rest of onboarding hinges on, because the public webhook URL can't
+    be collected in a single linear order — a provisioned host doesn't mint its URL until
+    deploy time:
+
+    - bring-your-own: you have a URL now (a domain, a dev tunnel, or a platform hostname like
+      Render's). `init` prompts for it next and webhook delivery is wired right after.
+    - provision on AWS: `loopy deploy aws` stands up the host and its `*.cloudfront.net` URL,
+      then writes `LOOPY_PUBLIC_URL` back for you. `init` skips the URL prompt entirely.
+
+    Recorded in `loopy.env` so `webhooks`/`doctor` can phrase their guidance for the right
+    path; the engine never reads it. Re-init keeps an existing choice (never clobbers), and
+    anything but an explicit "2" falls back to bring-your-own (the safe default: it just
+    prompts for a URL, and blank is a first-class answer there).
+    """
+    from loopy_cli.deploy_mode import (
+        DEPLOY_MODE_ENV,
+        MODE_BYO,
+        MODE_PROVISIONED,
+        resolve_deploy_mode,
+    )
+    from loopy_runtime.secrets import write_control_plane_env
+
+    existing = resolve_deploy_mode(target)
+    if existing:
+        return existing
+
+    typer.echo("  How will you host the engine?")
+    typer.echo(
+        "    1) I'll provide the public URL — a domain, a dev tunnel, or a platform like Render"
+    )
+    typer.echo(
+        "    2) Provision it on AWS for me — one command stands up the host and mints the URL"
+    )
+    choice = typer.prompt("  Choose 1 or 2", default="1").strip()
+    mode = MODE_PROVISIONED if choice == "2" else MODE_BYO
+    write_control_plane_env(target, {DEPLOY_MODE_ENV: mode})
+
+    if mode == MODE_PROVISIONED:
+        typer.echo(
+            "  "
+            + typer.style("✓", fg=typer.colors.GREEN)
+            + " provisioned mode — `loopy deploy aws` sets LOOPY_PUBLIC_URL for you at deploy."
+        )
+    typer.echo()
+    return mode
+
+
 def _offer_public_webhook_url(target: Path) -> None:
     """Ask for the public base URL external services deliver webhooks to.
 
@@ -758,12 +812,14 @@ def _offer_github_auth(target: Path) -> bool:
     return bool(load_control_plane_env(target).get("GITHUB_APP_ID"))
 
 
-def _report_remaining_setup(target: Path, name: str) -> None:
+def _report_remaining_setup(target: Path, name: str, mode: str) -> None:
     """Compile the fresh project and print the gaps still blocking a first run (doctor's checks).
 
     Replaces the old static checklist: because the wizard may have already set the key or wired
     auth, we report the *actual* remaining findings instead of a fixed list the user has to
-    re-verify by hand. Then we point at the run commands.
+    re-verify by hand. Then we point at the next commands, ordered for the chosen deployment
+    mode — provisioned hosting deploys before it can register webhooks, bring-your-own can
+    register straight away.
     """
     from loopy_core.compile.pipeline import compile_project
 
@@ -791,16 +847,42 @@ def _report_remaining_setup(target: Path, name: str) -> None:
         )
         typer.echo()
 
+    from loopy_cli.deploy_mode import MODE_PROVISIONED
+
     typer.echo("  Then:")
     typer.echo(typer.style(f"    cd {name}", fg=typer.colors.BRIGHT_WHITE))
     typer.echo(
         typer.style("    loopy doctor", fg=typer.colors.BRIGHT_WHITE)
-        + typer.style("   # re-check the above any time", fg=typer.colors.BRIGHT_BLACK)
+        + typer.style("          # re-check the above any time", fg=typer.colors.BRIGHT_BLACK)
     )
-    typer.echo(
-        typer.style("    loopy run", fg=typer.colors.BRIGHT_WHITE)
-        + typer.style("   # compiles + starts the engine", fg=typer.colors.BRIGHT_BLACK)
-    )
+    if mode == MODE_PROVISIONED:
+        typer.echo(
+            typer.style("    loopy deploy aws", fg=typer.colors.BRIGHT_WHITE)
+            + typer.style(
+                "      # provision the host; sets LOOPY_PUBLIC_URL for you",
+                fg=typer.colors.BRIGHT_BLACK,
+            )
+        )
+        typer.echo(
+            typer.style("    loopy webhooks github", fg=typer.colors.BRIGHT_WHITE)
+            + typer.style(
+                "  # register GitHub delivery, after deploy", fg=typer.colors.BRIGHT_BLACK
+            )
+        )
+    else:
+        typer.echo(
+            typer.style("    loopy webhooks github", fg=typer.colors.BRIGHT_WHITE)
+            + typer.style(
+                "  # register GitHub delivery (needs LOOPY_PUBLIC_URL)",
+                fg=typer.colors.BRIGHT_BLACK,
+            )
+        )
+        typer.echo(
+            typer.style("    loopy run", fg=typer.colors.BRIGHT_WHITE)
+            + typer.style(
+                "             # compiles + starts the engine", fg=typer.colors.BRIGHT_BLACK
+            )
+        )
     typer.echo()
 
 

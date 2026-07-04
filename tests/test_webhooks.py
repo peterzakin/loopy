@@ -303,6 +303,25 @@ def test_cli_github_requires_public_url(tmp_path, monkeypatch):
 
     assert result.exit_code == 1
     assert "LOOPY_PUBLIC_URL" in result.output
+    # Bring-your-own (the default): point at setting the URL, not at deploying.
+    assert "deploy aws" not in result.output
+
+
+def test_cli_github_no_url_points_at_deploy_in_provisioned_mode(tmp_path, monkeypatch):
+    """In provisioned mode the URL is minted by `loopy deploy aws`, so the missing-URL
+    error must send the operator there rather than telling them to set it by hand."""
+    from loopy_cli.deploy_mode import DEPLOY_MODE_ENV, MODE_PROVISIONED
+
+    target, _ = _github_project(tmp_path)
+    _write_app_creds(target)
+    write_control_plane_env(target, {DEPLOY_MODE_ENV: MODE_PROVISIONED})
+    monkeypatch.delenv("LOOPY_PUBLIC_URL", raising=False)
+    monkeypatch.delenv(DEPLOY_MODE_ENV, raising=False)
+
+    result = runner.invoke(app, ["webhooks", "github", "--root", str(target)])
+
+    assert result.exit_code == 1
+    assert "loopy deploy aws" in result.output
 
 
 def test_cli_github_requires_repos(tmp_path, monkeypatch):
@@ -367,78 +386,6 @@ def test_cli_list_with_no_webhook_sensors(tmp_path):
 
     assert result.exit_code == 0, result.output
     assert "no webhook sensors" in result.output
-
-
-# --- the wizard offer (auth + init) ------------------------------------------
-
-
-def test_offer_skips_silently_before_scaffold(tmp_path, monkeypatch):
-    """`loopy init` runs auth before the scaffold exists — no registry.yml, no prompt."""
-
-    def _boom(*a, **k):
-        raise AssertionError("must not prompt without a project")
-
-    monkeypatch.setattr("typer.confirm", _boom)
-    webhooks.offer_github_webhooks(tmp_path)  # empty dir — returns quietly
-
-
-def test_offer_registers_on_confirm(tmp_path, monkeypatch):
-    target, _ = _github_project(tmp_path)
-    _write_app_creds(target)
-    write_control_plane_env(target, {"LOOPY_PUBLIC_URL": _URL})
-    monkeypatch.delenv("LOOPY_PUBLIC_URL", raising=False)
-    monkeypatch.setattr("typer.confirm", lambda *a, **k: True)
-    seen = {}
-
-    def fake_sync(root, *, repos, events, public_url, check=False):
-        seen.update(repos=repos, public_url=public_url)
-        return SyncReport(results=[HookSync("me/app", "created")])
-
-    monkeypatch.setattr(webhooks, "sync_github_webhooks", fake_sync)
-    webhooks.offer_github_webhooks(target)
-
-    assert seen == {"repos": ["me/app"], "public_url": _URL}
-
-
-def test_offer_respects_decline(tmp_path, monkeypatch):
-    target, _ = _github_project(tmp_path)
-    _write_app_creds(target)
-    write_control_plane_env(target, {"LOOPY_PUBLIC_URL": _URL})
-    monkeypatch.delenv("LOOPY_PUBLIC_URL", raising=False)
-    monkeypatch.setattr("typer.confirm", lambda *a, **k: False)
-
-    def _boom(*a, **k):
-        raise AssertionError("declined — must not sync")
-
-    monkeypatch.setattr(webhooks, "sync_github_webhooks", _boom)
-    webhooks.offer_github_webhooks(target)  # no exception ⇒ decline respected
-
-
-def test_offer_without_url_prints_pointer_when_project_uses_github(tmp_path, monkeypatch, capsys):
-    target, _ = _github_project(tmp_path)
-    _write_app_creds(target)
-    monkeypatch.delenv("LOOPY_PUBLIC_URL", raising=False)
-
-    def _boom(*a, **k):
-        raise AssertionError("no URL — must not prompt")
-
-    monkeypatch.setattr("typer.confirm", _boom)
-    webhooks.offer_github_webhooks(target)
-
-    out = capsys.readouterr().out
-    assert "LOOPY_PUBLIC_URL" in out
-    assert "loopy webhooks github" in out
-
-
-def test_offer_skips_without_app_creds(tmp_path, monkeypatch):
-    target, _ = _github_project(tmp_path)
-    monkeypatch.delenv("GITHUB_APP_ID", raising=False)
-
-    def _boom(*a, **k):
-        raise AssertionError("no App — must not prompt")
-
-    monkeypatch.setattr("typer.confirm", _boom)
-    webhooks.offer_github_webhooks(target)
 
 
 # --- doctor findings ---------------------------------------------------------
