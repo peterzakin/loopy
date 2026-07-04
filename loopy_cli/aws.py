@@ -351,6 +351,40 @@ def _refresh_instance(ssm, instance_id: str, *, sleep=time.sleep) -> None:
     raise RuntimeError(f"in-place refresh did not complete on {instance_id}")
 
 
+def _http_status(url: str) -> int:
+    """GET `url` and return the HTTP status (stdlib, short timeout). Raises on connect errors."""
+    import urllib.request
+
+    request = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310 - our own URL
+        return response.status
+
+
+def wait_until_serving(
+    public_url: str, *, fetch=None, sleep=time.sleep, attempts: int = 60, delay: int = 10
+) -> bool:
+    """Poll `<public_url>/healthz` until it answers 200, so "deployed" means "serving".
+
+    Closes the gap between CloudFormation's CREATE_COMPLETE (the instance *launched*) and the
+    engine actually answering: a fresh deploy still has to finish user-data (image build +
+    container start) and let the new CloudFront distribution propagate to the edge. Testing the
+    real end-to-end URL covers both. `/healthz` is open and outside the blocked `/admin*` path.
+
+    Returns True once live, False on timeout (~10 min by default). Never raises — a slow but
+    healthy boot must not fail the deploy; the caller prints where to look on a timeout.
+    """
+    fetch = fetch or _http_status
+    url = public_url.rstrip("/") + "/healthz"
+    for _ in range(attempts):
+        try:
+            if fetch(url) == 200:
+                return True
+        except Exception:  # noqa: BLE001 - connection refused / 502 / DNS lag are all "not yet"
+            pass
+        sleep(delay)
+    return False
+
+
 def _delete_stack_secrets(ssm, stack: str) -> int:
     """Remove every parameter under the stack's path; returns how many went."""
     names: list[str] = []
@@ -541,9 +575,24 @@ def aws(
 
     stack_flag = f" --stack {stack}" if stack != "loopy-engine" else ""
     instance_id = outputs["InstanceId"]
+
+    # "Stack complete" only means the instance launched. Wait for the engine to actually answer
+    # through CloudFront (user-data's image build + a fresh distribution's edge propagation both
+    # trail CREATE_COMPLETE) so the printed URL works when the user hits it.
+    typer.echo(f"deploy: waiting for the engine to answer at {public_url}/healthz…")
+    serving = wait_until_serving(public_url)
+
     typer.echo("")
     verb = "updated" if existed else "done"
     typer.echo(f"deploy: {verb}. Engine at {public_url}")
+    if serving:
+        typer.echo("  status:    live (/healthz is answering)")
+    else:
+        typer.echo("  status:    not answering yet. A fresh boot builds the image (a few minutes)")
+        typer.echo("             and a new CloudFront distribution takes time to propagate; give")
+        typer.echo("             it a bit. If it stays down, check the boot log via SSM:")
+        typer.echo(f"             aws ssm start-session --target {instance_id},")
+        typer.echo("             then cat /var/log/loopy-deploy.log")
     typer.echo(f"  origin:    {public_ip} (CloudFront-only ingress; direct hits are refused)")
     typer.echo(f"  webhooks:  set LOOPY_PUBLIC_URL={public_url} in loopy.env,")
     typer.echo("             then `loopy webhooks github`")
