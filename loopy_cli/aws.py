@@ -838,10 +838,15 @@ def aws(
     typer.echo(f"  url:       wrote LOOPY_PUBLIC_URL={public_url} to loopy.env")
     typer.echo("  webhooks:  loopy webhooks github  (registers GitHub delivery to the URL above)")
     # /admin is blocked at CloudFront on this mode (the edge->origin hop is plain HTTP, so the
-    # bearer token must not travel it). Reach the dashboard over an SSM tunnel instead.
-    typer.echo("  dashboard: aws ssm start-session --target " + instance_id)
+    # bearer token must not travel it). Reach the dashboard over an SSM tunnel instead. Needs
+    # the Session Manager plugin (`aws ssm` port-forwarding won't run without it). The tunnel
+    # forwards the engine port to the same local port; `loopy admin` serves the UI on its own
+    # 9000. The URL must include /admin — that's where the engine mounts the dashboard (and its
+    # /api), so pointing at the bare host would 404.
+    typer.echo("  dashboard: # one-time: install the Session Manager plugin (see AWS docs)")
+    typer.echo("             aws ssm start-session --target " + instance_id + " \\")
     typer.echo("             --document-name AWS-StartPortForwardingSession \\")
     typer.echo(f"             --parameters '{{\"portNumber\":[\"{engine_port}\"],"
-               '"localPortNumber":["9000"]}\'')
-    typer.echo("             then: loopy admin --remote http://localhost:9000")
+               f'"localPortNumber":["{engine_port}"]}}\'')
+    typer.echo(f"             then: loopy admin --remote http://localhost:{engine_port}/admin")
     typer.echo(f"  teardown:  loopy deploy aws --destroy{stack_flag}")
