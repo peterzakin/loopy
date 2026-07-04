@@ -2,11 +2,14 @@
 
 The engine itself is provider-agnostic (the serve/auth contract in
 `docs/design/aws-deploy.md` and `docs/design/admin-auth.md`); a *deploy target* is the
-CLI-side name for one way of hosting it, so commands like `loopy deploy <target>` and
-`loopy admin <target>` can be explicit about which deployment they act on:
+CLI-side name for one way of hosting it, so a command like `loopy deploy <target>` can be
+explicit about which deployment it stands up. (`loopy admin` no longer names a target: it
+auto-routes from `LOOPY_PUBLIC_URL` — CloudFront → SSM tunnel, any other URL → proxy to
+`/admin`, unset → the local run-state DB — with `--local`/`--tunnel`/`--url` as overrides.)
 
-- `local` — no deployment: `loopy run` on this machine. `loopy admin local` reads the
-  run-state DB it writes. Never recorded in `loopy.env` (it isn't a hosting choice).
+- `local` — no deployment: `loopy run` on this machine, read back by `loopy admin --local`
+  (or bare `loopy admin` when no public URL is set). Never recorded in `loopy.env` (it
+  isn't a hosting choice).
 - `byo` — bring-your-own hosting: a platform (Render, Fly, Railway), a VPS, or a dev
   tunnel. You bring the public URL (`LOOPY_PUBLIC_URL`); `loopy init` prompts for it.
 - `bootstrap` — the loopy-provisioned starter stack: `loopy deploy bootstrap` stands up
@@ -17,25 +20,24 @@ CLI-side name for one way of hosting it, so commands like `loopy deploy <target>
 
 The hosting choice is recorded as `LOOPY_DEPLOY_TARGET` in `loopy.env` — by `loopy init`
 (the wizard's hosting question) or by `loopy deploy bootstrap` itself. It's a CLI-side
-hint only: it phrases `init`/`webhooks` guidance for the right path and lets `loopy
-admin` point at the right target in its errors. The engine never reads it.
+hint only: it phrases `init`/`webhooks` guidance for the right path and lets `loopy admin`
+point at the right next step in its "no local DB yet" error. The engine never reads it.
 """
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 DEPLOY_TARGET_ENV = "LOOPY_DEPLOY_TARGET"
 
-TARGET_LOCAL = "local"
 TARGET_BYO = "byo"
 TARGET_BOOTSTRAP = "bootstrap"
 
-# What `loopy init` / `loopy deploy` record in loopy.env (a hosting choice) vs. what
-# `loopy admin` accepts (any place run state can be read from, `local` included).
+# What `loopy init` / `loopy deploy` record in loopy.env: a hosting choice (`local` isn't one
+# — it's the no-deployment case, and `loopy admin` reaches it by the absence of a public URL).
 HOSTED_TARGETS = (TARGET_BYO, TARGET_BOOTSTRAP)
-ADMIN_TARGETS = (TARGET_LOCAL, TARGET_BYO, TARGET_BOOTSTRAP)
 
 # Written by `loopy deploy bootstrap` alongside LOOPY_PUBLIC_URL, so `loopy admin
 # bootstrap` can print a ready-to-run SSM tunnel command and derive the tunneled
@@ -75,3 +77,17 @@ def resolve_bootstrap_config(root: str | Path) -> dict[str, str]:
         if value:
             out[key] = value
     return out
+
+
+def is_cloudfront_url(url: str | None) -> bool:
+    """True if `url` points at a CloudFront distribution (host `*.cloudfront.net`).
+
+    That's the public URL `loopy deploy bootstrap` mints, and the one place `/admin` is
+    blocked at the edge: the CloudFront→origin hop is plain HTTP, so the bearer token must
+    not travel it. `loopy admin` reads this signal to reach such a deploy over its SSM
+    tunnel instead of proxying to `$LOOPY_PUBLIC_URL/admin`.
+    """
+    if not url:
+        return False
+    host = (urlsplit(url).hostname or "").lower()
+    return host.endswith(".cloudfront.net")
