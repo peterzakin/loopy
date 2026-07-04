@@ -1,9 +1,9 @@
 # Design: provision the Loopy engine on AWS from an operator's keys
 
-Status: implemented (`loopy_cli/aws.py`, `loopy_cli/deploy/aws-stack.json`,
+Status: implemented (`loopy_cli/bootstrap.py`, `loopy_cli/deploy/aws-stack.json`,
 `loopy_cli/deploy/aws-userdata.sh`, `loopy_cli/deploy/aws-deploy.sh`; tests in
-`tests/test_deploy_aws.py`) · Scope: `loopy_cli` (`deploy aws` command),
-`loopy_cli/deploy`, docs
+`tests/test_deploy_bootstrap.py`) · Scope: `loopy_cli` (`deploy bootstrap` command —
+the `bootstrap` deploy target, formerly spelled `deploy aws`), `loopy_cli/deploy`, docs
 
 ## Problem
 
@@ -41,7 +41,7 @@ no-domain mode.
 ## Decisions (the proposed design)
 
 1. **CloudFormation, driven by boto3.** One template describes the stack; a new
-   `loopy deploy aws` command calls `create_stack` / `update_stack` /
+   `loopy deploy bootstrap` command calls `create_stack` / `update_stack` /
    `delete_stack` through boto3. The stack name (derived from the project, e.g.
    `loopy-engine-<project>`) is the idempotency key: a first run creates, a
    re-run updates, and a bad template rolls back on its own. Teardown is one
@@ -179,8 +179,8 @@ CloudFront-to-instance leg is unencrypted. Two consequences, handled differently
   through CloudFront.** A `viewer-request` CloudFront Function 403s `/admin` and
   `/admin/*` at the edge. Operators reach the dashboard over an SSM port-forward
   straight to the engine port (`aws ssm start-session
-  --document-name AWS-StartPortForwardingSession`, then `loopy admin --remote
-  http://localhost:<port>`), so `LOOPY_ADMIN_TOKEN` travels the encrypted SSM
+  --document-name AWS-StartPortForwardingSession`, then `loopy admin bootstrap`,
+  which proxies to `http://localhost:<port>/admin`), so `LOOPY_ADMIN_TOKEN` travels the encrypted SSM
   channel, never the plaintext hop. The security group already admits only
   CloudFront's ranges, so the port is not otherwise public; SSM reaches it
   through the agent, not an open inbound rule. The downside is deliberate: the
@@ -188,7 +188,10 @@ CloudFront-to-instance leg is unencrypted. Two consequences, handled differently
   This is the no-domain mode's tradeoff; a domain mode with end-to-end TLS could
   serve `/admin` publicly behind the same bearer.
 
-## The `loopy deploy aws` command
+## The `loopy deploy bootstrap` command
+
+(Originally shipped as `loopy deploy aws`; renamed so the provider name stays free for
+future custom targets that also run on AWS.)
 
 - **Inputs:** `--region`, `--profile` (or the standard AWS env vars, resolved by
   boto3's default chain), `--stack` (default `loopy-engine` — the idempotency
@@ -207,7 +210,7 @@ CloudFront-to-instance leg is unencrypted. Two consequences, handled differently
   once at the final origin (a no-op if only the project changed), then re-run the
   deploy script in place via SSM.
 - **After apply:** print the `https://<id>.cloudfront.net` URL, the origin IP,
-  and the follow-ups (`loopy webhooks github`, `loopy admin --remote`). A fresh
+  and the follow-ups (`loopy webhooks github`, `loopy admin bootstrap`). A fresh
   distribution takes a few minutes to deploy globally before the URL answers.
 - **`--destroy`:** delete the `/loopy/<stack>/*` parameters, then `delete_stack`
   and wait, with a reminder that `/state` (run history) goes with it.
@@ -223,7 +226,7 @@ installs `loopy-computer==<version>` from PyPI, which assumes the operator's CLI
 is a released version whose published engine matches the manifests it compiles.
 An *unreleased* CLI breaks that: the version string is frozen (e.g. `0.1.0`),
 so PyPI carries stale code whose manifest schema predates the checkout, and the
-engine rejects the CLI's manifest on load. `loopy deploy aws --engine-source
+engine rejects the CLI's manifest on load. `loopy deploy bootstrap --engine-source
 <checkout>` closes the gap: the CLI builds a wheel from that loopy checkout
 (`uv build`), ships it to `s3://<bucket>/<stack>/engine/<wheel>` under its real
 PEP 427 filename (read by the same instance role, already scoped to `<stack>/*`;
@@ -236,7 +239,7 @@ for dogfooding on real infrastructure before a release.
 
 ## IAM the operator's provisioning identity needs
 
-The credentials passed to `loopy deploy aws` (a deploy user, not the instance
+The credentials passed to `loopy deploy bootstrap` (a deploy user, not the instance
 role) need: CloudFormation (`cloudformation:*Stack*`), EC2 (instance, security
 group, EIP, volume, their describes, and `DescribeManagedPrefixLists` for the
 CloudFront prefix-list lookup), CloudFront (create/update/delete the

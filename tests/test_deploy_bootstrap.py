@@ -1,4 +1,4 @@
-"""`loopy deploy aws` — the offline half: rendering, packaging, and client wiring.
+"""`loopy deploy bootstrap` — the offline half: rendering, packaging, and client wiring.
 
 Everything here runs with no AWS account, no network, and no boto3 (the module imports
 it lazily inside the command body). The boto3-touching helpers take injected clients,
@@ -19,7 +19,7 @@ import pytest
 from typer.testing import CliRunner
 
 from loopy_cli import app
-from loopy_cli.aws import (
+from loopy_cli.bootstrap import (
     TEMPLATE_PATH,
     _apply_stack,
     _clear_unusable_stack,
@@ -620,17 +620,29 @@ def test_apply_stack_reports_failure_reason_by_stack_id_after_rollback():
 # ── CLI wiring ───────────────────────────────────────────────────────────────────────
 
 
-def test_deploy_aws_help_does_not_touch_boto3():
+def test_deploy_bootstrap_help_does_not_touch_boto3():
     """Registration is weightless: help renders without importing/using boto3
     (it's a core dep but imported lazily inside the command body)."""
-    result = runner.invoke(app, ["deploy", "aws", "--help"])
+    result = runner.invoke(app, ["deploy", "bootstrap", "--help"])
     assert result.exit_code == 0
     assert "CloudFront" in result.output
 
 
+def test_deploy_aws_stub_points_at_bootstrap():
+    """The old spelling errors with a pointer — the provider name stays free for future
+    custom targets that happen to run on AWS, and the stub stays out of the command list."""
+    result = runner.invoke(app, ["deploy", "aws"])
+    assert result.exit_code == 1
+    assert "loopy deploy bootstrap" in result.output
+
+    help_result = runner.invoke(app, ["deploy", "--help"])
+    assert "bootstrap" in help_result.output
+    assert " aws " not in help_result.output
+
+
 def test_destroy_path_with_fake_session(monkeypatch, tmp_path):
     """--destroy deletes the stack's SSM parameters, then the stack itself."""
-    import loopy_cli.aws as aws_mod
+    import loopy_cli.bootstrap as bootstrap_mod
 
     ssm = _FakeSsm(existing=["/loopy/loopy-engine/files/loopy.env"])
     cf = _FakeCf(exists=True)
@@ -647,9 +659,9 @@ def test_destroy_path_with_fake_session(monkeypatch, tmp_path):
             return {"cloudformation": cf, "ssm": ssm}[name]
 
     monkeypatch.setattr(
-        aws_mod, "_require_boto3", lambda: type("B", (), {"Session": _FakeSession})
+        bootstrap_mod, "_require_boto3", lambda: type("B", (), {"Session": _FakeSession})
     )
-    result = runner.invoke(app, ["deploy", "aws", "--destroy", "--region", "us-east-1"])
+    result = runner.invoke(app, ["deploy", "bootstrap", "--destroy", "--region", "us-east-1"])
     assert result.exit_code == 0, result.output
     assert deleted == ["loopy-engine"]
     assert ssm.deleted == [["/loopy/loopy-engine/files/loopy.env"]]

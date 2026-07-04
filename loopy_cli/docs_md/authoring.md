@@ -280,9 +280,11 @@ sensor sees the payload. Without registration (or the manual equivalent), built-
 - **`loopy run`** brings up the containerized stack (a `redis` bus container plus the
   engine); `loopy run --in-process` is the no-Docker dev server, recording every run to
   `.loopy/state.db`.
-- **`loopy admin`** serves a read-only dashboard over that DB (run list, step timeline,
-  emitted events, outputs, failures) at <http://127.0.0.1:9000>. `loopy demo` serves the
-  same views against in-memory sample data.
+- **`loopy admin local`** serves a read-only dashboard over that DB (run list, step
+  timeline, emitted events, outputs, failures) at <http://127.0.0.1:9000>. Other deploy
+  targets swap where run state is read from (`loopy admin byo`, `loopy admin bootstrap` —
+  see `loopy docs deployment`). `loopy demo` serves the same views against in-memory
+  sample data.
 - **`loopy auth github`** creates a GitHub App via the manifest flow (browser required)
   and writes its creds to `loopy.env`; tokens are then minted and injected into sandboxes
   on both `run` and `trigger`. Headless alternative: a `GITHUB_TOKEN` with

@@ -114,7 +114,7 @@ run record (steps, outputs, emits, failures).
 
 > **Watching runs:** `loopy trigger` is the one-shot test path and runs in-memory, so it isn't
 > recorded. To see runs in the dashboard, drive the workflow through the server instead —
-> `loopy run --in-process manifest.json` records to `.loopy/state.db`, and `loopy admin` (in another terminal,
+> `loopy run --in-process manifest.json` records to `.loopy/state.db`, and `loopy admin local` (in another terminal,
 > at http://127.0.0.1:9000) shows the run list, timeline, and outputs read-only.
 
 ## One-command smoke test

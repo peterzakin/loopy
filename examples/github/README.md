@@ -64,7 +64,7 @@ loopy run --in-process manifest.json
 ```
 
 Open a PR (or merge one) on the target repo and watch the matching workflow fire. Inspect runs
-with `loopy admin` (dashboard at http://127.0.0.1:9000).
+with `loopy admin local` (dashboard at http://127.0.0.1:9000).
 
 ### Try it without GitHub
 
