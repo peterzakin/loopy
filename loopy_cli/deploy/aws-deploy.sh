@@ -53,7 +53,7 @@ fi
 if ! docker image inspect "loopy-engine:$LOOPY_VERSION" >/dev/null 2>&1; then
   mkdir -p /opt/loopy/image
   cat > /opt/loopy/image/Dockerfile <<EOF
-FROM python:3.11-slim
+FROM python:3.12-slim
 RUN pip install --no-cache-dir "loopy-computer[redis]==$LOOPY_VERSION"
 WORKDIR /project
 ENTRYPOINT ["loopy"]

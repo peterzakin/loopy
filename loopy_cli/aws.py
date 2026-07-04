@@ -382,18 +382,31 @@ def _stack_outputs(cf, stack: str) -> dict[str, str]:
     return {o["OutputKey"]: o["OutputValue"] for o in described.get("Outputs", [])}
 
 
-def _refresh_instance(ssm, instance_id: str, *, sleep=time.sleep) -> None:
-    """Re-run /opt/loopy/deploy.sh on the instance via SSM RunCommand, then wait.
+def _refresh_instance(ssm, instance_id: str, deploy_script: str, *, sleep=time.sleep) -> None:
+    """Rewrite /opt/loopy/deploy.sh from the freshly rendered script, run it, and wait.
 
     This is the in-place update: the CLI has already pushed the new tarball (S3) and secrets
     (SSM), so re-running the deploy script re-fetches both and restarts the containers — no
-    instance replacement, ~seconds of downtime. Only called for an already-running stack, where
-    the instance has had time to register with SSM; a fresh boot updates via user-data instead.
+    instance replacement, ~seconds of downtime. The script itself is re-pushed first (base64,
+    same encoding as user-data) — the instance's stored copy is whatever its *first boot*
+    rendered, so a CLI upgrade that fixes the script must not keep re-running the old one.
+    Only called for an already-running stack, where the instance has had time to register with
+    SSM; a fresh boot updates via user-data instead.
+
+    On failure the error carries the tail of the script's *stdout*: the script tees everything
+    (stderr included) into stdout via its log redirect, so that is where the real reason lives —
+    SSM's stderr holds only a generic "exit status 1".
     """
+    encoded = base64.b64encode(deploy_script.encode()).decode()
     command = ssm.send_command(
         InstanceIds=[instance_id],
         DocumentName="AWS-RunShellScript",
-        Parameters={"commands": [f"bash {INSTANCE_DEPLOY_SCRIPT}"]},
+        Parameters={
+            "commands": [
+                f"echo {encoded} | base64 -d > {INSTANCE_DEPLOY_SCRIPT}",
+                f"bash {INSTANCE_DEPLOY_SCRIPT}",
+            ]
+        },
     )
     command_id = command["Command"]["CommandId"]
     for _ in range(120):  # ~20 min ceiling: a cold image build is the slow case
@@ -405,8 +418,12 @@ def _refresh_instance(ssm, instance_id: str, *, sleep=time.sleep) -> None:
         status = result["Status"]
         if status in ("Success", "Cancelled", "TimedOut", "Failed"):
             if status != "Success":
-                detail = (result.get("StandardErrorContent") or "").strip()[:500]
-                raise RuntimeError(f"in-place refresh {status.lower()} on {instance_id}: {detail}")
+                stderr = (result.get("StandardErrorContent") or "").strip()
+                stdout_tail = (result.get("StandardOutputContent") or "").strip()[-1500:]
+                detail = "\n".join(part for part in (stderr, stdout_tail) if part)
+                raise RuntimeError(
+                    f"in-place refresh {status.lower()} on {instance_id}: {detail or 'no output'}"
+                )
             return
     raise RuntimeError(f"in-place refresh did not complete on {instance_id}")
 
@@ -664,7 +681,7 @@ def aws(
             "deploy: refreshing the engine in place (re-fetch project + secrets, restart; "
             "usually under a minute, a cold image build a few minutes)…"
         )
-        _refresh_instance(ssm, outputs["InstanceId"])
+        _refresh_instance(ssm, outputs["InstanceId"], deploy_script)
 
     stack_flag = f" --stack {stack}" if stack != "loopy-engine" else ""
     instance_id = outputs["InstanceId"]
