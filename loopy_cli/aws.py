@@ -521,11 +521,18 @@ def aws(
         _refresh_instance(ssm, outputs["InstanceId"])
 
     stack_flag = f" --stack {stack}" if stack != "loopy-engine" else ""
+    instance_id = outputs["InstanceId"]
     typer.echo("")
     verb = "updated" if existed else "done"
     typer.echo(f"deploy: {verb}. Engine at {public_url}")
     typer.echo(f"  origin:    {public_ip} (CloudFront-only ingress; direct hits are refused)")
     typer.echo(f"  webhooks:  set LOOPY_PUBLIC_URL={public_url} in loopy.env,")
     typer.echo("             then `loopy webhooks github`")
-    typer.echo(f"  dashboard: loopy admin --remote {public_url}/admin")
+    # /admin is blocked at CloudFront on this mode (the edge->origin hop is plain HTTP, so the
+    # bearer token must not travel it). Reach the dashboard over an SSM tunnel instead.
+    typer.echo("  dashboard: aws ssm start-session --target " + instance_id)
+    typer.echo("             --document-name AWS-StartPortForwardingSession \\")
+    typer.echo(f"             --parameters '{{\"portNumber\":[\"{engine_port}\"],"
+               '"localPortNumber":["9000"]}\'')
+    typer.echo("             then: loopy admin --remote http://localhost:9000")
     typer.echo(f"  teardown:  loopy deploy aws --destroy{stack_flag}")

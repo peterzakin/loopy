@@ -142,6 +142,22 @@ def test_template_shape_matches_the_design():
     assert behavior["CachePolicyId"] == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
 
 
+def test_admin_is_blocked_at_the_edge():
+    """No-domain mode: the edge->origin hop is plain HTTP, so /admin (bearer token) must not
+    be reachable through CloudFront — a viewer-request function 403s it. The dashboard is
+    reached over an SSM tunnel instead."""
+    resources = json.loads(TEMPLATE_PATH.read_text())["Resources"]
+    fn = resources["BlockAdminFunction"]
+    assert fn["Type"] == "AWS::CloudFront::Function"
+    assert "/admin/" in fn["Properties"]["FunctionCode"]
+    assert "statusCode: 403" in fn["Properties"]["FunctionCode"]
+    assoc = resources["Distribution"]["Properties"]["DistributionConfig"]["DefaultCacheBehavior"][
+        "FunctionAssociations"
+    ]
+    assert assoc[0]["EventType"] == "viewer-request"
+    assert assoc[0]["FunctionARN"] == {"Fn::GetAtt": ["BlockAdminFunction", "FunctionARN"]}
+
+
 def _project(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "proj"
     (root / "secrets").mkdir(parents=True)

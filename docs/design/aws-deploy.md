@@ -32,6 +32,12 @@ Three constraints frame the design:
    (Caddy/Let's Encrypt would need a domain the operator controls) and points at
    CloudFront, whose distribution serves a managed cert on `*.cloudfront.net`.
 
+This is **one deployment mode** (no domain, managed cert, CloudFront front door),
+not the only one. A bring-your-own-domain mode (ACM + ALB, or Caddy on the box)
+would terminate TLS end to end and could serve the dashboard publicly; its
+security posture differs from the tradeoffs below. The choices here apply to the
+no-domain mode.
+
 ## Decisions (the proposed design)
 
 1. **CloudFormation, driven by boto3.** One template describes the stack; a new
@@ -155,6 +161,29 @@ and mint a new URL. The command then writes `https://<domain>` to the
 script reads it; a first boot that races the distribution polls for it and starts
 the engine regardless after a timeout (the URL only gates printing delivery URLs,
 not serving).
+
+## Securing the edge-to-origin hop
+
+CloudFront terminates viewer TLS, but reaches the origin over plain HTTP (the
+origin has no trusted cert — that is the no-domain premise). So the
+CloudFront-to-instance leg is unencrypted. Two consequences, handled differently:
+
+- **Webhooks ride it in cleartext, and that is acceptable.** GitHub/Sentry
+  deliveries are HMAC-signed (`GITHUB_WEBHOOK_SECRET`), so forgery and tampering
+  are caught at the engine; the only residual is payload confidentiality (triage
+  and PR metadata, no credentials).
+- **The dashboard's bearer token must never ride it, so `/admin` is not served
+  through CloudFront.** A `viewer-request` CloudFront Function 403s `/admin` and
+  `/admin/*` at the edge. Operators reach the dashboard over an SSM port-forward
+  straight to the engine port (`aws ssm start-session
+  --document-name AWS-StartPortForwardingSession`, then `loopy admin --remote
+  http://localhost:<port>`), so `LOOPY_ADMIN_TOKEN` travels the encrypted SSM
+  channel, never the plaintext hop. The security group already admits only
+  CloudFront's ranges, so the port is not otherwise public; SSM reaches it
+  through the agent, not an open inbound rule. The downside is deliberate: the
+  dashboard is no longer "open the URL," it needs AWS access plus the tunnel.
+  This is the no-domain mode's tradeoff; a domain mode with end-to-end TLS could
+  serve `/admin` publicly behind the same bearer.
 
 ## The `loopy deploy aws` command
 
