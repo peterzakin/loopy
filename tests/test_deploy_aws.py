@@ -163,6 +163,27 @@ def test_security_group_descriptions_use_ec2s_allowed_charset():
         assert allowed.match(desc), f"{name} GroupDescription has a char EC2 rejects: {desc!r}"
 
 
+def test_cloudfront_comments_stay_within_the_128_char_limit():
+    """CloudFront rejects a Function or Distribution `Comment` over 128 characters with an
+    opaque `The parameter Comment is too big`. Keep them plain, short strings so a reworded
+    comment can't quietly blow the limit and roll a deploy back at pass 2."""
+    resources = json.loads(TEMPLATE_PATH.read_text())["Resources"]
+    comments: dict[str, object] = {}
+    for name, r in resources.items():
+        props = r.get("Properties", {})
+        if r["Type"] == "AWS::CloudFront::Function":
+            comments[name] = props.get("FunctionConfig", {}).get("Comment")
+        elif r["Type"] == "AWS::CloudFront::Distribution":
+            comments[name] = props.get("DistributionConfig", {}).get("Comment")
+    assert comments, "expected CloudFront resources with comments in the template"
+    for name, comment in comments.items():
+        assert isinstance(comment, str), (
+            f"{name} Comment must be a plain string kept under 128 chars, not {comment!r} "
+            "(an Fn::Sub can silently exceed the limit once resolved)"
+        )
+        assert len(comment) <= 128, f"{name} Comment is {len(comment)} chars; CloudFront caps it at 128"
+
+
 def test_admin_is_blocked_at_the_edge():
     """No-domain mode: the edge->origin hop is plain HTTP, so /admin (bearer token) must not
     be reachable through CloudFront — a viewer-request function 403s it. The dashboard is
