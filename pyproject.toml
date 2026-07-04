@@ -29,8 +29,12 @@ dependencies = [
     # never silently on the host), so its SDK is a core dependency — not an optional extra.
     "daytona>=0.180",
     # `loopy deploy aws` provisions the engine's hosting stack via CloudFormation; boto3
-    # is a core dependency (imported lazily so `loopy compile` stays runtime-free).
-    "boto3>=1.34",
+    # is a core dependency (imported lazily so `loopy compile` stays runtime-free). The
+    # `[crt]` extra pulls awscrt, which botocore's SSO / IAM Identity Center ("login")
+    # credential provider requires — orgs hand out AWS creds via SSO, and the deploy is
+    # meant to run from whatever credentials the AWS SDK resolves, so it must not fail at
+    # credential resolution with "pip install botocore[crt]".
+    "boto3[crt]>=1.34",
 ]
 
 [project.scripts]
