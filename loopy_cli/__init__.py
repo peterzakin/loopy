@@ -297,7 +297,7 @@ def _print_workflow_diagram(name: str, wf) -> None:  # noqa: ANN001
         for ni, step_name in enumerate(gen):
             step = wf.steps[step_name]
             if multi:
-                glyph = ("└─●" if ni == len(gen) - 1 else "├─●")
+                glyph = "└─●" if ni == len(gen) - 1 else "├─●"
             else:
                 glyph = "  ●" if forked else "●"
             raw = f"{glyph} {step_name}"
@@ -602,9 +602,7 @@ def _offer_ambient_daytona_creds(target: Path) -> None:
 
     write_control_plane_env(target, updates)
     wrote = " + ".join(updates)
-    typer.echo(
-        "  " + typer.style("✓", fg=typer.colors.GREEN) + f" wrote {wrote} to loopy.env"
-    )
+    typer.echo("  " + typer.style("✓", fg=typer.colors.GREEN) + f" wrote {wrote} to loopy.env")
     typer.echo()
 
 
@@ -1813,7 +1811,7 @@ def _admin_bootstrap_url(root: Path) -> str:
     typer.echo(f"  aws ssm start-session --target {instance} \\")
     typer.echo("    --document-name AWS-StartPortForwardingSession \\")
     typer.echo(
-        f"    --parameters '{{\"portNumber\":[\"{engine_port}\"],"
+        f'    --parameters \'{{"portNumber":["{engine_port}"],'
         f'"localPortNumber":["{engine_port}"]}}\''
     )
     return f"http://localhost:{engine_port}/admin"
@@ -1823,9 +1821,9 @@ def _admin_bootstrap_url(root: Path) -> str:
 def admin(
     target: str | None = typer.Argument(
         None,
-        help="Deploy target to administer: `local` (the state DB `loopy run` writes here), "
-        "`byo` (your hosted control plane, at $LOOPY_PUBLIC_URL/admin), or `bootstrap` "
-        "(the provisioned stack, over its SSM tunnel).",
+        help="Deploy target to administer (default `local`): `local` (the state DB `loopy "
+        "run` writes here), `byo` (your hosted control plane, at $LOOPY_PUBLIC_URL/admin), "
+        "or `bootstrap` (the provisioned stack, over its SSM tunnel).",
     ),
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address."),
     port: int | None = typer.Option(
@@ -1851,12 +1849,12 @@ def admin(
 ) -> None:
     """Serve the read-only control-plane dashboard for one deploy target.
 
-    The target is explicit — each one reads run state from a different place:
+    Each target reads run state from a different place; the target defaults to `local`:
 
-    `local`: the run-state DB `loopy run` writes on this machine. Pairs with `loopy run`
-    (which defaults to that same DB): `loopy run` in one terminal, `loopy admin local` in
-    another. When `manifest.json` is present it also powers the workflow-template, registry,
-    and schedule views; the run views work without it.
+    `local` (the default): the run-state DB `loopy run` writes on this machine. Pairs with
+    `loopy run` (which defaults to that same DB): `loopy run` in one terminal, `loopy admin`
+    in another. When `manifest.json` is present it also powers the workflow-template,
+    registry, and schedule views; the run views work without it.
 
     `byo` / `bootstrap`: a local proxy that serves the UI and forwards /api to the deployed
     control plane with a bearer token from LOOPY_ADMIN_TOKEN — the browser never holds the
@@ -1890,26 +1888,11 @@ def admin(
     port = _admin_port(port)
 
     choices = "|".join(ADMIN_TARGETS)
+    # `local` is the default: it pairs with `loopy run` on this machine, the common dev
+    # loop, so `loopy run` in one terminal and bare `loopy admin` in another just works.
+    # The hosted targets (byo/bootstrap) proxy elsewhere, so those must be named.
     if target is None:
-        # Explicit by design: guessing `local` here used to surface as a baffling
-        # "no state DB" error in a project whose engine actually runs in the cloud.
-        typer.echo(
-            f"error: say which deployment to administer: `loopy admin <{choices}>`.",
-            err=True,
-        )
-        recorded = resolve_deploy_target(root)
-        if recorded:
-            typer.echo(
-                f"       This project's deploy target is '{recorded}' (from loopy.env): "
-                f"`loopy admin {recorded}`.",
-                err=True,
-            )
-        typer.echo(
-            "       `loopy admin local` reads the state DB a `loopy run` on this machine "
-            "writes.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
+        target = TARGET_LOCAL
 
     if target not in ADMIN_TARGETS:
         hint = ""
@@ -1996,6 +1979,15 @@ def admin(
         store = SqliteStateStore(db, read_only=True)  # raises if the DB doesn't exist yet
     except FileNotFoundError as exc:
         typer.echo(f"error: {exc}", err=True)
+        # A local DB is expected before a local run — but if the project is set up for a
+        # hosted target, the operator likely wanted that one, not the default `local`.
+        recorded = resolve_deploy_target(root)
+        if recorded:
+            typer.echo(
+                f"       (this project's deploy target is '{recorded}' — for that, run "
+                f"`loopy admin {recorded}`)",
+                err=True,
+            )
         raise typer.Exit(code=1) from exc
 
     loaded = None

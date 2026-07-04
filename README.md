@@ -367,15 +367,15 @@ A few things worth knowing before the first run:
 The dev server `loopy run --in-process` records every run to a durable on-disk store
 (`.loopy/state.db` by default), and `loopy admin` serves a small read-only dashboard over it: a
 run list with each run's step timeline, emitted events, outputs, and any failure. `loopy admin`
-takes the deploy target to administer — `local` for this dev loop, `byo` or `bootstrap` for a
-hosted control plane (below):
+takes an optional deploy target to administer — it defaults to `local` (this dev loop); pass
+`byo` or `bootstrap` for a hosted control plane (below):
 
 ```bash
 loopy run --in-process manifest.json   # dev server: records runs as they execute
-loopy admin local                      # in another terminal → http://127.0.0.1:9000
+loopy admin                            # in another terminal → http://127.0.0.1:9000
 ```
 
-`loopy admin local` reads the same DB the dev server writes, so it needs no flags; with a
+`loopy admin` (target `local`) reads the same DB the dev server writes, so it needs no flags; with a
 `manifest.json` present it also renders the workflow, sensor, and registry views, and `loopy demo`
 serves every view against in-memory sample data. (A bare `loopy run` brings up the containerized
 stack instead, a `redis` bus container plus the engine, which keeps its state in a Docker

@@ -285,7 +285,7 @@ gitignored — never commit them, and never write a secret into `registry.yml` o
 | `loopy doctor` | runnability check — placeholder keys, git auth, provider creds |
 | `loopy trigger . --event E --fields '{...}' --json` | fire one event; print the run record |
 | `loopy run` | start the engine (compiles first); `--in-process` = no-Docker dev server |
-| `loopy admin local` | read-only dashboard over recorded runs (http://127.0.0.1:9000) |
+| `loopy admin` | read-only dashboard over recorded runs (http://127.0.0.1:9000) |
 | `loopy auth github` | GitHub App manifest flow — **opens a browser; not headless-safe** |
 | `loopy webhooks github` | register GitHub repo webhooks (`loopy webhooks list` = delivery URLs) |
 | `loopy docs [topic]` | this reference in full; `loopy docs errors` = the diagnostic catalog |

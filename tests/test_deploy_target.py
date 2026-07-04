@@ -8,7 +8,6 @@ from loopy_cli.deploy_target import (
     BOOTSTRAP_ENGINE_PORT_ENV,
     BOOTSTRAP_INSTANCE_ID_ENV,
     DEPLOY_TARGET_ENV,
-    LEGACY_DEPLOY_MODE_ENV,
     TARGET_BOOTSTRAP,
     TARGET_BYO,
     resolve_bootstrap_config,
@@ -20,7 +19,6 @@ from loopy_cli.deploy_target import (
 def _clean_env(monkeypatch):
     for key in (
         DEPLOY_TARGET_ENV,
-        LEGACY_DEPLOY_MODE_ENV,
         BOOTSTRAP_INSTANCE_ID_ENV,
         BOOTSTRAP_ENGINE_PORT_ENV,
     ):
@@ -47,23 +45,6 @@ def test_stray_value_resolves_to_none(tmp_path):
     for stray in ("local", "render", "yes"):
         (tmp_path / "loopy.env").write_text(f"{DEPLOY_TARGET_ENV}={stray}\n")
         assert resolve_deploy_target(tmp_path) is None
-
-
-def test_legacy_mode_maps_provisioned_to_bootstrap(tmp_path):
-    (tmp_path / "loopy.env").write_text(f"{LEGACY_DEPLOY_MODE_ENV}=provisioned\n")
-    assert resolve_deploy_target(tmp_path) == TARGET_BOOTSTRAP
-
-
-def test_legacy_mode_maps_byo(tmp_path):
-    (tmp_path / "loopy.env").write_text(f"{LEGACY_DEPLOY_MODE_ENV}=byo\n")
-    assert resolve_deploy_target(tmp_path) == TARGET_BYO
-
-
-def test_current_spelling_wins_over_legacy(tmp_path):
-    (tmp_path / "loopy.env").write_text(
-        f"{DEPLOY_TARGET_ENV}=byo\n{LEGACY_DEPLOY_MODE_ENV}=provisioned\n"
-    )
-    assert resolve_deploy_target(tmp_path) == TARGET_BYO
 
 
 def test_bootstrap_config_reads_recorded_hints(tmp_path, monkeypatch):

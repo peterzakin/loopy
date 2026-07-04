@@ -325,23 +325,6 @@ def test_cli_github_no_url_points_at_deploy_on_bootstrap_target(tmp_path, monkey
     assert "loopy deploy bootstrap" in result.output
 
 
-def test_cli_github_no_url_honors_legacy_provisioned_mode(tmp_path, monkeypatch):
-    """A project set up before the rename recorded LOOPY_DEPLOY_MODE=provisioned; it must
-    still resolve to the bootstrap target's guidance."""
-    from loopy_cli.deploy_target import LEGACY_DEPLOY_MODE_ENV
-
-    target, _ = _github_project(tmp_path)
-    _write_app_creds(target)
-    write_control_plane_env(target, {LEGACY_DEPLOY_MODE_ENV: "provisioned"})
-    monkeypatch.delenv("LOOPY_PUBLIC_URL", raising=False)
-    monkeypatch.delenv(LEGACY_DEPLOY_MODE_ENV, raising=False)
-
-    result = runner.invoke(app, ["webhooks", "github", "--root", str(target)])
-
-    assert result.exit_code == 1
-    assert "loopy deploy bootstrap" in result.output
-
-
 def test_cli_github_requires_repos(tmp_path, monkeypatch):
     """The minimal no-repo scaffold has no repos — nothing to hang a repo webhook on."""
     target = tmp_path / "demo"
@@ -446,7 +429,5 @@ def test_findings_quiet_without_app(tmp_path, monkeypatch):
     URL finding still fires (that's local), but no unverifiable live check."""
     target, project = _github_project(tmp_path)
     monkeypatch.delenv("GITHUB_APP_ID", raising=False)
-    findings = registration_findings(
-        project, target, control_env={"LOOPY_PUBLIC_URL": _URL}
-    )
+    findings = registration_findings(project, target, control_env={"LOOPY_PUBLIC_URL": _URL})
     assert findings == []

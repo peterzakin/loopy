@@ -44,12 +44,13 @@ endpoint is deterministic on every provider. The mount follows the bind:
 
 ## Deploy targets, and the admin dashboard
 
-`loopy admin <target>` serves the read-only dashboard for one deploy target — the named
-place the engine runs. The target is explicit (guessing wrongly used to surface as a
-baffling "no state DB" error), and each one reads run state from a different place:
+`loopy admin [target]` serves the read-only dashboard for one deploy target — the named
+place the engine runs. The target defaults to `local` (the dev loop); the hosted targets
+are named explicitly. Each reads run state from a different place:
 
-1. **`loopy admin local`.** Binds loopback, no auth, reads `.loopy/state.db` directly. The
-   dev loop: `loopy run` in one terminal, `loopy admin local` in another.
+1. **`loopy admin` (target `local`, the default).** Binds loopback, no auth, reads
+   `.loopy/state.db` directly. The dev loop: `loopy run` in one terminal, `loopy admin` in
+   another.
 2. **`loopy admin byo`** (bring-your-own hosting, on your laptop). A local loopback proxy
    that serves the dashboard UI and forwards `/api/*` (and `/static`) to the control
    plane, injecting the bearer from `LOOPY_ADMIN_TOKEN` (environment or `loopy.env`). The

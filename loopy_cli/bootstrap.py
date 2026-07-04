@@ -41,8 +41,7 @@ import typer
 
 deploy_app = typer.Typer(
     no_args_is_help=True,
-    help="Provision hosting for the engine on a named deploy target "
-    "(`loopy deploy bootstrap`).",
+    help="Provision hosting for the engine on a named deploy target (`loopy deploy bootstrap`).",
 )
 
 _DEPLOY_DIR = Path(__file__).resolve().parent / "deploy"
@@ -579,20 +578,6 @@ def _delete_stack_secrets(ssm, stack: str) -> int:
 # ── the command ─────────────────────────────────────────────────────────────────────
 
 
-@deploy_app.command(name="aws", hidden=True)
-def aws_renamed_stub() -> None:
-    """(renamed) The provisioned starter stack is `loopy deploy bootstrap`."""
-    # The bootstrap target used to be spelled `loopy deploy aws`. It kept squatting the
-    # provider's name, which a future *custom* AWS target should be free to claim, so the
-    # command moved; this stub exists only to point old fingers at the new name.
-    typer.echo(
-        "error: `loopy deploy aws` is now `loopy deploy bootstrap` — the loopy-provisioned "
-        "starter stack (EC2 + CloudFront). Same flags, new name.",
-        err=True,
-    )
-    raise typer.Exit(code=1)
-
-
 @deploy_app.command()
 def bootstrap(
     manifest: Path = typer.Argument(
@@ -782,8 +767,7 @@ def bootstrap(
             "image build, then CloudFront). Safe to leave it; the URL is printed when it's live."
         )
         typer.echo(
-            f"deploy: creating stack {stack} in {resolved_region} "
-            "(instance + address; ~2-4 min)…"
+            f"deploy: creating stack {stack} in {resolved_region} (instance + address; ~2-4 min)…"
         )
         _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": ""})
         origin = eip_public_dns(_stack_outputs(cf, stack)["PublicIp"], resolved_region)

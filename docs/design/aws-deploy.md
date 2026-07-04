@@ -3,7 +3,7 @@
 Status: implemented (`loopy_cli/bootstrap.py`, `loopy_cli/deploy/aws-stack.json`,
 `loopy_cli/deploy/aws-userdata.sh`, `loopy_cli/deploy/aws-deploy.sh`; tests in
 `tests/test_deploy_bootstrap.py`) · Scope: `loopy_cli` (`deploy bootstrap` command —
-the `bootstrap` deploy target, formerly spelled `deploy aws`), `loopy_cli/deploy`, docs
+the `bootstrap` deploy target), `loopy_cli/deploy`, docs
 
 ## Problem
 
@@ -190,8 +190,8 @@ CloudFront-to-instance leg is unencrypted. Two consequences, handled differently
 
 ## The `loopy deploy bootstrap` command
 
-(Originally shipped as `loopy deploy aws`; renamed so the provider name stays free for
-future custom targets that also run on AWS.)
+(Named `bootstrap`, not `aws`, so the provider name stays free for future custom
+targets that also run on AWS.)
 
 - **Inputs:** `--region`, `--profile` (or the standard AWS env vars, resolved by
   boto3's default chain), `--stack` (default `loopy-engine` — the idempotency

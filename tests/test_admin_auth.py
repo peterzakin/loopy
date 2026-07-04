@@ -39,7 +39,6 @@ def _clean_env(monkeypatch):
         "LOOPY_PUBLIC_URL",
         "PORT",
         "LOOPY_DEPLOY_TARGET",
-        "LOOPY_DEPLOY_MODE",
         "LOOPY_BOOTSTRAP_INSTANCE_ID",
         "LOOPY_BOOTSTRAP_ENGINE_PORT",
     )
@@ -194,28 +193,22 @@ def test_admin_reads_token_from_loopy_env(monkeypatch, tmp_path):
 
 
 # ── `loopy admin <target>` resolution ────────────────────────────────────────────────
-def test_bare_admin_requires_an_explicit_target(monkeypatch, tmp_path):
-    # No more guessing `local`: in a project whose engine runs in the cloud that guess
-    # surfaced as a baffling "no state DB" error.
+def test_bare_admin_defaults_to_local(monkeypatch, tmp_path):
+    # `local` is the default: bare `loopy admin` pairs with a local `loopy run`. With no
+    # DB yet, the next failure is the missing state DB — proving it resolved to local.
     result = _invoke(["admin"], monkeypatch, tmp_path)
     assert result.exit_code == 1
-    assert "loopy admin <local|byo|bootstrap>" in result.output
-    assert "loopy admin local" in result.output
+    assert "no state DB" in result.output
 
 
-def test_bare_admin_names_the_recorded_target(monkeypatch, tmp_path):
+def test_bare_admin_hints_recorded_target_when_local_db_missing(monkeypatch, tmp_path):
+    # A project set up for a hosted target, run with bare `loopy admin`: it still defaults
+    # to local, but the missing-DB error points at the target the project actually uses.
     (tmp_path / "loopy.env").write_text("LOOPY_DEPLOY_TARGET=bootstrap\n")
     result = _invoke(["admin"], monkeypatch, tmp_path)
     assert result.exit_code == 1
+    assert "no state DB" in result.output
     assert "'bootstrap'" in result.output and "loopy admin bootstrap" in result.output
-
-
-def test_bare_admin_maps_the_legacy_deploy_mode(monkeypatch, tmp_path):
-    # Projects set up before the rename recorded LOOPY_DEPLOY_MODE=provisioned.
-    (tmp_path / "loopy.env").write_text("LOOPY_DEPLOY_MODE=provisioned\n")
-    result = _invoke(["admin"], monkeypatch, tmp_path)
-    assert result.exit_code == 1
-    assert "loopy admin bootstrap" in result.output
 
 
 def test_unknown_target_rejected_with_db_hint(monkeypatch, tmp_path):

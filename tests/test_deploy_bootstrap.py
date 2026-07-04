@@ -112,8 +112,7 @@ def test_render_deploy_script_installs_shipped_wheel_when_source_built():
     """With --engine-source: the script fetches the wheel from S3 and installs it, and the
     tag carries the content hash so a changed wheel forces a rebuild."""
     wheel_uri = (
-        "s3://loopy-deploy-1-us-east-1/loopy-engine/engine/"
-        "loopy_computer-0.1.0-py3-none-any.whl"
+        "s3://loopy-deploy-1-us-east-1/loopy-engine/engine/loopy_computer-0.1.0-py3-none-any.whl"
     )
     script = _render(engine_image_tag="0.1.0-abc123def456", engine_wheel_s3=wheel_uri)
     assert "__LOOPY_" not in script
@@ -172,9 +171,7 @@ def test_template_shape_matches_the_design():
     assert len(ingress) == 1
     assert ingress[0]["SourcePrefixListId"] == {"Ref": "CloudFrontPrefixListId"}
     # Webhooks must arrive intact: every method, no caching (the managed policy ids).
-    behavior = resources["Distribution"]["Properties"]["DistributionConfig"][
-        "DefaultCacheBehavior"
-    ]
+    behavior = resources["Distribution"]["Properties"]["DistributionConfig"]["DefaultCacheBehavior"]
     assert "POST" in behavior["AllowedMethods"]
     assert behavior["CachePolicyId"] == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
 
@@ -185,11 +182,7 @@ def test_security_group_descriptions_use_ec2s_allowed_charset():
     CREATE_FAILED — catch it here instead of minutes into a deploy."""
     allowed = re.compile(r"^[A-Za-z0-9 ._:/()#,@\[\]+=&;{}!$*-]{1,255}$")
     resources = json.loads(TEMPLATE_PATH.read_text())["Resources"]
-    sgs = {
-        name: r
-        for name, r in resources.items()
-        if r["Type"] == "AWS::EC2::SecurityGroup"
-    }
+    sgs = {name: r for name, r in resources.items() if r["Type"] == "AWS::EC2::SecurityGroup"}
     assert sgs, "expected at least one security group in the template"
     for name, sg in sgs.items():
         desc = sg["Properties"]["GroupDescription"]
@@ -628,12 +621,11 @@ def test_deploy_bootstrap_help_does_not_touch_boto3():
     assert "CloudFront" in result.output
 
 
-def test_deploy_aws_stub_points_at_bootstrap():
-    """The old spelling errors with a pointer — the provider name stays free for future
-    custom targets that happen to run on AWS, and the stub stays out of the command list."""
+def test_deploy_aws_is_not_a_command():
+    """`bootstrap` is the only deploy target — the provider name `aws` is free for a
+    future custom target and is not itself a command."""
     result = runner.invoke(app, ["deploy", "aws"])
-    assert result.exit_code == 1
-    assert "loopy deploy bootstrap" in result.output
+    assert result.exit_code != 0
 
     help_result = runner.invoke(app, ["deploy", "--help"])
     assert "bootstrap" in help_result.output

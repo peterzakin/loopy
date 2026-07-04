@@ -19,9 +19,6 @@ The hosting choice is recorded as `LOOPY_DEPLOY_TARGET` in `loopy.env` — by `l
 (the wizard's hosting question) or by `loopy deploy bootstrap` itself. It's a CLI-side
 hint only: it phrases `init`/`webhooks` guidance for the right path and lets `loopy
 admin` point at the right target in its errors. The engine never reads it.
-
-Older projects recorded the same fork as `LOOPY_DEPLOY_MODE` (`byo`/`provisioned`);
-`resolve_deploy_target` still honors that spelling, mapping `provisioned` → `bootstrap`.
 """
 
 from __future__ import annotations
@@ -46,32 +43,21 @@ ADMIN_TARGETS = (TARGET_LOCAL, TARGET_BYO, TARGET_BOOTSTRAP)
 BOOTSTRAP_INSTANCE_ID_ENV = "LOOPY_BOOTSTRAP_INSTANCE_ID"
 BOOTSTRAP_ENGINE_PORT_ENV = "LOOPY_BOOTSTRAP_ENGINE_PORT"
 
-# The pre-rename spelling of the recorded choice, kept readable so a project set up by an
-# older CLI resolves without re-running `loopy init`.
-LEGACY_DEPLOY_MODE_ENV = "LOOPY_DEPLOY_MODE"
-_LEGACY_MODE_TO_TARGET = {"byo": TARGET_BYO, "provisioned": TARGET_BOOTSTRAP}
-
 
 def resolve_deploy_target(root: str | Path) -> str | None:
-    """The recorded deploy target: process env > `loopy.env` > legacy mode > None.
+    """The recorded deploy target: process env > `loopy.env` > None.
 
     Same precedence every control-plane var gets (the real environment wins over the
-    local dotenv), checked for the current spelling before the legacy one. Returns None
-    when unset or unrecognized, so callers fall back to target-agnostic behavior rather
-    than trusting a stray value.
+    local dotenv). Returns None when unset or unrecognized, so callers fall back to
+    target-agnostic behavior rather than trusting a stray value.
     """
     from loopy_runtime.secrets import load_control_plane_env
 
-    file_env = load_control_plane_env(root)
-
-    def lookup(key: str) -> str:
-        value = os.environ.get(key, "").strip()
-        return (value or file_env.get(key, "").strip()).lower()
-
-    target = lookup(DEPLOY_TARGET_ENV)
-    if target in HOSTED_TARGETS:
-        return target
-    return _LEGACY_MODE_TO_TARGET.get(lookup(LEGACY_DEPLOY_MODE_ENV))
+    value = os.environ.get(DEPLOY_TARGET_ENV, "").strip()
+    if not value:
+        value = load_control_plane_env(root).get(DEPLOY_TARGET_ENV, "").strip()
+    value = value.lower()
+    return value if value in HOSTED_TARGETS else None
 
 
 def resolve_bootstrap_config(root: str | Path) -> dict[str, str]:
