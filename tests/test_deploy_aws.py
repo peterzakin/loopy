@@ -32,6 +32,7 @@ from loopy_cli.aws import (
     render_deploy_script,
     render_user_data,
     stack_param_path,
+    wait_until_serving,
 )
 
 runner = CliRunner()
@@ -285,6 +286,31 @@ def test_refresh_instance_raises_on_failed_command():
     ssm = _FakeCommandSsm(["Failed"])
     with pytest.raises(RuntimeError, match="refresh failed on i-123: boom"):
         _refresh_instance(ssm, "i-123", sleep=lambda _s: None)
+
+
+def test_wait_until_serving_returns_true_once_healthz_answers_200():
+    """The URL 502s while the instance boots and CloudFront propagates, then answers."""
+    calls = {"n": 0}
+    seen = []
+
+    def fetch(url):
+        seen.append(url)
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise ConnectionError("502")  # still booting / propagating
+        return 200
+
+    assert wait_until_serving("https://x.cloudfront.net", fetch=fetch, sleep=lambda _s: None)
+    assert seen[0] == "https://x.cloudfront.net/healthz"  # polls /healthz, not /admin
+    assert calls["n"] == 3
+
+
+def test_wait_until_serving_times_out_without_raising():
+    """A slow-but-fine boot must not fail the deploy; timeout returns False, no raise."""
+    result = wait_until_serving(
+        "https://x.cloudfront.net", fetch=lambda _u: 502, sleep=lambda _s: None, attempts=3
+    )
+    assert result is False
 
 
 class _FakeWaiter:
