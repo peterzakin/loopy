@@ -212,11 +212,14 @@ def test_scaffold_still_refuses_dir_with_unrelated_file(tmp_path):
 
 
 def test_init_wizard_step_order(tmp_path, monkeypatch):
-    """The wizard collects the public URL first (auth's webhook offer needs it recorded),
-    then authenticates, then asks which repo(s) to work on — and offers webhook
-    registration only after the scaffold exists (registration needs registry.yml)."""
+    """Bring-your-own mode: pick the deploy mode first, then collect the public URL, then
+    authenticate, then ask which repo(s) to work on. Webhook registration is no longer an
+    inline offer — it's an explicit next step surfaced by the closing report."""
     calls: list[str] = []
 
+    monkeypatch.setattr(
+        loopy_cli, "_choose_deploy_mode", lambda target: (calls.append("mode"), "byo")[1]
+    )
     monkeypatch.setattr(
         loopy_cli, "_offer_public_webhook_url", lambda target: calls.append("url")
     )
@@ -224,9 +227,6 @@ def test_init_wizard_step_order(tmp_path, monkeypatch):
         loopy_cli, "_offer_github_auth", lambda target: (calls.append("auth"), True)[1]
     )
     monkeypatch.setattr(loopy_cli, "_prompt_for_repos", lambda: (calls.append("repos"), [])[1])
-    monkeypatch.setattr(
-        loopy_cli, "offer_github_webhooks", lambda target: calls.append("webhooks")
-    )
     # Keep the rest of the interactive wizard quiet.
     monkeypatch.setattr(loopy_cli, "_write_admin_token", lambda target: None)
     monkeypatch.setattr(loopy_cli, "_offer_ambient_anthropic_key", lambda target: None)
@@ -242,14 +242,49 @@ def test_init_wizard_step_order(tmp_path, monkeypatch):
 
     loopy_cli.init("demo", directory=tmp_path)
 
-    assert calls == ["url", "auth", "repos", "webhooks"]
-    # The webhook-registration offer fires post-scaffold, so the registry it compiles exists.
+    assert calls == ["mode", "url", "auth", "repos"]
+    assert (tmp_path / "demo" / "registry.yml").is_file()
+
+
+def test_init_provisioned_mode_skips_url_prompt(tmp_path, monkeypatch):
+    """Provisioned mode: no public URL exists yet (`loopy deploy aws` mints it), so `init`
+    must not prompt for LOOPY_PUBLIC_URL — that would ask for something unknowable."""
+    monkeypatch.setattr(loopy_cli, "_choose_deploy_mode", lambda target: "provisioned")
+
+    def _no_url_prompt(target):
+        raise AssertionError("provisioned mode must not prompt for the public URL")
+
+    monkeypatch.setattr(loopy_cli, "_offer_public_webhook_url", _no_url_prompt)
+    monkeypatch.setattr(loopy_cli, "_offer_github_auth", lambda target: False)
+
+    def _no_repo_prompt():
+        raise AssertionError("repo prompt must be skipped when git auth is not wired")
+
+    monkeypatch.setattr(loopy_cli, "_prompt_for_repos", _no_repo_prompt)
+    for fn in (
+        "_write_admin_token",
+        "_offer_ambient_anthropic_key",
+        "_offer_ambient_daytona_creds",
+        "_offer_redis_bus",
+        "_note_minimal_mode",
+        "_report_remaining_setup",
+    ):
+        monkeypatch.setattr(loopy_cli, fn, lambda *a, **k: None)
+
+    class _Tty:
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(loopy_cli.sys, "stdin", _Tty())
+
+    loopy_cli.init("demo", directory=tmp_path)  # no AssertionError ⇒ URL prompt skipped
     assert (tmp_path / "demo" / "registry.yml").is_file()
 
 
 def test_init_without_github_auth_scaffolds_minimal(tmp_path, monkeypatch):
     """No git auth ⇒ the minimal registry (no workflow), and the repo prompt is skipped
     entirely — naming repos a repo-less project can't reach would be misleading."""
+    monkeypatch.setattr(loopy_cli, "_choose_deploy_mode", lambda target: "byo")
     monkeypatch.setattr(loopy_cli, "_offer_public_webhook_url", lambda target: None)
     # Auth declined / not completed.
     monkeypatch.setattr(loopy_cli, "_offer_github_auth", lambda target: False)
@@ -260,7 +295,6 @@ def test_init_without_github_auth_scaffolds_minimal(tmp_path, monkeypatch):
     monkeypatch.setattr(loopy_cli, "_prompt_for_repos", _no_repo_prompt)
     # Keep the rest of the wizard quiet.
     for name in (
-        "offer_github_webhooks",
         "_offer_ambient_anthropic_key",
         "_offer_ambient_daytona_creds",
         "_offer_redis_bus",

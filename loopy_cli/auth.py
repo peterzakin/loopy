@@ -415,13 +415,17 @@ def run_github_auth(
     _verify(root)
     typer.echo()
 
-    # With auth landed, offer to wire event delivery too: built-in `Github.*` triggers
-    # only fire once GitHub can deliver webhooks to the engine. The offer gates itself —
-    # it needs a compiled project with repos and a LOOPY_PUBLIC_URL (so it's silent when
-    # `loopy init` runs auth before the scaffold exists) and it never raises.
-    from loopy_cli.webhooks import offer_github_webhooks
-
-    offer_github_webhooks(root)
+    # Event delivery is wired separately, on purpose: built-in `Github.*` triggers only fire
+    # once GitHub can deliver to the engine, and that's the one explicit `loopy webhooks
+    # github` step. Auth doesn't do it inline — the public URL may not exist yet (a
+    # provisioned host mints it at deploy). Just point at the next step.
+    typer.echo(
+        typer.style(
+            "  Next: `loopy webhooks github` to register event delivery "
+            "(needs LOOPY_PUBLIC_URL).",
+            fg=typer.colors.BRIGHT_BLACK,
+        )
+    )
 
 
 @auth_app.command()

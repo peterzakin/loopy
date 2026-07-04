@@ -260,20 +260,70 @@ def _put_secret_files(ssm, stack: str, root: Path, rels: list[str]) -> None:
         )
 
 
-def _stack_exists(cf, stack: str) -> bool:
+# Terminal states a stack can be stuck in that block a fresh deploy: a create that rolled
+# back but wasn't cleaned up, or a failed rollback/delete. None can be updated — CloudFormation
+# only allows deleting them — and a rolled-back stack has no EIP output, so the update path
+# would `KeyError` on `PublicIp`. The deploy deletes such a stack and recreates instead.
+DEAD_STACK_STATUSES = frozenset(
+    {
+        "ROLLBACK_COMPLETE",
+        "ROLLBACK_FAILED",
+        "CREATE_FAILED",
+        "DELETE_FAILED",
+        "UPDATE_ROLLBACK_FAILED",
+    }
+)
+
+
+def _stack_status(cf, stack: str) -> str | None:
+    """The stack's `StackStatus`, or None if it doesn't exist."""
     try:
         response = cf.describe_stacks(StackName=stack)
     except Exception:  # noqa: BLE001 - ClientError ValidationError == "does not exist"
-        return False
-    status = response["Stacks"][0]["StackStatus"]
-    if status == "REVIEW_IN_PROGRESS":  # a never-executed change set, not a real stack
+        return None
+    return response["Stacks"][0]["StackStatus"]
+
+
+def _stack_exists(cf, stack: str) -> bool:
+    status = _stack_status(cf, stack)
+    if status is None or status == "REVIEW_IN_PROGRESS":  # absent, or a never-executed change set
         return False
     return True
+
+
+def _clear_unusable_stack(cf, stack: str, *, echo=None) -> None:
+    """Delete a stack stuck in a terminal failed state (or wait out a running delete).
+
+    CloudFormation only allows deleting a rolled-back/failed stack, never updating it, and a
+    rolled-back stack has no outputs — so the deploy's update path would `KeyError` on the EIP.
+    Clearing it here makes the subsequent apply a clean create. A healthy or absent stack is
+    left untouched; only the failure states in `DEAD_STACK_STATUSES` (plus an in-flight delete)
+    are acted on.
+    """
+    echo = echo or typer.echo
+    status = _stack_status(cf, stack)
+    if status in DEAD_STACK_STATUSES:
+        echo(
+            f"deploy: existing stack {stack} is in {status} (a prior deploy failed); "
+            "deleting it so this is a clean create…"
+        )
+        cf.delete_stack(StackName=stack)
+    elif status == "DELETE_IN_PROGRESS":
+        echo(f"deploy: stack {stack} is finishing an earlier delete; waiting for it…")
+    else:
+        return
+    cf.get_waiter("stack_delete_complete").wait(
+        StackName=stack, WaiterConfig={"Delay": 15, "MaxAttempts": 120}
+    )
 
 
 def _apply_stack(cf, stack: str, template_body: str, parameters: dict[str, str]) -> None:
     """create_stack or update_stack, then wait; a no-op update is success, not an error."""
     params = [{"ParameterKey": k, "ParameterValue": v} for k, v in parameters.items()]
+    # The failed-resource lookup queries by this. On a failed *create* the stack rolls back
+    # and (OnFailure=DELETE) is gone, so its name no longer resolves — but the immutable stack
+    # id (ARN) that create_stack returns keeps its events queryable, so the reason survives.
+    stack_ref = stack
     if _stack_exists(cf, stack):
         try:
             cf.update_stack(
@@ -288,27 +338,37 @@ def _apply_stack(cf, stack: str, template_body: str, parameters: dict[str, str])
             raise
         waiter = cf.get_waiter("stack_update_complete")
     else:
-        cf.create_stack(
+        response = cf.create_stack(
             StackName=stack,
             TemplateBody=template_body,
             Parameters=params,
             Capabilities=["CAPABILITY_IAM"],
             OnFailure="DELETE",
         )
+        stack_ref = (response or {}).get("StackId") or stack
         waiter = cf.get_waiter("stack_create_complete")
     try:
         waiter.wait(StackName=stack, WaiterConfig={"Delay": 15, "MaxAttempts": 120})
     except Exception as exc:
-        reasons = _failure_reasons(cf, stack)
+        reasons = _failure_reasons(cf, stack_ref)
         raise RuntimeError(f"stack {stack} did not stabilize: {reasons}") from exc
 
 
-def _failure_reasons(cf, stack: str) -> str:
-    """The first few failed-resource reasons — the part of the event stream worth reading."""
+def _failure_reasons(cf, stack_ref: str) -> str:
+    """The first few failed-resource reasons — the part of the event stream worth reading.
+
+    `stack_ref` should be the stack id (ARN) when we have it: a create that failed with
+    `OnFailure=DELETE` no longer resolves by name, but its events stay queryable by id, so
+    that is what surfaces the real cause (a bad AMI, an unavailable instance type, a hit
+    service limit) instead of a bare "stack does not exist".
+    """
     try:
-        events = cf.describe_stack_events(StackName=stack)["StackEvents"]
-    except Exception:  # noqa: BLE001 - the stack may already be gone (OnFailure=DELETE)
-        return "no stack events available (the failed create may have rolled back and deleted)"
+        events = cf.describe_stack_events(StackName=stack_ref)["StackEvents"]
+    except Exception:  # noqa: BLE001 - even the id can age out of CloudFormation's history
+        return (
+            "no stack events available. The failed create rolled back and deleted; open the "
+            "CloudFormation console (toggle 'Deleted' stacks) to read the failed resource's reason"
+        )
     reasons = [
         f"{e['LogicalResourceId']}: {e.get('ResourceStatusReason', e['ResourceStatus'])}"
         for e in events
@@ -534,6 +594,11 @@ def aws(
         "EnginePort": str(engine_port),
     }
 
+    # A stack left in a failed/rolled-back state (a prior deploy that rolled back without
+    # cleaning up, a stuck delete) can't be updated and has no EIP output for the update path
+    # to read. Clear it first so this deploy is a clean create rather than a KeyError.
+    _clear_unusable_stack(cf, stack)
+
     # An existing stack already has its EIP (and distribution), so apply once at the final
     # state — never blank the OriginDomain, which would tear the distribution down and mint a
     # new URL. A fresh stack needs two passes: the EIP's DNS name (the CloudFront origin) only
@@ -541,15 +606,26 @@ def aws(
     existed = _stack_exists(cf, stack)
     if existed:
         origin = eip_public_dns(_stack_outputs(cf, stack)["PublicIp"], resolved_region)
-        typer.echo(f"deploy: updating stack {stack} in {resolved_region}…")
+        typer.echo(
+            f"deploy: updating stack {stack} in {resolved_region} "
+            "(this can take a few minutes; longer if it replaces the instance)…"
+        )
         _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": origin})
     else:
         _require_default_vpc(ec2)  # fail fast before provisioning if the region has none
-        typer.echo(f"deploy: creating stack {stack} in {resolved_region} (instance + address)…")
+        typer.echo(
+            "deploy: this is a first deploy — it runs several minutes end to end (instance boot, "
+            "image build, then CloudFront). Safe to leave it; the URL is printed when it's live."
+        )
+        typer.echo(
+            f"deploy: creating stack {stack} in {resolved_region} "
+            "(instance + address; ~2-4 min)…"
+        )
         _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": ""})
         origin = eip_public_dns(_stack_outputs(cf, stack)["PublicIp"], resolved_region)
         typer.echo(
-            f"deploy: fronting {origin} with CloudFront (a fresh distribution takes a few minutes)…"
+            f"deploy: fronting {origin} with CloudFront "
+            "(a fresh distribution takes ~5-10 min to deploy globally)…"
         )
         _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": origin})
 
@@ -566,11 +642,28 @@ def aws(
         Overwrite=True,
     )
 
+    # Mirror the URL (and this deploy mode) into the operator's *local* loopy.env — the same
+    # value the instance gets via SSM. The CloudFront name only exists once the distribution
+    # does, so `loopy init` couldn't record it; writing it here is what makes `loopy webhooks
+    # github` runnable straight after a deploy, with no hand-copy. Idempotent (the URL is
+    # stable across re-deploys). We deliberately do *not* register webhooks ourselves — that
+    # stays one explicit `loopy webhooks github` step.
+    from loopy_cli.deploy_mode import DEPLOY_MODE_ENV, MODE_PROVISIONED
+    from loopy_runtime.secrets import write_control_plane_env
+
+    write_control_plane_env(
+        root_abs,
+        {"LOOPY_PUBLIC_URL": public_url, DEPLOY_MODE_ENV: MODE_PROVISIONED},
+    )
+
     # On an update, the running instance still holds the old project/secrets (user-data ran
     # once). Re-run its deploy script in place so it picks up what we just pushed. A fresh
     # instance is doing this via user-data already, so only existing stacks need the nudge.
     if existed:
-        typer.echo("deploy: refreshing the engine in place (re-fetch project + secrets, restart)…")
+        typer.echo(
+            "deploy: refreshing the engine in place (re-fetch project + secrets, restart; "
+            "usually under a minute, a cold image build a few minutes)…"
+        )
         _refresh_instance(ssm, outputs["InstanceId"])
 
     stack_flag = f" --stack {stack}" if stack != "loopy-engine" else ""
@@ -579,7 +672,10 @@ def aws(
     # "Stack complete" only means the instance launched. Wait for the engine to actually answer
     # through CloudFront (user-data's image build + a fresh distribution's edge propagation both
     # trail CREATE_COMPLETE) so the printed URL works when the user hits it.
-    typer.echo(f"deploy: waiting for the engine to answer at {public_url}/healthz…")
+    typer.echo(
+        f"deploy: waiting for the engine to answer at {public_url}/healthz "
+        "(first boot builds the image and the CDN propagates; up to ~10 min)…"
+    )
     serving = wait_until_serving(public_url)
 
     typer.echo("")
@@ -594,8 +690,8 @@ def aws(
         typer.echo(f"             aws ssm start-session --target {instance_id},")
         typer.echo("             then cat /var/log/loopy-deploy.log")
     typer.echo(f"  origin:    {public_ip} (CloudFront-only ingress; direct hits are refused)")
-    typer.echo(f"  webhooks:  set LOOPY_PUBLIC_URL={public_url} in loopy.env,")
-    typer.echo("             then `loopy webhooks github`")
+    typer.echo(f"  url:       wrote LOOPY_PUBLIC_URL={public_url} to loopy.env")
+    typer.echo("  webhooks:  loopy webhooks github  (registers GitHub delivery to the URL above)")
     # /admin is blocked at CloudFront on this mode (the edge->origin hop is plain HTTP, so the
     # bearer token must not travel it). Reach the dashboard over an SSM tunnel instead.
     typer.echo("  dashboard: aws ssm start-session --target " + instance_id)

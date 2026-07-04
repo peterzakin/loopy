@@ -42,7 +42,7 @@
     "EngineSecurityGroup": {
       "Type": "AWS::EC2::SecurityGroup",
       "Properties": {
-        "GroupDescription": "Loopy engine origin: inbound only from CloudFront's origin-facing ranges. The EIP is a locked-down origin, not a second public door.",
+        "GroupDescription": "Loopy engine origin: inbound only from CloudFront origin-facing ranges. The EIP is a locked-down origin, not a second public door.",
         "SecurityGroupIngress": [
           {
             "IpProtocol": "tcp",
@@ -166,7 +166,7 @@
         "Name": { "Fn::Sub": "${AWS::StackName}-block-admin" },
         "AutoPublish": true,
         "FunctionConfig": {
-          "Comment": "Refuse /admin* at the edge: on the no-domain mode the CloudFront->origin hop is plain HTTP, so the dashboard's bearer token must not travel it. Reach /admin over an SSM tunnel instead.",
+          "Comment": "Refuse /admin* at the edge: the CloudFront-to-origin hop is plain HTTP, so the bearer token must not cross it.",
           "Runtime": "cloudfront-js-2.0"
         },
         "FunctionCode": "function handler(event) {\n  var uri = event.request.uri;\n  if (uri === '/admin' || uri.indexOf('/admin/') === 0) {\n    return { statusCode: 403, statusDescription: 'Forbidden', headers: { 'content-type': { value: 'text/plain' } }, body: 'The dashboard is not served publicly on this deployment. Reach it over an SSM tunnel: loopy admin --remote (see docs/deployment).' };\n  }\n  return event.request;\n}\n"
@@ -178,7 +178,7 @@
       "DependsOn": "EngineAddressAssociation",
       "Properties": {
         "DistributionConfig": {
-          "Comment": { "Fn::Sub": "Loopy engine front door for ${AWS::StackName}: managed cert, no caching, all methods+headers forwarded so webhook POSTs and signatures arrive intact." },
+          "Comment": "Loopy engine front door: managed cert, no caching, all methods and headers forwarded.",
           "Enabled": true,
           "HttpVersion": "http2",
           "Origins": [

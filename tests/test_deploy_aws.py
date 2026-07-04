@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import re
 import tarfile
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from loopy_cli import app
 from loopy_cli.aws import (
     TEMPLATE_PATH,
     _apply_stack,
+    _clear_unusable_stack,
     _delete_stack_secrets,
     _put_secret_files,
     _refresh_instance,
@@ -142,6 +144,44 @@ def test_template_shape_matches_the_design():
     ]
     assert "POST" in behavior["AllowedMethods"]
     assert behavior["CachePolicyId"] == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+
+
+def test_security_group_descriptions_use_ec2s_allowed_charset():
+    """EC2 rejects a security-group description with any character outside
+    `a-zA-Z0-9. _-:/()#,@[]+=&;{}!$*` (so no apostrophe, no emdash) with an opaque
+    CREATE_FAILED — catch it here instead of minutes into a deploy."""
+    allowed = re.compile(r"^[A-Za-z0-9 ._:/()#,@\[\]+=&;{}!$*-]{1,255}$")
+    resources = json.loads(TEMPLATE_PATH.read_text())["Resources"]
+    sgs = {
+        name: r
+        for name, r in resources.items()
+        if r["Type"] == "AWS::EC2::SecurityGroup"
+    }
+    assert sgs, "expected at least one security group in the template"
+    for name, sg in sgs.items():
+        desc = sg["Properties"]["GroupDescription"]
+        assert allowed.match(desc), f"{name} GroupDescription has a char EC2 rejects: {desc!r}"
+
+
+def test_cloudfront_comments_stay_within_the_128_char_limit():
+    """CloudFront rejects a Function or Distribution `Comment` over 128 characters with an
+    opaque `The parameter Comment is too big`. Keep them plain, short strings so a reworded
+    comment can't quietly blow the limit and roll a deploy back at pass 2."""
+    resources = json.loads(TEMPLATE_PATH.read_text())["Resources"]
+    comments: dict[str, object] = {}
+    for name, r in resources.items():
+        props = r.get("Properties", {})
+        if r["Type"] == "AWS::CloudFront::Function":
+            comments[name] = props.get("FunctionConfig", {}).get("Comment")
+        elif r["Type"] == "AWS::CloudFront::Distribution":
+            comments[name] = props.get("DistributionConfig", {}).get("Comment")
+    assert comments, "expected CloudFront resources with comments in the template"
+    for name, comment in comments.items():
+        assert isinstance(comment, str), (
+            f"{name} Comment must be a plain string kept under 128 chars, not {comment!r} "
+            "(an Fn::Sub can silently exceed the limit once resolved)"
+        )
+        assert len(comment) <= 128, f"{name} Comment is {len(comment)} chars; CloudFront caps it at 128"
 
 
 def test_admin_is_blocked_at_the_edge():
@@ -366,6 +406,97 @@ def test_apply_stack_surfaces_other_update_errors():
     cf = _FakeCf(exists=True, update_error="TemplateBody is malformed")
     with pytest.raises(RuntimeError, match="malformed"):
         _apply_stack(cf, "s", "{}", {})
+
+
+class _FailingWaiter:
+    def wait(self, **kwargs):
+        raise RuntimeError("Waiter StackCreateComplete failed")
+
+
+class _DeletedStackCf:
+    """A create that fails and rolls back: the name no longer resolves, but the id does."""
+
+    STACK_ID = "arn:aws:cloudformation:us-east-1:1:stack/s/abc123"
+
+    def __init__(self):
+        self.events_queried_with: list[str] = []
+
+    def describe_stacks(self, StackName):  # noqa: N803 - stack absent ⇒ create branch
+        raise RuntimeError(f"Stack with id {StackName} does not exist")
+
+    def create_stack(self, **kwargs):
+        return {"StackId": self.STACK_ID}
+
+    def get_waiter(self, name):
+        return _FailingWaiter()
+
+    def describe_stack_events(self, StackName):  # noqa: N803
+        self.events_queried_with.append(StackName)
+        if StackName != self.STACK_ID:  # by name (deleted) CloudFormation would 400
+            raise RuntimeError(f"Stack [{StackName}] does not exist")
+        return {
+            "StackEvents": [
+                {
+                    "LogicalResourceId": "EngineInstance",
+                    "ResourceStatus": "CREATE_FAILED",
+                    "ResourceStatusReason": "The instance type t3.small is not supported here",
+                }
+            ]
+        }
+
+
+class _StatusCf:
+    """A CloudFormation whose stack sits in one fixed status; records delete calls."""
+
+    def __init__(self, status: str | None):
+        self._status = status
+        self.deleted = 0
+
+    def describe_stacks(self, StackName):  # noqa: N803
+        if self._status is None:
+            raise RuntimeError(f"Stack with id {StackName} does not exist")
+        return {"Stacks": [{"StackStatus": self._status, "Outputs": []}]}
+
+    def delete_stack(self, StackName):  # noqa: N803
+        self.deleted += 1
+
+    def get_waiter(self, name):
+        return _FakeWaiter()
+
+
+def test_clear_unusable_stack_deletes_a_rolled_back_stack():
+    """A ROLLBACK_COMPLETE leftover can't be updated (and has no EIP output), so the deploy
+    must delete it before creating — otherwise the update path KeyErrors on 'PublicIp'."""
+    cf = _StatusCf("ROLLBACK_COMPLETE")
+    _clear_unusable_stack(cf, "loopy-engine", echo=lambda *_: None)
+    assert cf.deleted == 1
+
+
+def test_clear_unusable_stack_waits_out_a_running_delete_without_redeleting():
+    cf = _StatusCf("DELETE_IN_PROGRESS")
+    _clear_unusable_stack(cf, "loopy-engine", echo=lambda *_: None)
+    assert cf.deleted == 0  # already deleting; we just wait
+
+
+def test_clear_unusable_stack_leaves_a_healthy_stack_untouched():
+    cf = _StatusCf("CREATE_COMPLETE")
+    _clear_unusable_stack(cf, "loopy-engine", echo=lambda *_: None)
+    assert cf.deleted == 0
+
+
+def test_clear_unusable_stack_noop_when_absent():
+    cf = _StatusCf(None)
+    _clear_unusable_stack(cf, "loopy-engine", echo=lambda *_: None)
+    assert cf.deleted == 0
+
+
+def test_apply_stack_reports_failure_reason_by_stack_id_after_rollback():
+    """A rolled-back create is gone by name; we must query events by the stack id so the
+    real cause surfaces instead of a bare 'stack does not exist'."""
+    cf = _DeletedStackCf()
+    with pytest.raises(RuntimeError, match="t3.small is not supported"):
+        _apply_stack(cf, "s", "{}", {"OriginDomain": ""})
+    assert cf.events_queried_with == [_DeletedStackCf.STACK_ID]
 
 
 # ── CLI wiring ───────────────────────────────────────────────────────────────────────
