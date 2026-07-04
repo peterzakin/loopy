@@ -10,6 +10,7 @@ from loopy_cli.deploy_target import (
     DEPLOY_TARGET_ENV,
     TARGET_BOOTSTRAP,
     TARGET_BYO,
+    is_cloudfront_url,
     resolve_bootstrap_config,
     resolve_deploy_target,
 )
@@ -60,3 +61,14 @@ def test_bootstrap_config_reads_recorded_hints(tmp_path, monkeypatch):
     # process env wins over the dotenv
     monkeypatch.setenv(BOOTSTRAP_INSTANCE_ID_ENV, "i-0def")
     assert resolve_bootstrap_config(tmp_path)[BOOTSTRAP_INSTANCE_ID_ENV] == "i-0def"
+
+
+def test_is_cloudfront_url():
+    assert is_cloudfront_url("https://d1234abcd.cloudfront.net")
+    assert is_cloudfront_url("https://d1234abcd.cloudfront.net/admin")
+    assert is_cloudfront_url("https://ABC.CLOUDFRONT.NET")  # case-insensitive host
+    # not CloudFront: a custom domain, a lookalike suffix, or nothing at all
+    assert not is_cloudfront_url("https://loopy.example.com")
+    assert not is_cloudfront_url("https://cloudfront.net.evil.com")
+    assert not is_cloudfront_url("")
+    assert not is_cloudfront_url(None)

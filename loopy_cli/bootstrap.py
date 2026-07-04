@@ -796,8 +796,8 @@ def bootstrap(
     # github` runnable straight after a deploy, with no hand-copy. Idempotent (the URL is
     # stable across re-deploys). We deliberately do *not* register webhooks ourselves — that
     # stays one explicit `loopy webhooks github` step. The instance id and engine port are
-    # client-side hints for `loopy admin bootstrap` (the SSM tunnel); the engine reads none
-    # of these.
+    # client-side hints for the `loopy admin` SSM tunnel (which the CloudFront URL auto-routes
+    # to); the engine reads none of these.
     from loopy_cli.deploy_target import (
         BOOTSTRAP_ENGINE_PORT_ENV,
         BOOTSTRAP_INSTANCE_ID_ENV,
@@ -856,8 +856,8 @@ def bootstrap(
     typer.echo(f"  url:       wrote LOOPY_PUBLIC_URL={public_url} to loopy.env")
     typer.echo("  webhooks:  loopy webhooks github  (registers GitHub delivery to the URL above)")
     # /admin is blocked at CloudFront on this mode (the edge->origin hop is plain HTTP, so the
-    # bearer token must not travel it). Reach the dashboard over an SSM tunnel instead —
-    # `loopy admin bootstrap` prints the tunnel command (from the instance id/port recorded in
-    # loopy.env above) and proxies to it.
-    typer.echo("  dashboard: loopy admin bootstrap  (walks you through the SSM tunnel)")
+    # bearer token must not travel it). Reach the dashboard over an SSM tunnel instead — bare
+    # `loopy admin` recognizes the CloudFront URL, prints the tunnel command (from the instance
+    # id/port recorded in loopy.env above), and proxies to it.
+    typer.echo("  dashboard: loopy admin  (recognizes the CloudFront URL; opens the SSM tunnel)")
     typer.echo(f"  teardown:  loopy deploy bootstrap --destroy{stack_flag}")

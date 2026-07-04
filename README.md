@@ -400,18 +400,20 @@ service to deploy and the admin endpoint is deterministic on every provider:
 # webhooks but no /admin at all (fail-closed by absence).
 
 # laptop: the token (and LOOPY_PUBLIC_URL) are already in loopy.env, then:
-loopy admin byo                   # proxies /api to $LOOPY_PUBLIC_URL/admin with the token
+loopy admin                       # proxies /api to $LOOPY_PUBLIC_URL/admin with the token
 ```
 
-`loopy admin byo` runs a small local proxy: the token stays in that process (read from
-`loopy.env` or the environment — never a query param, cookie, or browser variable), every
-request crosses as `Authorization: Bearer` over TLS, and the server compares it in constant
-time. (`loopy admin bootstrap` is the same proxy pointed at the provisioned stack's SSM
-tunnel — see the deploy section.) Pass an explicit URL (`loopy admin byo --url https://…`)
-to point somewhere other than the derived default, e.g. a standalone
-`loopy admin local --host 0.0.0.0` serving a copy of the state DB. Rotation is
-overlap-based: the server also accepts `LOOPY_ADMIN_TOKEN_NEXT`, so you can roll both sides
-without a lockout. Plain HTTP to a non-loopback remote is refused.
+`loopy admin` routes itself off `LOOPY_PUBLIC_URL`: a normal URL is proxied at
+`$LOOPY_PUBLIC_URL/admin`, a CloudFront URL (`*.cloudfront.net`, where `/admin` is blocked at
+the edge) is reached over an SSM tunnel instead, and no URL at all reads the local run-state
+DB. It runs a small local proxy: the token stays in that process (read from `loopy.env` or
+the environment — never a query param, cookie, or browser variable), every request crosses
+as `Authorization: Bearer` over TLS, and the server compares it in constant time. Override
+the routing with `--url https://…` (proxy somewhere explicit), `--tunnel` (force the SSM
+tunnel), or `--local` (force the local DB, e.g. a standalone `loopy admin --local --host
+0.0.0.0` serving a copy of the state DB). Rotation is overlap-based: the server also accepts
+`LOOPY_ADMIN_TOKEN_NEXT`, so you can roll both sides without a lockout. Plain HTTP to a
+non-loopback remote is refused.
 
 The serve contract is deliberately provider-agnostic — a process env var, `$PORT`, TLS
 terminated at the platform ingress, and durable run state behind the `StateStore` protocol —

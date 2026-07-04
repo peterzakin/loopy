@@ -1771,15 +1771,15 @@ def _admin_port(flag: int | None) -> int:
     return 9000
 
 
-def _admin_byo_url() -> str:
-    """The byo target's control-plane URL: the deterministic admin endpoint derived from
+def _admin_proxy_url() -> str:
+    """The proxied control-plane URL: the deterministic admin endpoint derived from
     `LOOPY_PUBLIC_URL` — the engine mounts the dashboard at `/admin` on the same server that
     receives webhook deliveries, so one public URL covers both."""
     public = os.environ.get("LOOPY_PUBLIC_URL", "").strip().rstrip("/")
     if not public:
         typer.echo(
-            "error: `loopy admin byo` derives its URL from LOOPY_PUBLIC_URL, which is not "
-            "set. Set it in the environment or loopy.env, or pass "
+            "error: `loopy admin` derives its URL from LOOPY_PUBLIC_URL, which is not set. "
+            "Set it in the environment or loopy.env, or pass "
             "`--url https://loopy.example.com/admin`.",
             err=True,
         )
@@ -1787,14 +1787,14 @@ def _admin_byo_url() -> str:
     return f"{public}/admin"
 
 
-def _admin_bootstrap_url(root: Path) -> str:
-    """The bootstrap target's dashboard URL: the local end of its SSM port-forward tunnel.
+def _admin_tunnel_url(root: Path) -> str:
+    """The dashboard URL for a tunneled deploy: the local end of its SSM port-forward tunnel.
 
-    On the bootstrap stack `/admin` is blocked at CloudFront (the edge→origin hop is plain
-    HTTP, so the bearer token must not travel it); the dashboard is reached over an SSM
-    tunnel to the engine port instead. `loopy deploy bootstrap` records the instance id and
-    engine port in loopy.env, so the tunnel command printed here is ready to paste; both
-    fall back to placeholders/defaults when the deploy predates the recording.
+    Behind CloudFront `/admin` is blocked (the edge→origin hop is plain HTTP, so the bearer
+    token must not travel it); the dashboard is reached over an SSM tunnel to the engine port
+    instead. `loopy deploy bootstrap` records the instance id and engine port in loopy.env, so
+    the tunnel command printed here is ready to paste; both fall back to placeholders/defaults
+    when the deploy predates the recording (or the URL is a CloudFront one from elsewhere).
     """
     from loopy_cli.deploy_target import (
         BOOTSTRAP_ENGINE_PORT_ENV,
@@ -1805,7 +1805,7 @@ def _admin_bootstrap_url(root: Path) -> str:
     config = resolve_bootstrap_config(root)
     engine_port = config.get(BOOTSTRAP_ENGINE_PORT_ENV, "8000")
     instance = config.get(BOOTSTRAP_INSTANCE_ID_ENV, "<instance-id>")
-    typer.echo("bootstrap target: the dashboard rides an SSM tunnel to the engine port.")
+    typer.echo("CloudFront deploy: the dashboard rides an SSM tunnel to the engine port.")
     typer.echo("If it isn't up yet, start it in another terminal (needs the Session")
     typer.echo("Manager plugin, a one-time install; see AWS docs):")
     typer.echo(f"  aws ssm start-session --target {instance} \\")
@@ -1819,26 +1819,29 @@ def _admin_bootstrap_url(root: Path) -> str:
 
 @app.command()
 def admin(
-    target: str | None = typer.Argument(
-        None,
-        help="Deploy target to administer (default `local`): `local` (the state DB `loopy "
-        "run` writes here), `byo` (your hosted control plane, at $LOOPY_PUBLIC_URL/admin), "
-        "or `bootstrap` (the provisioned stack, over its SSM tunnel).",
-    ),
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address."),
     port: int | None = typer.Option(
         None, "--port", help="Port to serve the dashboard on (default $PORT, then 9000)."
     ),
+    local: bool = typer.Option(
+        False,
+        "--local",
+        help="Attach to the local runner's state DB, even when LOOPY_PUBLIC_URL is set.",
+    ),
+    tunnel: bool = typer.Option(
+        False,
+        "--tunnel",
+        help="Reach a CloudFront-fronted deploy over its SSM tunnel (prints the tunnel command).",
+    ),
     db: Path | None = typer.Option(
         None,
         "--db",
-        help="State DB to read (local target only; default .loopy/state.db).",
+        help="State DB to read (local dashboard only; default .loopy/state.db).",
     ),
     url: str | None = typer.Option(
         None,
         "--url",
-        help="Control-plane URL to proxy to (byo/bootstrap targets only; overrides the "
-        "derived default).",
+        help="Control-plane URL to proxy to (overrides the URL derived from LOOPY_PUBLIC_URL).",
     ),
     manifest: Path = typer.Option(
         Path("manifest.json"),
@@ -1847,22 +1850,24 @@ def admin(
         "skipped if absent).",
     ),
 ) -> None:
-    """Serve the read-only control-plane dashboard for one deploy target.
+    """Serve the read-only control-plane dashboard.
 
-    Each target reads run state from a different place; the target defaults to `local`:
+    With no flags, `loopy admin` routes itself off LOOPY_PUBLIC_URL:
 
-    `local` (the default): the run-state DB `loopy run` writes on this machine. Pairs with
-    `loopy run` (which defaults to that same DB): `loopy run` in one terminal, `loopy admin`
-    in another. When `manifest.json` is present it also powers the workflow-template,
-    registry, and schedule views; the run views work without it.
+    - unset → the local run-state DB `loopy run` writes on this machine (the dev loop: `loopy
+      run` in one terminal, `loopy admin` in another). When `manifest.json` is present it also
+      powers the workflow-template, registry, and schedule views; the run views work without it.
+    - a CloudFront URL (`*.cloudfront.net`, or a recorded bootstrap instance) → an SSM tunnel to
+      the engine port. Behind CloudFront `/admin` is blocked (the edge→origin hop is plain HTTP,
+      so the bearer token can't ride it); the tunnel command is printed for you.
+    - any other URL → a local loopback proxy that serves the UI and forwards /api to
+      $LOOPY_PUBLIC_URL/admin with a bearer token from LOOPY_ADMIN_TOKEN, so the browser never
+      holds the credential.
 
-    `byo` / `bootstrap`: a local proxy that serves the UI and forwards /api to the deployed
-    control plane with a bearer token from LOOPY_ADMIN_TOKEN — the browser never holds the
-    credential. `byo` targets $LOOPY_PUBLIC_URL/admin (where `loopy run` mounts the
-    dashboard); `bootstrap` targets the provisioned stack's SSM tunnel (it prints the tunnel
-    command). Pass --url to point either somewhere else.
+    Override the routing with `--local` (force the local DB), `--tunnel` (force the SSM tunnel),
+    or `--url` (proxy somewhere explicit). Those three are mutually exclusive.
 
-    Exposed server (`local --host 0.0.0.0`, e.g. on the control plane itself): requires
+    Exposed server (`--local --host 0.0.0.0`, e.g. on the control plane itself): requires
     LOOPY_ADMIN_TOKEN in the environment and puts every /api route behind it; refuses to start
     without one, because run/step outputs are not redacted. (`loopy run` also mounts this
     dashboard at /admin on its own webhook server, under the same rules.)
@@ -1870,10 +1875,9 @@ def admin(
     import uvicorn
 
     from loopy_cli.deploy_target import (
-        ADMIN_TARGETS,
-        TARGET_BOOTSTRAP,
-        TARGET_BYO,
-        TARGET_LOCAL,
+        BOOTSTRAP_INSTANCE_ID_ENV,
+        is_cloudfront_url,
+        resolve_bootstrap_config,
         resolve_deploy_target,
     )
     from loopy_runtime.dashboard.auth import AdminAuth, is_loopback_host
@@ -1887,43 +1891,59 @@ def admin(
         os.environ.setdefault(key, value)
     port = _admin_port(port)
 
-    choices = "|".join(ADMIN_TARGETS)
-    # `local` is the default: it pairs with `loopy run` on this machine, the common dev
-    # loop, so `loopy run` in one terminal and bare `loopy admin` in another just works.
-    # The hosted targets (byo/bootstrap) proxy elsewhere, so those must be named.
-    if target is None:
-        target = TARGET_LOCAL
-
-    if target not in ADMIN_TARGETS:
-        hint = ""
-        if "/" in target or target.endswith(".db"):
-            hint = " A state DB path goes to --db: `loopy admin local --db PATH`."
+    # --local / --tunnel / --url each pin a different dashboard; more than one is contradictory.
+    picked = [
+        name
+        for name, on in (("--local", local), ("--tunnel", tunnel), ("--url", url is not None))
+        if on
+    ]
+    if len(picked) > 1:
         typer.echo(
-            f"error: unknown deploy target '{target}' — expected one of: {choices}.{hint}",
+            f"error: {', '.join(picked)} select different dashboards — pass at most one.",
             err=True,
         )
         raise typer.Exit(code=1)
 
-    if target in (TARGET_BYO, TARGET_BOOTSTRAP):
+    # Resolve the mode. An explicit flag wins; otherwise route off LOOPY_PUBLIC_URL — a
+    # CloudFront deploy (where /admin is blocked at the edge) rides the tunnel, any other URL is
+    # proxied at /admin, and no URL at all means the local run-state DB.
+    public = os.environ.get("LOOPY_PUBLIC_URL", "").strip().rstrip("/")
+    tunnel_signal = is_cloudfront_url(public) or bool(
+        resolve_bootstrap_config(root).get(BOOTSTRAP_INSTANCE_ID_ENV)
+    )
+    if local:
+        mode = "local"
+    elif tunnel:
+        mode = "tunnel"
+    elif url is not None:
+        mode = "proxy"
+    elif public and tunnel_signal:
+        mode = "tunnel"
+    elif public:
+        mode = "proxy"
+    else:
+        mode = "local"
+
+    if mode != "local" and db is not None:
+        typer.echo(
+            "error: --db reads a local state DB, which a proxied/tunneled dashboard doesn't "
+            "use — drop it, or pass `loopy admin --local --db PATH`.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    if mode in ("proxy", "tunnel"):
         from loopy_runtime.dashboard.proxy import create_proxy_app, validate_remote_url
 
-        if db is not None:
-            typer.echo(
-                f"error: --db reads a local state DB, which the '{target}' target doesn't "
-                "use — drop it, or use `loopy admin local --db PATH`.",
-                err=True,
-            )
-            raise typer.Exit(code=1)
         if not is_loopback_host(host):
             typer.echo(
-                f"error: `loopy admin {target}` runs a local proxy that holds the admin "
-                "token; it binds loopback only (drop --host, or harden the control plane "
-                "itself instead).",
+                "error: `loopy admin` runs a local proxy that holds the admin token; it binds "
+                "loopback only (drop --host, or harden the control plane itself instead).",
                 err=True,
             )
             raise typer.Exit(code=1)
         if url is None:
-            url = _admin_byo_url() if target == TARGET_BYO else _admin_bootstrap_url(root)
+            url = _admin_tunnel_url(root) if mode == "tunnel" else _admin_proxy_url()
         try:
             url = validate_remote_url(url)
         except ValueError as exc:
@@ -1932,32 +1952,24 @@ def admin(
         token = os.environ.get(ADMIN_TOKEN_ENV, "").strip()
         if not token:
             typer.echo(
-                f"error: `loopy admin {target}` needs {ADMIN_TOKEN_ENV} in the environment "
-                "or loopy.env — the same token the control plane was deployed with.",
+                f"error: `loopy admin` needs {ADMIN_TOKEN_ENV} in the environment or loopy.env "
+                "— the same token the control plane was deployed with.",
                 err=True,
             )
             raise typer.Exit(code=1)
         port = _resolve_dashboard_port(host, port)
-        typer.echo(f"loopy dashboard → http://{host}:{port}  ({target} → {url})")
+        typer.echo(f"loopy dashboard → http://{host}:{port}  ({mode} → {url})")
         config = uvicorn.Config(
             create_proxy_app(url, token), host=host, port=port, log_level="warning"
         )
         _serve_dashboard(config)  # pragma: no cover - long-lived server
         return
 
-    assert target == TARGET_LOCAL
+    assert mode == "local"
 
     from loopy_runtime.dashboard.app import create_app
     from loopy_runtime.manifest_model import load_manifest
     from loopy_runtime.state.sqlite import SqliteStateStore
-
-    if url is not None:
-        typer.echo(
-            "error: --url proxies to a deployed control plane, which the 'local' target "
-            f"doesn't do — drop it, or use `loopy admin <{TARGET_BYO}|{TARGET_BOOTSTRAP}>`.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
 
     # Fail-closed (checked before anything else): run/step outputs are not redacted, so a
     # bind that leaves loopback must carry bearer auth or not start at all.
@@ -1979,13 +1991,14 @@ def admin(
         store = SqliteStateStore(db, read_only=True)  # raises if the DB doesn't exist yet
     except FileNotFoundError as exc:
         typer.echo(f"error: {exc}", err=True)
-        # A local DB is expected before a local run — but if the project is set up for a
-        # hosted target, the operator likely wanted that one, not the default `local`.
+        # A local DB is expected before a local run — but if the project is set up for a hosted
+        # deploy that isn't up yet (no LOOPY_PUBLIC_URL), point at how `loopy admin` will reach it.
         recorded = resolve_deploy_target(root)
-        if recorded:
+        if recorded and not public:
             typer.echo(
-                f"       (this project's deploy target is '{recorded}' — for that, run "
-                f"`loopy admin {recorded}`)",
+                f"       (this project deploys to '{recorded}'; once it's up and "
+                "LOOPY_PUBLIC_URL is set, `loopy admin` targets it automatically — a CloudFront "
+                "deploy rides the tunnel, or force it with `loopy admin --tunnel`)",
                 err=True,
             )
         raise typer.Exit(code=1) from exc
