@@ -42,7 +42,7 @@
     "EngineSecurityGroup": {
       "Type": "AWS::EC2::SecurityGroup",
       "Properties": {
-        "GroupDescription": "Loopy engine origin: inbound only from CloudFront's origin-facing ranges. The EIP is a locked-down origin, not a second public door.",
+        "GroupDescription": "Loopy engine origin: inbound only from CloudFront origin-facing ranges. The EIP is a locked-down origin, not a second public door.",
         "SecurityGroupIngress": [
           {
             "IpProtocol": "tcp",

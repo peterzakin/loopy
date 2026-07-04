@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import re
 import tarfile
 from pathlib import Path
 
@@ -142,6 +143,23 @@ def test_template_shape_matches_the_design():
     ]
     assert "POST" in behavior["AllowedMethods"]
     assert behavior["CachePolicyId"] == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+
+
+def test_security_group_descriptions_use_ec2s_allowed_charset():
+    """EC2 rejects a security-group description with any character outside
+    `a-zA-Z0-9. _-:/()#,@[]+=&;{}!$*` (so no apostrophe, no emdash) with an opaque
+    CREATE_FAILED — catch it here instead of minutes into a deploy."""
+    allowed = re.compile(r"^[A-Za-z0-9 ._:/()#,@\[\]+=&;{}!$*-]{1,255}$")
+    resources = json.loads(TEMPLATE_PATH.read_text())["Resources"]
+    sgs = {
+        name: r
+        for name, r in resources.items()
+        if r["Type"] == "AWS::EC2::SecurityGroup"
+    }
+    assert sgs, "expected at least one security group in the template"
+    for name, sg in sgs.items():
+        desc = sg["Properties"]["GroupDescription"]
+        assert allowed.match(desc), f"{name} GroupDescription has a char EC2 rejects: {desc!r}"
 
 
 def test_admin_is_blocked_at_the_edge():
