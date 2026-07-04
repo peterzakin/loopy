@@ -188,6 +188,24 @@ def package_project(root: Path, exclude_rels: list[str]) -> bytes:
 # ── boto3-touching helpers (each takes clients, so tests can inject fakes) ──────────
 
 
+def _require_default_vpc(ec2) -> None:
+    """Fail fast if the region has no default VPC.
+
+    The template places the instance and its security group with no explicit subnet or
+    VpcId, so they land in the default VPC's public subnets (a fresh account has one in
+    every region). An account that deleted its default VPC would otherwise fail deep in a
+    create-stack rollback with an opaque EC2 error; this turns that into one clear message
+    before anything is provisioned.
+    """
+    response = ec2.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])
+    if not response.get("Vpcs"):
+        raise RuntimeError(
+            "no default VPC in this region. This deploy mode uses the default VPC's public "
+            "subnets; recreate one (`aws ec2 create-default-vpc`) or pick a region that has "
+            "it. A custom-VPC mode is not built yet."
+        )
+
+
 def _cloudfront_prefix_list_id(ec2) -> str:
     response = ec2.describe_managed_prefix_lists(
         Filters=[{"Name": "prefix-list-name", "Values": [CLOUDFRONT_PREFIX_LIST_NAME]}]
@@ -492,6 +510,7 @@ def aws(
         typer.echo(f"deploy: updating stack {stack} in {resolved_region}…")
         _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": origin})
     else:
+        _require_default_vpc(ec2)  # fail fast before provisioning if the region has none
         typer.echo(f"deploy: creating stack {stack} in {resolved_region} (instance + address)…")
         _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": ""})
         origin = eip_public_dns(_stack_outputs(cf, stack)["PublicIp"], resolved_region)

@@ -194,10 +194,12 @@ CloudFront-to-instance leg is unencrypted. Two consequences, handled differently
   (compile-on-demand included). The secret set is read from the project's
   `loopy.env` and sandbox `env_file`s and written to SSM. No `--domain`: the
   operator brings none.
-- **Create:** preflight (`manifest` under root, `loopy.env` present), push
-  secrets, upload the tarball, then the two-pass `create_stack` with waiters; on
-  failure the first failed-resource reasons from the event stream are surfaced
-  (a failed first create rolls back and deletes itself).
+- **Create:** preflight (`manifest` under root, `loopy.env` present, and a
+  default VPC exists in the region — the template uses its public subnets, so a
+  missing one errors clearly here instead of deep in a rollback), push secrets,
+  upload the tarball, then the two-pass `create_stack` with waiters; on failure
+  the first failed-resource reasons from the event stream are surfaced (a failed
+  first create rolls back and deletes itself).
 - **Update (stack exists):** push the new secrets and tarball, `update_stack`
   once at the final origin (a no-op if only the project changed), then re-run the
   deploy script in place via SSM.

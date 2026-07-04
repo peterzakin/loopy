@@ -24,6 +24,7 @@ from loopy_cli.aws import (
     _delete_stack_secrets,
     _put_secret_files,
     _refresh_instance,
+    _require_default_vpc,
     build_template_body,
     collect_secret_files,
     eip_public_dns,
@@ -238,6 +239,23 @@ def test_delete_stack_secrets_chunks_by_ten():
     ssm = _FakeSsm(existing=names)
     assert _delete_stack_secrets(ssm, "s") == 23
     assert [len(chunk) for chunk in ssm.deleted] == [10, 10, 3]
+
+
+class _FakeEc2Vpcs:
+    def __init__(self, has_default: bool):
+        self._has_default = has_default
+
+    def describe_vpcs(self, Filters):  # noqa: N803
+        return {"Vpcs": [{"VpcId": "vpc-1"}] if self._has_default else []}
+
+
+def test_require_default_vpc_passes_when_present():
+    _require_default_vpc(_FakeEc2Vpcs(has_default=True))  # must not raise
+
+
+def test_require_default_vpc_errors_when_missing():
+    with pytest.raises(RuntimeError, match="no default VPC"):
+        _require_default_vpc(_FakeEc2Vpcs(has_default=False))
 
 
 class _FakeCommandSsm:
