@@ -27,6 +27,7 @@ from loopy_cli.aws import (
     _put_secret_files,
     _refresh_instance,
     _require_default_vpc,
+    build_engine_wheel,
     build_template_body,
     collect_secret_files,
     eip_public_dns,
@@ -63,6 +64,7 @@ def _render(**overrides) -> str:
         manifest_rel="manifest.json",
         engine_port=8000,
         secret_files=["loopy.env", "secrets/base.env"],
+        engine_image_tag="0.1.0",
     )
     kwargs.update(overrides)
     return render_deploy_script(**kwargs)
@@ -94,7 +96,36 @@ def test_render_deploy_script_is_rerunnable():
     """The restart path (rm -f then run) and skip-build-if-present make it safe to re-run."""
     script = _render()
     assert "docker rm -f loopy-redis loopy-engine" in script
-    assert 'docker image inspect "loopy-engine:$LOOPY_VERSION"' in script
+    assert 'docker image inspect "loopy-engine:$ENGINE_IMAGE_TAG"' in script
+
+
+def test_render_deploy_script_defaults_to_pypi_install():
+    """Without --engine-source: install the pinned PyPI release, no wheel fetch, tag = version."""
+    script = _render(engine_image_tag="0.1.0", engine_wheel_s3="")
+    assert 'ENGINE_WHEEL_S3=""' in script
+    assert 'ENGINE_IMAGE_TAG="0.1.0"' in script
+    assert "loopy-computer[redis]==$LOOPY_VERSION" in script
+
+
+def test_render_deploy_script_installs_shipped_wheel_when_source_built():
+    """With --engine-source: the script fetches the wheel from S3 and installs it, and the
+    tag carries the content hash so a changed wheel forces a rebuild."""
+    script = _render(
+        engine_image_tag="0.1.0-abc123def456",
+        engine_wheel_s3="s3://loopy-deploy-1-us-east-1/loopy-engine/engine/engine.whl",
+    )
+    assert "__LOOPY_" not in script
+    wheel_uri = "s3://loopy-deploy-1-us-east-1/loopy-engine/engine/engine.whl"
+    assert f'ENGINE_WHEEL_S3="{wheel_uri}"' in script
+    assert 'ENGINE_IMAGE_TAG="0.1.0-abc123def456"' in script
+    assert 'aws s3 cp "$ENGINE_WHEEL_S3" /opt/loopy/image/engine.whl' in script
+    assert '"/tmp/engine.whl[redis]"' in script
+
+
+def test_build_engine_wheel_rejects_a_non_checkout(tmp_path):
+    """A directory with no pyproject.toml isn't a loopy checkout — fail clearly, not mid-build."""
+    with pytest.raises(RuntimeError, match="not a loopy checkout"):
+        build_engine_wheel(tmp_path, tmp_path / "out")
 
 
 def test_render_user_data_embeds_the_deploy_script_as_base64():

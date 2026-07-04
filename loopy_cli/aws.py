@@ -117,12 +117,18 @@ def render_deploy_script(
     manifest_rel: str,
     engine_port: int,
     secret_files: list[str],
+    engine_image_tag: str,
+    engine_wheel_s3: str = "",
 ) -> str:
     """Fill the re-runnable deploy script's tokens (fetch project+secrets, restart the stack).
 
     This is the code path shared by first boot and every re-deploy, so its inputs are all
     stable per stack: it re-reads whatever the CLI last pushed to S3/SSM. Pure string work,
     so tests cover it offline.
+
+    `engine_image_tag` tags the built image (the version for a PyPI build; the version plus the
+    wheel's content hash for a source build, so a changed wheel rebuilds). `engine_wheel_s3` is
+    the S3 URI of a shipped engine wheel (`--engine-source`), or empty to install from PyPI.
     """
     fetch_lines = "\n".join(f'fetch_secret_file "{rel}"' for rel in secret_files)
     script = DEPLOY_SCRIPT_PATH.read_text()
@@ -133,6 +139,8 @@ def render_deploy_script(
         "__LOOPY_VERSION__": loopy_version,
         "__LOOPY_MANIFEST_REL__": manifest_rel,
         "__LOOPY_ENGINE_PORT__": str(engine_port),
+        "__LOOPY_ENGINE_IMAGE_TAG__": engine_image_tag,
+        "__LOOPY_ENGINE_WHEEL_S3__": engine_wheel_s3,
         "__LOOPY_FETCH_SECRET_FILES__": fetch_lines,
     }
     for token, value in replacements.items():
@@ -140,6 +148,37 @@ def render_deploy_script(
     if "__LOOPY_" in script:
         raise ValueError("deploy-script render left an unfilled __LOOPY_ token")
     return script
+
+
+def build_engine_wheel(source: Path, out_dir: Path) -> Path:
+    """Build a wheel of loopy-computer from `source` (a loopy checkout) into `out_dir`.
+
+    Backs `deploy aws --engine-source`: the instance installs the operator's exact code rather
+    than the pinned PyPI release, the only way to run an *unreleased* build on AWS (the version
+    string is frozen, so PyPI can't carry it). Shells out to `uv build`, the repo's build tool.
+    """
+    import shutil
+    import subprocess
+
+    if not (source / "pyproject.toml").is_file():
+        raise RuntimeError(
+            f"--engine-source {source} is not a loopy checkout (no pyproject.toml); point it "
+            "at your local loopy repo."
+        )
+    if shutil.which("uv") is None:
+        raise RuntimeError("--engine-source needs `uv` on PATH to build the engine wheel")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        ["uv", "build", "--wheel", str(source), "--out-dir", str(out_dir)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"building the engine wheel failed:\n{result.stderr.strip()[:1000]}")
+    wheels = sorted(out_dir.glob("*.whl"))
+    if not wheels:
+        raise RuntimeError("`uv build` reported success but produced no wheel")
+    return wheels[-1]
 
 
 def render_user_data(deploy_script: str) -> str:
@@ -504,6 +543,12 @@ def aws(
         8, "--state-size-gb", help="EBS /state volume size (run history + redis queue)."
     ),
     engine_port: int = typer.Option(8000, "--port", help="Engine port behind CloudFront."),
+    engine_source: Path | None = typer.Option(
+        None,
+        "--engine-source",
+        help="Build the engine image from this local loopy checkout instead of the pinned PyPI "
+        "release — the way to run an unreleased build on AWS. Default: install from PyPI.",
+    ),
     destroy: bool = typer.Option(
         False, "--destroy", help="Tear the stack down (snapshot /state first if it matters)."
     ),
@@ -592,6 +637,32 @@ def aws(
     s3.put_object(Bucket=bucket, Key=key, Body=package_project(root_abs, secret_files))
     typer.echo(f"deploy: uploaded project to s3://{bucket}/{key}")
 
+    # Engine source: PyPI by default; a `--engine-source` checkout is built into a wheel, shipped
+    # to S3, and installed on the instance instead — the way to run an unreleased build. The image
+    # tag carries the wheel's content hash so a changed wheel forces a rebuild (the frozen version
+    # string alone wouldn't).
+    engine_image_tag = __version__
+    engine_wheel_s3 = ""
+    if engine_source is not None:
+        import hashlib
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                wheel = build_engine_wheel(engine_source.resolve(), Path(tmp))
+            except RuntimeError as exc:
+                typer.echo(f"error: {exc}", err=True)
+                raise typer.Exit(code=1) from exc
+            wheel_bytes = wheel.read_bytes()
+            engine_image_tag = f"{__version__}-{hashlib.sha256(wheel_bytes).hexdigest()[:12]}"
+            engine_key = f"{stack}/engine/engine.whl"
+            s3.put_object(Bucket=bucket, Key=engine_key, Body=wheel_bytes)
+            engine_wheel_s3 = f"s3://{bucket}/{engine_key}"
+        typer.echo(
+            f"deploy: built engine wheel from {engine_source} → s3://{bucket}/{engine_key} "
+            f"(image loopy-engine:{engine_image_tag})"
+        )
+
     # The deploy script (re-fetch project+secrets, restart) is shared by first boot and every
     # re-deploy; user-data embeds it and runs it once, SSM re-runs it thereafter.
     deploy_script = render_deploy_script(
@@ -602,6 +673,8 @@ def aws(
         manifest_rel=manifest_rel,
         engine_port=engine_port,
         secret_files=secret_files,
+        engine_image_tag=engine_image_tag,
+        engine_wheel_s3=engine_wheel_s3,
     )
     template_body = build_template_body(render_user_data(deploy_script))
     base_parameters = {

@@ -13,6 +13,8 @@ PROJECT_S3_URI="__LOOPY_PROJECT_S3_URI__"
 LOOPY_VERSION="__LOOPY_VERSION__"
 MANIFEST_REL="__LOOPY_MANIFEST_REL__"
 ENGINE_PORT="__LOOPY_ENGINE_PORT__"
+ENGINE_IMAGE_TAG="__LOOPY_ENGINE_IMAGE_TAG__"
+ENGINE_WHEEL_S3="__LOOPY_ENGINE_WHEEL_S3__"
 
 mkdir -p /opt/loopy /state/redis
 
@@ -48,17 +50,33 @@ if [ -n "$PUBLIC_URL" ] && ! grep -q '^LOOPY_PUBLIC_URL=' /opt/loopy/project/loo
   echo "LOOPY_PUBLIC_URL=$PUBLIC_URL" >> /opt/loopy/project/loopy.env
 fi
 
-# ── The engine image: the pinned PyPI release, same recipe as the shipped Dockerfile.pypi
-# (no source checkout on the instance). Built once per version, then reused across re-deploys.
-if ! docker image inspect "loopy-engine:$LOOPY_VERSION" >/dev/null 2>&1; then
+# ── The engine image. By default the pinned PyPI release (same recipe as the shipped
+# Dockerfile.pypi, no source checkout on the instance). With a wheel shipped by
+# `loopy deploy aws --engine-source`, it installs that instead, so an unreleased CLI can run
+# its own engine (the PyPI version string is frozen, so PyPI can't carry unreleased code). The
+# tag carries the wheel's content hash in source mode, so a changed wheel is a new tag and
+# forces a rebuild. Built once per tag, then reused across re-deploys.
+if ! docker image inspect "loopy-engine:$ENGINE_IMAGE_TAG" >/dev/null 2>&1; then
   mkdir -p /opt/loopy/image
-  cat > /opt/loopy/image/Dockerfile <<EOF
+  rm -f /opt/loopy/image/engine.whl
+  if [ -n "$ENGINE_WHEEL_S3" ]; then
+    aws s3 cp "$ENGINE_WHEEL_S3" /opt/loopy/image/engine.whl --region "$REGION"
+    cat > /opt/loopy/image/Dockerfile <<EOF
+FROM python:3.12-slim
+COPY engine.whl /tmp/engine.whl
+RUN pip install --no-cache-dir "/tmp/engine.whl[redis]"
+WORKDIR /project
+ENTRYPOINT ["loopy"]
+EOF
+  else
+    cat > /opt/loopy/image/Dockerfile <<EOF
 FROM python:3.12-slim
 RUN pip install --no-cache-dir "loopy-computer[redis]==$LOOPY_VERSION"
 WORKDIR /project
 ENTRYPOINT ["loopy"]
 EOF
-  docker build -t "loopy-engine:$LOOPY_VERSION" /opt/loopy/image
+  fi
+  docker build -t "loopy-engine:$ENGINE_IMAGE_TAG" /opt/loopy/image
 fi
 
 # ── The stack: same collapsed single-node topology as the bundled compose file (redis bus,
@@ -75,7 +93,7 @@ docker run -d --name loopy-engine --network loopy --restart unless-stopped \
   -e REDIS_URL=redis://loopy-redis:6379 \
   -v /opt/loopy/project:/project:ro \
   -v /state:/state \
-  "loopy-engine:$LOOPY_VERSION" \
+  "loopy-engine:$ENGINE_IMAGE_TAG" \
   run "$MANIFEST_REL" --in-process --root /project \
   --host 0.0.0.0 --port "$ENGINE_PORT" \
   --bus redis --state sqlite --state-path /state/state.db

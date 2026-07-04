@@ -218,6 +218,21 @@ the script builds the image only when the versioned tag is absent — so a new
 version means a missing tag and a rebuild in place. Old image versions linger
 on the instance's disk until pruned, which is harmless at this size.
 
+**Running an unreleased build (`--engine-source`).** The default engine image
+installs `loopy-computer==<version>` from PyPI, which assumes the operator's CLI
+is a released version whose published engine matches the manifests it compiles.
+An *unreleased* CLI breaks that: the version string is frozen (e.g. `0.1.0`),
+so PyPI carries stale code whose manifest schema predates the checkout, and the
+engine rejects the CLI's manifest on load. `loopy deploy aws --engine-source
+<checkout>` closes the gap: the CLI builds a wheel from that loopy checkout
+(`uv build`), ships it to `s3://<bucket>/<stack>/engine/engine.whl` (read by the
+same instance role, already scoped to `<stack>/*`), and the deploy script
+installs that wheel instead of the PyPI release. The image tag carries the
+wheel's content hash (`<version>-<sha>`), so iterating on local code and
+re-deploying rebuilds the image; without the hash the frozen version would let a
+stale image linger. PyPI stays the default for released users — this is opt-in,
+for dogfooding on real infrastructure before a release.
+
 ## IAM the operator's provisioning identity needs
 
 The credentials passed to `loopy deploy aws` (a deploy user, not the instance
