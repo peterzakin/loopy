@@ -142,11 +142,14 @@ every re-deploy share it:
 
 **In-place updates.** Because the instance ran user-data only once, a re-deploy
 must actively refresh it. After pushing the new tarball and secrets, the CLI
-re-runs `/opt/loopy/deploy.sh` on the instance via SSM RunCommand
+rewrites `/opt/loopy/deploy.sh` from the freshly rendered script (base64, the
+same encoding user-data uses) and re-runs it via SSM RunCommand
 (`AWS-RunShellScript`, then poll `get_command_invocation`), so the engine picks
-up the change with a container restart and no instance replacement. Only an
-already-running stack gets this nudge; a fresh instance is doing it via user-data
-already, and has not registered with SSM yet.
+up the change with a container restart and no instance replacement. Re-pushing
+the script matters: the stored copy is whatever the instance's *first boot*
+rendered, so a CLI upgrade that fixes the deploy script would otherwise keep
+re-running the old one. Only an already-running stack gets this nudge; a fresh
+instance is doing it via user-data already, and has not registered with SSM yet.
 
 **A fresh stack needs two passes; an update does not.** The CloudFront origin is
 the EIP's public DNS, which only exists once the address does, and a template
@@ -209,10 +212,11 @@ CloudFront-to-instance leg is unencrypted. Two consequences, handled differently
 - **`--destroy`:** delete the `/loopy/<stack>/*` parameters, then `delete_stack`
   and wait, with a reminder that `/state` (run history) goes with it.
 
-One thing an in-place refresh cannot change is the **engine version**: a version
-bump changes the image tag, and the running instance keeps its built image. That
-is rare (it tracks the CLI's own version) and a `--destroy` + re-create picks up
-the new version cleanly; a future flag could force an image rebuild in place.
+An in-place refresh also carries an **engine version** bump: the version is
+baked into the rendered deploy script, the refresh re-pushes that script, and
+the script builds the image only when the versioned tag is absent — so a new
+version means a missing tag and a rebuild in place. Old image versions linger
+on the instance's disk until pruned, which is harmless at this size.
 
 ## IAM the operator's provisioning identity needs
 

@@ -4,7 +4,7 @@
 # The engine image: the single long-lived process `loopy run` drives — sensor webhooks
 # + scheduler + event-bus consumer + runtime, all in one. Agents do NOT run here; they
 # run in Daytona sandboxes (a separate domain).
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Declared so the shared compose build arg is accepted here too; the source build ignores it —
 # it installs from the COPYed tree below, not from PyPI (see Dockerfile.pypi for the pip path).

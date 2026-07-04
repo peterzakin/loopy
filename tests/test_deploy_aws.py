@@ -181,7 +181,9 @@ def test_cloudfront_comments_stay_within_the_128_char_limit():
             f"{name} Comment must be a plain string kept under 128 chars, not {comment!r} "
             "(an Fn::Sub can silently exceed the limit once resolved)"
         )
-        assert len(comment) <= 128, f"{name} Comment is {len(comment)} chars; CloudFront caps it at 128"
+        assert len(comment) <= 128, (
+            f"{name} Comment is {len(comment)} chars; CloudFront caps it at 128"
+        )
 
 
 def test_admin_is_blocked_at_the_edge():
@@ -312,20 +314,56 @@ class _FakeCommandSsm:
 
     def get_command_invocation(self, CommandId, InstanceId):  # noqa: N803
         status = self._statuses.pop(0)
-        return {"Status": status, "StandardErrorContent": "boom" if status == "Failed" else ""}
+        return {
+            "Status": status,
+            "StandardErrorContent": "boom" if status == "Failed" else "",
+            "StandardOutputContent": (
+                "…pip install\nERROR: requires a different Python" if status == "Failed" else ""
+            ),
+        }
 
 
-def test_refresh_instance_reruns_the_deploy_script_and_waits_for_success():
+def test_refresh_instance_repushes_the_script_then_runs_it():
+    """The instance's stored deploy.sh is whatever first boot rendered; a refresh must
+    rewrite it from the freshly rendered script before running, or a CLI upgrade that
+    fixes the script keeps re-running the old broken one forever."""
     ssm = _FakeCommandSsm(["InProgress", "Success"])
-    _refresh_instance(ssm, "i-123", sleep=lambda _s: None)
+    _refresh_instance(ssm, "i-123", "#!/bin/bash\necho hi\n", sleep=lambda _s: None)
     assert ssm.sent[0]["InstanceIds"] == ["i-123"]
-    assert ssm.sent[0]["Parameters"]["commands"] == ["bash /opt/loopy/deploy.sh"]
+    commands = ssm.sent[0]["Parameters"]["commands"]
+    assert len(commands) == 2
+    encoded = base64.b64encode(b"#!/bin/bash\necho hi\n").decode()
+    assert commands[0] == f"echo {encoded} | base64 -d > /opt/loopy/deploy.sh"
+    assert commands[1] == "bash /opt/loopy/deploy.sh"
 
 
-def test_refresh_instance_raises_on_failed_command():
+def test_refresh_instance_failure_carries_the_scripts_stdout():
+    """The script tees stderr into stdout (its log redirect), so SSM's stderr is just a
+    generic 'exit status 1' — the error must include the stdout tail, where the reason is."""
     ssm = _FakeCommandSsm(["Failed"])
-    with pytest.raises(RuntimeError, match="refresh failed on i-123: boom"):
-        _refresh_instance(ssm, "i-123", sleep=lambda _s: None)
+    with pytest.raises(RuntimeError, match="requires a different Python"):
+        _refresh_instance(ssm, "i-123", "echo hi", sleep=lambda _s: None)
+
+
+def test_engine_image_python_satisfies_requires_python():
+    """Every deploy Dockerfile must use a base image new enough for the package's
+    requires-python — pip inside the image build otherwise refuses the install, which
+    surfaces as an opaque exit-1 minutes into a deploy (`python:3.11-slim` vs `>=3.12`)."""
+    pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+    spec = re.search(r'requires-python\s*=\s*">=(\d+)\.(\d+)"', pyproject)
+    assert spec, "expected a >=X.Y requires-python in pyproject.toml"
+    minimum = (int(spec.group(1)), int(spec.group(2)))
+    deploy_dir = TEMPLATE_PATH.parent
+    dockerfiles = ["Dockerfile", "Dockerfile.pypi", "aws-deploy.sh"]
+    for name in dockerfiles:
+        text = (deploy_dir / name).read_text()
+        base = re.search(r"FROM python:(\d+)\.(\d+)-slim", text)
+        assert base, f"{name}: expected a python:X.Y-slim base image"
+        version = (int(base.group(1)), int(base.group(2)))
+        assert version >= minimum, (
+            f"{name} builds FROM python:{version[0]}.{version[1]}-slim but the package "
+            f"requires >= {minimum[0]}.{minimum[1]}; pip inside the build will refuse it"
+        )
 
 
 def test_wait_until_serving_returns_true_once_healthz_answers_200():
