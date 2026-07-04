@@ -24,6 +24,7 @@ from loopy_cli.aws import (
     _apply_stack,
     _clear_unusable_stack,
     _delete_stack_secrets,
+    _engine_diagnostics,
     _put_secret_files,
     _refresh_instance,
     _require_default_vpc,
@@ -421,6 +422,53 @@ def test_wait_until_serving_times_out_without_raising():
         "https://x.cloudfront.net", fetch=lambda _u: 502, sleep=lambda _s: None, attempts=3
     )
     assert result is False
+
+
+def test_wait_until_serving_emits_a_heartbeat_while_waiting():
+    """A multi-minute wait must show life, not a frozen cursor, so it doesn't read as a hang."""
+    lines: list[str] = []
+    wait_until_serving(
+        "https://x.cloudfront.net",
+        fetch=lambda _u: 504,
+        sleep=lambda _s: None,
+        attempts=10,
+        delay=10,
+        echo=lines.append,
+    )
+    assert lines, "expected at least one heartbeat line"
+    assert any("elapsed" in line and "504" in line for line in lines)
+
+
+def test_engine_diagnostics_returns_logs_on_timeout():
+    """When healthz times out, the deploy pulls container status + logs so the reason is
+    visible inline instead of leaving the operator to SSM in by hand."""
+
+    class _DiagSsm:
+        def send_command(self, **kwargs):
+            self.commands = kwargs["Parameters"]["commands"]
+            return {"Command": {"CommandId": "cmd-diag"}}
+
+        def get_command_invocation(self, CommandId, InstanceId):  # noqa: N803
+            return {
+                "Status": "Success",
+                "StandardOutputContent": "loopy-engine   Exited (1)\n--- engine logs ---\nboom",
+            }
+
+    ssm = _DiagSsm()
+    out = _engine_diagnostics(ssm, "i-123", sleep=lambda _s: None)
+    assert "Exited" in out and "boom" in out
+    assert any("docker logs" in c for c in ssm.commands)
+
+
+def test_engine_diagnostics_never_raises_on_ssm_failure():
+    """Diagnostics are best-effort — an SSM failure must not mask the original timeout."""
+
+    class _BrokenSsm:
+        def send_command(self, **kwargs):
+            raise RuntimeError("ssm down")
+
+    out = _engine_diagnostics(_BrokenSsm(), "i-123", sleep=lambda _s: None)
+    assert "couldn't run diagnostics" in out
 
 
 class _FakeWaiter:

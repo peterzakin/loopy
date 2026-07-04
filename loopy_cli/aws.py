@@ -477,7 +477,13 @@ def _http_status(url: str) -> int:
 
 
 def wait_until_serving(
-    public_url: str, *, fetch=None, sleep=time.sleep, attempts: int = 60, delay: int = 10
+    public_url: str,
+    *,
+    fetch=None,
+    sleep=time.sleep,
+    attempts: int = 60,
+    delay: int = 10,
+    echo=None,
 ) -> bool:
     """Poll `<public_url>/healthz` until it answers 200, so "deployed" means "serving".
 
@@ -486,19 +492,63 @@ def wait_until_serving(
     container start) and let the new CloudFront distribution propagate to the edge. Testing the
     real end-to-end URL covers both. `/healthz` is open and outside the blocked `/admin*` path.
 
-    Returns True once live, False on timeout (~10 min by default). Never raises — a slow but
-    healthy boot must not fail the deploy; the caller prints where to look on a timeout.
+    With `echo`, prints a heartbeat (elapsed time + the last status/error) periodically so the
+    wait reads as progress, not a hang. Returns True once live, False on timeout (~10 min by
+    default). Never raises — a slow but healthy boot must not fail the deploy; the caller
+    surfaces diagnostics on a timeout.
     """
     fetch = fetch or _http_status
     url = public_url.rstrip("/") + "/healthz"
-    for _ in range(attempts):
+    last = "no response yet"
+    for i in range(attempts):
         try:
             if fetch(url) == 200:
                 return True
-        except Exception:  # noqa: BLE001 - connection refused / 502 / DNS lag are all "not yet"
-            pass
+            last = f"HTTP {fetch(url)}"
+        except Exception as exc:  # noqa: BLE001 - refused / 502 / 504 / DNS lag are all "not yet"
+            last = type(exc).__name__
+        # Heartbeat every ~30s (not on the first tick), so a multi-minute wait shows life.
+        if echo and i and i % (max(30 // delay, 1)) == 0:
+            elapsed = (i + 1) * delay
+            echo(f"  … still waiting ({elapsed // 60}m{elapsed % 60:02d}s elapsed; last: {last})")
         sleep(delay)
     return False
+
+
+def _engine_diagnostics(ssm, instance_id: str, *, sleep=time.sleep) -> str:
+    """Best-effort container status + logs from the instance, to explain a healthz timeout.
+
+    `docker run -d` in the deploy script returns as soon as the container *starts*, so a deploy
+    can report success while the engine crashes a second later — the reason lives in the
+    container's logs, not the deploy output. Pulls them (plus the boot log) over one SSM command.
+    Never raises: this only runs to explain a deploy that didn't come up, so any failure degrades
+    to a short note rather than masking the original timeout.
+    """
+    commands = [
+        "docker ps -a || true",
+        "echo '--- engine logs (tail) ---'",
+        "docker logs --tail 60 loopy-engine 2>&1 || true",
+        "echo '--- boot log (tail) ---'",
+        "tail -40 /var/log/loopy-deploy.log 2>&1 || true",
+    ]
+    try:
+        command = ssm.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": commands},
+        )
+        command_id = command["Command"]["CommandId"]
+    except Exception as exc:  # noqa: BLE001 - botocore ClientError; diagnostics are best-effort
+        return f"(couldn't run diagnostics via SSM: {exc})"
+    for _ in range(18):  # ~3 min
+        sleep(10)
+        try:
+            result = ssm.get_command_invocation(CommandId=command_id, InstanceId=instance_id)
+        except Exception:  # noqa: BLE001 - InvocationDoesNotExist until the agent picks it up
+            continue
+        if result["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
+            return (result.get("StandardOutputContent") or "").strip() or "(no output)"
+    return "(diagnostics timed out)"
 
 
 def _delete_stack_secrets(ssm, stack: str) -> int:
@@ -768,7 +818,7 @@ def aws(
         f"deploy: waiting for the engine to answer at {public_url}/healthz "
         "(first boot builds the image and the CDN propagates; up to ~10 min)…"
     )
-    serving = wait_until_serving(public_url)
+    serving = wait_until_serving(public_url, echo=typer.echo)
 
     typer.echo("")
     verb = "updated" if existed else "done"
@@ -776,11 +826,14 @@ def aws(
     if serving:
         typer.echo("  status:    live (/healthz is answering)")
     else:
-        typer.echo("  status:    not answering yet. A fresh boot builds the image (a few minutes)")
-        typer.echo("             and a new CloudFront distribution takes time to propagate; give")
-        typer.echo("             it a bit. If it stays down, check the boot log via SSM:")
-        typer.echo(f"             aws ssm start-session --target {instance_id},")
-        typer.echo("             then cat /var/log/loopy-deploy.log")
+        typer.echo("  status:    not answering after ~10 min. Pulling the engine's logs from the")
+        typer.echo("             instance to show why (a crash on boot shows here; a fresh")
+        typer.echo("             CloudFront distribution still propagating does not)…")
+        import textwrap
+
+        diagnostics = _engine_diagnostics(ssm, instance_id)
+        typer.echo(textwrap.indent(diagnostics, "    "))
+        typer.echo(f"    (re-check any time: curl {public_url}/healthz)")
     typer.echo(f"  origin:    {public_ip} (CloudFront-only ingress; direct hits are refused)")
     typer.echo(f"  url:       wrote LOOPY_PUBLIC_URL={public_url} to loopy.env")
     typer.echo("  webhooks:  loopy webhooks github  (registers GitHub delivery to the URL above)")
