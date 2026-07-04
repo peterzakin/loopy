@@ -225,9 +225,10 @@ An *unreleased* CLI breaks that: the version string is frozen (e.g. `0.1.0`),
 so PyPI carries stale code whose manifest schema predates the checkout, and the
 engine rejects the CLI's manifest on load. `loopy deploy aws --engine-source
 <checkout>` closes the gap: the CLI builds a wheel from that loopy checkout
-(`uv build`), ships it to `s3://<bucket>/<stack>/engine/engine.whl` (read by the
-same instance role, already scoped to `<stack>/*`), and the deploy script
-installs that wheel instead of the PyPI release. The image tag carries the
+(`uv build`), ships it to `s3://<bucket>/<stack>/engine/<wheel>` under its real
+PEP 427 filename (read by the same instance role, already scoped to `<stack>/*`;
+the name is preserved because pip rejects a renamed wheel), and the deploy
+script installs that wheel instead of the PyPI release. The image tag carries the
 wheel's content hash (`<version>-<sha>`), so iterating on local code and
 re-deploying rebuilds the image; without the hash the frozen version would let a
 stale image linger. PyPI stays the default for released users — this is opt-in,

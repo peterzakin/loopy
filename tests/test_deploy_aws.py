@@ -110,16 +110,17 @@ def test_render_deploy_script_defaults_to_pypi_install():
 def test_render_deploy_script_installs_shipped_wheel_when_source_built():
     """With --engine-source: the script fetches the wheel from S3 and installs it, and the
     tag carries the content hash so a changed wheel forces a rebuild."""
-    script = _render(
-        engine_image_tag="0.1.0-abc123def456",
-        engine_wheel_s3="s3://loopy-deploy-1-us-east-1/loopy-engine/engine/engine.whl",
+    wheel_uri = (
+        "s3://loopy-deploy-1-us-east-1/loopy-engine/engine/"
+        "loopy_computer-0.1.0-py3-none-any.whl"
     )
+    script = _render(engine_image_tag="0.1.0-abc123def456", engine_wheel_s3=wheel_uri)
     assert "__LOOPY_" not in script
-    wheel_uri = "s3://loopy-deploy-1-us-east-1/loopy-engine/engine/engine.whl"
     assert f'ENGINE_WHEEL_S3="{wheel_uri}"' in script
     assert 'ENGINE_IMAGE_TAG="0.1.0-abc123def456"' in script
-    assert 'aws s3 cp "$ENGINE_WHEEL_S3" /opt/loopy/image/engine.whl' in script
-    assert '"/tmp/engine.whl[redis]"' in script
+    # Wheel copied into a dir (keeps its PEP 427 name), then installed with the [redis] extra.
+    assert 'aws s3 cp "$ENGINE_WHEEL_S3" /opt/loopy/image/wheels/' in script
+    assert 'pip install --no-cache-dir "$(ls /tmp/wheels/*.whl)[redis]"' in script
 
 
 def test_build_engine_wheel_rejects_a_non_checkout(tmp_path):

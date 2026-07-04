@@ -655,7 +655,9 @@ def aws(
                 raise typer.Exit(code=1) from exc
             wheel_bytes = wheel.read_bytes()
             engine_image_tag = f"{__version__}-{hashlib.sha256(wheel_bytes).hexdigest()[:12]}"
-            engine_key = f"{stack}/engine/engine.whl"
+            # Keep the wheel's real filename in the key — pip on the instance rejects any name
+            # that isn't a valid PEP 427 wheel (`<dist>-<ver>-<pytag>-<abi>-<plat>.whl`).
+            engine_key = f"{stack}/engine/{wheel.name}"
             s3.put_object(Bucket=bucket, Key=engine_key, Body=wheel_bytes)
             engine_wheel_s3 = f"s3://{bucket}/{engine_key}"
         typer.echo(
