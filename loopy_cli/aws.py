@@ -274,6 +274,10 @@ def _stack_exists(cf, stack: str) -> bool:
 def _apply_stack(cf, stack: str, template_body: str, parameters: dict[str, str]) -> None:
     """create_stack or update_stack, then wait; a no-op update is success, not an error."""
     params = [{"ParameterKey": k, "ParameterValue": v} for k, v in parameters.items()]
+    # The failed-resource lookup queries by this. On a failed *create* the stack rolls back
+    # and (OnFailure=DELETE) is gone, so its name no longer resolves — but the immutable stack
+    # id (ARN) that create_stack returns keeps its events queryable, so the reason survives.
+    stack_ref = stack
     if _stack_exists(cf, stack):
         try:
             cf.update_stack(
@@ -288,27 +292,37 @@ def _apply_stack(cf, stack: str, template_body: str, parameters: dict[str, str])
             raise
         waiter = cf.get_waiter("stack_update_complete")
     else:
-        cf.create_stack(
+        response = cf.create_stack(
             StackName=stack,
             TemplateBody=template_body,
             Parameters=params,
             Capabilities=["CAPABILITY_IAM"],
             OnFailure="DELETE",
         )
+        stack_ref = (response or {}).get("StackId") or stack
         waiter = cf.get_waiter("stack_create_complete")
     try:
         waiter.wait(StackName=stack, WaiterConfig={"Delay": 15, "MaxAttempts": 120})
     except Exception as exc:
-        reasons = _failure_reasons(cf, stack)
+        reasons = _failure_reasons(cf, stack_ref)
         raise RuntimeError(f"stack {stack} did not stabilize: {reasons}") from exc
 
 
-def _failure_reasons(cf, stack: str) -> str:
-    """The first few failed-resource reasons — the part of the event stream worth reading."""
+def _failure_reasons(cf, stack_ref: str) -> str:
+    """The first few failed-resource reasons — the part of the event stream worth reading.
+
+    `stack_ref` should be the stack id (ARN) when we have it: a create that failed with
+    `OnFailure=DELETE` no longer resolves by name, but its events stay queryable by id, so
+    that is what surfaces the real cause (a bad AMI, an unavailable instance type, a hit
+    service limit) instead of a bare "stack does not exist".
+    """
     try:
-        events = cf.describe_stack_events(StackName=stack)["StackEvents"]
-    except Exception:  # noqa: BLE001 - the stack may already be gone (OnFailure=DELETE)
-        return "no stack events available (the failed create may have rolled back and deleted)"
+        events = cf.describe_stack_events(StackName=stack_ref)["StackEvents"]
+    except Exception:  # noqa: BLE001 - even the id can age out of CloudFormation's history
+        return (
+            "no stack events available. The failed create rolled back and deleted; open the "
+            "CloudFormation console (toggle 'Deleted' stacks) to read the failed resource's reason"
+        )
     reasons = [
         f"{e['LogicalResourceId']}: {e.get('ResourceStatusReason', e['ResourceStatus'])}"
         for e in events

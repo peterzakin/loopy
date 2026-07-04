@@ -368,6 +368,52 @@ def test_apply_stack_surfaces_other_update_errors():
         _apply_stack(cf, "s", "{}", {})
 
 
+class _FailingWaiter:
+    def wait(self, **kwargs):
+        raise RuntimeError("Waiter StackCreateComplete failed")
+
+
+class _DeletedStackCf:
+    """A create that fails and rolls back: the name no longer resolves, but the id does."""
+
+    STACK_ID = "arn:aws:cloudformation:us-east-1:1:stack/s/abc123"
+
+    def __init__(self):
+        self.events_queried_with: list[str] = []
+
+    def describe_stacks(self, StackName):  # noqa: N803 - stack absent ⇒ create branch
+        raise RuntimeError(f"Stack with id {StackName} does not exist")
+
+    def create_stack(self, **kwargs):
+        return {"StackId": self.STACK_ID}
+
+    def get_waiter(self, name):
+        return _FailingWaiter()
+
+    def describe_stack_events(self, StackName):  # noqa: N803
+        self.events_queried_with.append(StackName)
+        if StackName != self.STACK_ID:  # by name (deleted) CloudFormation would 400
+            raise RuntimeError(f"Stack [{StackName}] does not exist")
+        return {
+            "StackEvents": [
+                {
+                    "LogicalResourceId": "EngineInstance",
+                    "ResourceStatus": "CREATE_FAILED",
+                    "ResourceStatusReason": "The instance type t3.small is not supported here",
+                }
+            ]
+        }
+
+
+def test_apply_stack_reports_failure_reason_by_stack_id_after_rollback():
+    """A rolled-back create is gone by name; we must query events by the stack id so the
+    real cause surfaces instead of a bare 'stack does not exist'."""
+    cf = _DeletedStackCf()
+    with pytest.raises(RuntimeError, match="t3.small is not supported"):
+        _apply_stack(cf, "s", "{}", {"OriginDomain": ""})
+    assert cf.events_queried_with == [_DeletedStackCf.STACK_ID]
+
+
 # ── CLI wiring ───────────────────────────────────────────────────────────────────────
 
 
