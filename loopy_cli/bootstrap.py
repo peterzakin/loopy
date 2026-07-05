@@ -33,6 +33,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import re
 import tarfile
 import time
 from pathlib import Path
@@ -154,6 +155,32 @@ def render_deploy_script(
     if "__LOOPY_" in script:
         raise ValueError("deploy-script render left an unfilled __LOOPY_ token")
     return script
+
+
+def detect_engine_source(start: Path | None = None) -> Path | None:
+    """The loopy checkout the running CLI lives in, if any — else None (an installed release).
+
+    The bootstrap deploy installs the engine from PyPI by version string by default. During
+    pre-release that string is frozen (`0.1.0`) while the code and the manifest schema move on, so a
+    CLI run from a source checkout compiles a manifest the *published* engine can't read — the
+    boot-time `ValidationError`/schema skew. When the CLI is itself running from a checkout we close
+    that gap without the operator having to know about it: build the engine from the same tree so it
+    always matches the CLI that compiled the manifest. This is what `--engine-source` does manually;
+    detecting the checkout makes it the default.
+
+    Returns the checkout root (the directory holding the loopy-computer `pyproject.toml`), or None
+    when the CLI is an installed wheel — a site-packages install has no `pyproject.toml` above it,
+    so a released user keeps the PyPI path untouched. `start` defaults to this module's location.
+    """
+    base = (start or Path(__file__)).resolve()
+    search = [base, *base.parents] if base.is_dir() else list(base.parents)
+    for parent in search:
+        pyproject = parent / "pyproject.toml"
+        if pyproject.is_file() and re.search(
+            r'^\s*name\s*=\s*"loopy-computer"', pyproject.read_text(), re.MULTILINE
+        ):
+            return parent
+    return None
 
 
 def build_engine_wheel(source: Path, out_dir: Path) -> Path:
@@ -603,7 +630,14 @@ def bootstrap(
         None,
         "--engine-source",
         help="Build the engine image from this local loopy checkout instead of the pinned PyPI "
-        "release — the way to run an unreleased build on AWS. Default: install from PyPI.",
+        "release — the way to run an unreleased build on AWS. When the CLI is itself run from a "
+        "checkout this is auto-detected; pass it only to point at a different tree.",
+    ),
+    engine_pypi: bool = typer.Option(
+        False,
+        "--engine-pypi",
+        help="Install the pinned PyPI release even when the CLI is run from a source checkout "
+        "(by default a checkout builds the engine from its own code so it can't lag the manifest).",
     ),
     destroy: bool = typer.Option(
         False, "--destroy", help="Tear the stack down (snapshot /state first if it matters)."
@@ -698,6 +732,21 @@ def bootstrap(
     # to S3, and installed on the instance instead — the way to run an unreleased build. The image
     # tag carries the wheel's content hash so a changed wheel forces a rebuild (the frozen version
     # string alone wouldn't).
+    #
+    # A CLI run from its own source checkout compiles a manifest whose schema can outrun the frozen
+    # PyPI release (`0.1.0` throughout pre-release), so the published engine rejects it on boot.
+    # When that's the case, default to building the engine from that same checkout so it can't lag
+    # the manifest — the fix the operator would otherwise reach for with `--engine-source` by hand.
+    # `--engine-pypi` forces the published release (e.g. to validate the released path).
+    if engine_source is None and not engine_pypi:
+        detected = detect_engine_source()
+        if detected is not None:
+            engine_source = detected
+            typer.echo(
+                f"deploy: CLI is running from the loopy checkout at {detected}; building the "
+                "engine from it so it matches this CLI (the pinned PyPI release can lag an "
+                "unreleased manifest schema). Pass --engine-pypi to force the published release."
+            )
     engine_image_tag = __version__
     engine_wheel_s3 = ""
     if engine_source is not None:
