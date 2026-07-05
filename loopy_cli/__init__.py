@@ -683,7 +683,7 @@ def _write_admin_token(target: Path) -> None:
 
 
 def _choose_deploy_target(target: Path) -> str:
-    """Ask how the engine will be hosted, and record it as `LOOPY_DEPLOY_TARGET`.
+    """Ask how the engine will be hosted, and return the choice (in-memory only).
 
     This is the fork the rest of onboarding hinges on, because the public webhook URL can't
     be collected in a single linear order — a provisioned host doesn't mint its URL until
@@ -696,21 +696,12 @@ def _choose_deploy_target(target: Path) -> str:
       host and its `*.cloudfront.net` URL from your AWS credentials, then writes
       `LOOPY_PUBLIC_URL` back for you. `init` skips the URL prompt entirely.
 
-    Recorded in `loopy.env` so `webhooks`/`admin` can phrase their guidance for the right
-    target; the engine never reads it. Re-init keeps an existing choice (never clobbers), and
-    anything but an explicit "2" falls back to bring-your-own (the safe default: it just
-    prompts for a URL, and blank is a first-class answer there).
+    The answer steers only the rest of *this* `init` run (whether to prompt for the URL, how
+    to order the next-steps list); it is not persisted, so re-init simply asks again. Anything
+    but an explicit "2" falls back to bring-your-own (the safe default: it just prompts for a
+    URL, and blank is a first-class answer there).
     """
-    from loopy_cli.deploy_target import (
-        DEPLOY_TARGET_ENV,
-        TARGET_BOOTSTRAP,
-        resolve_deploy_target,
-    )
-    from loopy_runtime.secrets import write_control_plane_env
-
-    existing = resolve_deploy_target(target)
-    if existing:
-        return existing
+    from loopy_cli.deploy_target import TARGET_BOOTSTRAP
 
     typer.echo("  How will you host the engine?")
     typer.echo(
@@ -722,7 +713,6 @@ def _choose_deploy_target(target: Path) -> str:
     )
     choice = typer.prompt("  Choose 1 or 2", default="1").strip()
     chosen = TARGET_BOOTSTRAP if choice == "2" else TARGET_BYO
-    write_control_plane_env(target, {DEPLOY_TARGET_ENV: chosen})
 
     if chosen == TARGET_BOOTSTRAP:
         typer.echo(
@@ -1878,7 +1868,6 @@ def admin(
         BOOTSTRAP_INSTANCE_ID_ENV,
         is_cloudfront_url,
         resolve_bootstrap_config,
-        resolve_deploy_target,
     )
     from loopy_runtime.dashboard.auth import AdminAuth, is_loopback_host
     from loopy_runtime.secrets import ADMIN_TOKEN_ENV, load_control_plane_env
@@ -1991,14 +1980,15 @@ def admin(
         store = SqliteStateStore(db, read_only=True)  # raises if the DB doesn't exist yet
     except FileNotFoundError as exc:
         typer.echo(f"error: {exc}", err=True)
-        # A local DB is expected before a local run — but if the project is set up for a hosted
-        # deploy that isn't up yet (no LOOPY_PUBLIC_URL), point at how `loopy admin` will reach it.
-        recorded = resolve_deploy_target(root)
-        if recorded and not public:
+        # A local DB is expected before a local run. If instead this project deploys to a hosted
+        # engine, `loopy admin` reaches it off LOOPY_PUBLIC_URL once that's set (a CloudFront
+        # deploy rides the tunnel automatically, or force it with `loopy admin --tunnel`) — no
+        # deploy target is recorded to detect that here, so the pointer is unconditional.
+        if not public:
             typer.echo(
-                f"       (this project deploys to '{recorded}'; once it's up and "
-                "LOOPY_PUBLIC_URL is set, `loopy admin` targets it automatically — a CloudFront "
-                "deploy rides the tunnel, or force it with `loopy admin --tunnel`)",
+                "       (deploying to a hosted engine? once it's up and LOOPY_PUBLIC_URL is "
+                "set, `loopy admin` targets it automatically — a CloudFront deploy rides the "
+                "tunnel, or force it with `loopy admin --tunnel`)",
                 err=True,
             )
         raise typer.Exit(code=1) from exc

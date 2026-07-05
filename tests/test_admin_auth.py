@@ -38,7 +38,6 @@ def _clean_env(monkeypatch):
         "LOOPY_ADMIN_TOKEN_NEXT",
         "LOOPY_PUBLIC_URL",
         "PORT",
-        "LOOPY_DEPLOY_TARGET",
         "LOOPY_BOOTSTRAP_INSTANCE_ID",
         "LOOPY_BOOTSTRAP_ENGINE_PORT",
     )
@@ -210,14 +209,24 @@ def test_local_flag_forces_local_even_with_public_url(monkeypatch, tmp_path):
     assert "no state DB" in result.output
 
 
-def test_bare_admin_hints_recorded_target_when_local_db_missing(monkeypatch, tmp_path):
-    # A project set up for a hosted deploy that isn't up yet (no LOOPY_PUBLIC_URL): bare
-    # `loopy admin` is local, and the missing-DB error explains how it will reach the deploy.
-    (tmp_path / "loopy.env").write_text("LOOPY_DEPLOY_TARGET=bootstrap\n")
+def test_bare_admin_hints_hosted_deploy_when_local_db_missing(monkeypatch, tmp_path):
+    # No local DB and no LOOPY_PUBLIC_URL: bare `loopy admin` is local, and the missing-DB
+    # error points at how it would reach a hosted engine once LOOPY_PUBLIC_URL is set. The
+    # pointer is unconditional — no deploy target is recorded to gate it on.
     result = _invoke(["admin"], monkeypatch, tmp_path)
     assert result.exit_code == 1
     assert "no state DB" in result.output
-    assert "'bootstrap'" in result.output and "--tunnel" in result.output
+    assert "LOOPY_PUBLIC_URL" in result.output and "--tunnel" in result.output
+
+
+def test_bare_admin_omits_hosted_hint_when_forced_local_with_url(monkeypatch, tmp_path):
+    # --local with a URL set is a deliberate local pin, not a not-yet-deployed project, so the
+    # hosted-deploy pointer stays out of the way.
+    monkeypatch.setenv("LOOPY_PUBLIC_URL", "https://loopy.example.com")
+    result = _invoke(["admin", "--local"], monkeypatch, tmp_path)
+    assert result.exit_code == 1
+    assert "no state DB" in result.output
+    assert "--tunnel" not in result.output
 
 
 def test_mode_flags_are_mutually_exclusive(monkeypatch, tmp_path):

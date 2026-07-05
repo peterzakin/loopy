@@ -295,6 +295,9 @@ def test_cli_github_check_exits_nonzero_on_gaps(tmp_path, monkeypatch):
 
 
 def test_cli_github_requires_public_url(tmp_path, monkeypatch):
+    """No public URL: the one missing-URL error names both ways to get one — set it by hand
+    (bring-your-own) or let `loopy deploy bootstrap` mint it — since nothing is recorded to
+    tell the two apart."""
     target, _ = _github_project(tmp_path)
     _write_app_creds(target)
     monkeypatch.delenv("LOOPY_PUBLIC_URL", raising=False)
@@ -303,25 +306,6 @@ def test_cli_github_requires_public_url(tmp_path, monkeypatch):
 
     assert result.exit_code == 1
     assert "LOOPY_PUBLIC_URL" in result.output
-    # Bring-your-own (the default): point at setting the URL, not at deploying.
-    assert "deploy bootstrap" not in result.output
-
-
-def test_cli_github_no_url_points_at_deploy_on_bootstrap_target(tmp_path, monkeypatch):
-    """On the bootstrap target the URL is minted by `loopy deploy bootstrap`, so the
-    missing-URL error must send the operator there rather than telling them to set it
-    by hand."""
-    from loopy_cli.deploy_target import DEPLOY_TARGET_ENV, TARGET_BOOTSTRAP
-
-    target, _ = _github_project(tmp_path)
-    _write_app_creds(target)
-    write_control_plane_env(target, {DEPLOY_TARGET_ENV: TARGET_BOOTSTRAP})
-    monkeypatch.delenv("LOOPY_PUBLIC_URL", raising=False)
-    monkeypatch.delenv(DEPLOY_TARGET_ENV, raising=False)
-
-    result = runner.invoke(app, ["webhooks", "github", "--root", str(target)])
-
-    assert result.exit_code == 1
     assert "loopy deploy bootstrap" in result.output
 
 

@@ -790,19 +790,17 @@ def bootstrap(
         Overwrite=True,
     )
 
-    # Mirror the URL (and this deploy target) into the operator's *local* loopy.env — the same
-    # value the instance gets via SSM. The CloudFront name only exists once the distribution
-    # does, so `loopy init` couldn't record it; writing it here is what makes `loopy webhooks
-    # github` runnable straight after a deploy, with no hand-copy. Idempotent (the URL is
-    # stable across re-deploys). We deliberately do *not* register webhooks ourselves — that
-    # stays one explicit `loopy webhooks github` step. The instance id and engine port are
-    # client-side hints for the `loopy admin` SSM tunnel (which the CloudFront URL auto-routes
-    # to); the engine reads none of these.
+    # Mirror the URL into the operator's *local* loopy.env — the same value the instance gets
+    # via SSM. The CloudFront name only exists once the distribution does, so `loopy init`
+    # couldn't record it; writing it here is what makes `loopy webhooks github` runnable
+    # straight after a deploy, with no hand-copy. Idempotent (the URL is stable across
+    # re-deploys). We deliberately do *not* register webhooks ourselves — that stays one
+    # explicit `loopy webhooks github` step. The instance id and engine port are client-side
+    # hints for the `loopy admin` SSM tunnel (which the CloudFront URL auto-routes to); the
+    # engine reads none of these.
     from loopy_cli.deploy_target import (
         BOOTSTRAP_ENGINE_PORT_ENV,
         BOOTSTRAP_INSTANCE_ID_ENV,
-        DEPLOY_TARGET_ENV,
-        TARGET_BOOTSTRAP,
     )
     from loopy_runtime.secrets import write_control_plane_env
 
@@ -810,7 +808,6 @@ def bootstrap(
         root_abs,
         {
             "LOOPY_PUBLIC_URL": public_url,
-            DEPLOY_TARGET_ENV: TARGET_BOOTSTRAP,
             BOOTSTRAP_INSTANCE_ID_ENV: outputs["InstanceId"],
             BOOTSTRAP_ENGINE_PORT_ENV: str(engine_port),
         },
