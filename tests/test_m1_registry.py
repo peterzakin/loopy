@@ -113,8 +113,7 @@ def test_defaults_scalar_override_replace_lists(tmp_path):
 def test_agent_missing_model_or_harness_reports_e507(tmp_path):
     # Both keys are mandatory (directly or via defaults.agent) — nothing is inferred.
     registry = (
-        "sandboxes:\n  default:\n    provider: local\n"
-        "agents:\n  Worker: { sandbox: default }\n"
+        "sandboxes:\n  default:\n    provider: local\nagents:\n  Worker: { sandbox: default }\n"
     )
     write_project(tmp_path, {"registry.yml": registry})
     assert_code(compile_project(tmp_path), codes.E507, file="registry.yml")
@@ -233,6 +232,39 @@ def test_duplicate_name_across_categories_reports_e211(tmp_path):
     registry = "agents:\n  Incident: {}\nevents:\n  Incident:\n    fields: {}\n"
     write_project(tmp_path, {"registry.yml": registry})
     assert_code(compile_project(tmp_path), codes.E211)
+
+
+def test_null_sandbox_key_reports_e001_not_crash(tmp_path):
+    # A null YAML key (`~:`) must produce a clean diagnostic, not crash the compiler
+    # (regression: it used to hit sandbox_env_prefix(None) with an uncaught TypeError).
+    write_project(tmp_path, {"registry.yml": "sandboxes:\n  ~:\n    provider: local\n"})
+    assert_code(compile_project(tmp_path), codes.E001, file="registry.yml")
+
+
+def test_non_string_agent_key_reports_e001_not_crash(tmp_path):
+    # A numeric key would crash pydantic's `name: str`; it must be a clean E001 instead.
+    write_project(tmp_path, {"registry.yml": "agents:\n  123:\n    model: m\n"})
+    assert_code(compile_project(tmp_path), codes.E001)
+
+
+def test_null_event_key_reports_e001_not_crash(tmp_path):
+    write_project(tmp_path, {"registry.yml": "events:\n  ~:\n    fields: {}\n"})
+    assert_code(compile_project(tmp_path), codes.E001)
+
+
+def test_non_mapping_entity_section_reports_e001_not_crash(tmp_path):
+    # `sandboxes:` as a list (not a mapping) must be a clean diagnostic, not an AttributeError.
+    write_project(tmp_path, {"registry.yml": "sandboxes:\n  - a\n  - b\n"})
+    assert_code(compile_project(tmp_path), codes.E001, file="registry.yml")
+
+
+def test_malformed_key_does_not_block_valid_siblings(tmp_path):
+    # The bad entry is skipped with a diagnostic; well-formed siblings still load.
+    registry = "sandboxes:\n  ~:\n    provider: local\n  Good:\n    provider: local\n"
+    write_project(tmp_path, {"registry.yml": registry})
+    result = compile_project(tmp_path)
+    assert "Good" in result.project.registry.sandboxes
+    assert codes.E001 in result_codes(result)
 
 
 def test_discovery_inventories_all_four_kinds(tmp_path):
