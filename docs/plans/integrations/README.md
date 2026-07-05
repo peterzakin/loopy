@@ -1,23 +1,26 @@
-# Built-in Sentry integration
+# Built-in integrations
 
-Plan for shipping **Sentry** as the second first-class built-in integration, the same way
-`Github.*` works today: a workflow names `on: Sentry.IssueCreated` and the compiler injects
-the event contract and a producing sensor with zero `registry.yml` and zero `sensors/` code.
+Plans for shipping outside services as first-class built-ins, the same way `Github.*` works
+today: a workflow names an event in its `on:` and the compiler injects the event contract and a
+producing sensor with zero `registry.yml` and zero `sensors/` code.
 
-Sentry is the natural next integration: it drives the canonical `Incident` loop (error →
-triage → fix) and is already the hand-written example sensor in
-`examples/incidents/sensors/sensors.py`, so this promotes existing example code into the
-platform.
+- **[sentry.md](sentry.md)** — **Sentry** (`Sentry.IssueCreated` / `IssueResolved` /
+  `AlertTriggered`). The second built-in, now shipped. Drives the canonical `Incident` loop
+  (error → triage → fix) and promotes the hand-written example sensor in
+  `examples/incidents/sensors/sensors.py` into the platform. Self-contained: it includes the
+  minimal generalization of the GitHub-only machinery (a second webhook path, mapper set,
+  secret, and verifier) and deliberately deferred a full multi-provider registry to a third
+  provider.
+- **[datadog.md](datadog.md)** — **Datadog** (`Datadog.MonitorAlerted` / `MonitorRecovered`).
+  The third built-in and the one that lands the deferred registry seam. Datadog differs from the
+  first two in two ways that shape the whole plan: its webhook **signs no body** (auth is a
+  shared secret in a custom header, so the verifier is a token compare, not an HMAC), and its
+  payload is **user-templated**, so the built-in must prescribe a canonical payload the user
+  pastes once.
 
-**The plan:** [sentry.md](sentry.md). It is self-contained — it includes the minimal
-generalization of the GitHub-only machinery that Sentry needs (a second webhook path, mapper
-set, secret, and verifier), and defers a full multi-provider registry until a third provider
-actually lands.
-
-> Scope note: earlier drafts of this branch also planned Slack, Linear, and Datadog. Those are
-> removed so this PR does one thing well. They can return as their own PRs later; the Sentry
-> work deliberately leaves seams (see [sentry.md](sentry.md) "Minimal generalization") that a
-> third provider would generalize further.
+> Scope note: earlier drafts of this branch also planned Slack and Linear. Those remain
+> deferred so each PR does one thing well; they can return as their own plans later, reusing the
+> same `BuiltinProvider` machinery.
 
 ## How a built-in works today (GitHub), for reference
 
