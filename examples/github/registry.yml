@@ -16,7 +16,7 @@ defaults:
     harness: claude-code
 
 # Sandbox — compute + egress. `gh` is on PATH so an agent can post review comments via the
-# injected GitHub token. Egress is open by default; add `network: [...]` to restrict it.
+# injected GitHub token. Egress is open by default.
 sandboxes:
   BaseSandbox:
     provider: daytona
