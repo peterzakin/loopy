@@ -298,7 +298,7 @@ def check_repo_access(registry, creds) -> list[Finding]:  # noqa: ANN001 - Regis
 
     def _warn(detail: str) -> list[Finding]:
         return [
-            Finding("warn", f"couldn't verify repo access: {detail}", "run `loopy auth status`")
+            Finding("warn", f"couldn't verify repo access: {detail}", "run `loopy auth github`")
         ]
 
     try:
@@ -311,7 +311,7 @@ def check_repo_access(registry, creds) -> list[Finding]:  # noqa: ANN001 - Regis
             Finding(
                 "error",
                 "the GitHub App is configured but not installed on any account yet",
-                "install it — run `loopy auth status` for the URL, then pick your repos",
+                "install it — run `loopy auth github` for the URL, then pick your repos",
             )
         ]
     if len(installations) > 1:
@@ -335,6 +335,6 @@ def check_repo_access(registry, creds) -> list[Finding]:  # noqa: ANN001 - Regis
             "error",
             f"the GitHub App can't access {', '.join(missing)} — "
             f"{'it is' if is_one else 'they are'} not in its selected repositories",
-            "add the repo(s) to the App's installation (run `loopy auth status` for the URL)",
+            "add the repo(s) to the App's installation (run `loopy auth github` for the URL)",
         )
     ]

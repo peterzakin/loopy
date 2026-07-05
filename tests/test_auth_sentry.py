@@ -191,3 +191,49 @@ def test_localhost_url_warns_but_proceeds(tmp_path, monkeypatch, fake_api, capsy
     )
     assert "won't reach it" in capsys.readouterr().out
     assert load_control_plane_env(tmp_path)["SENTRY_WEBHOOK_SECRET"] == "sec_live_xyz"
+
+
+# ── `loopy auth sentry`: status when registered, else create ─────────────────
+
+
+def _invoke(args):
+    from typer.testing import CliRunner
+
+    from loopy_cli import app
+
+    return CliRunner().invoke(app, args)
+
+
+def test_command_shows_status_when_registered(tmp_path, monkeypatch):
+    """A stored secret makes `loopy auth sentry` print status, not re-run token collection."""
+    write_control_plane_env(
+        tmp_path, {"SENTRY_WEBHOOK_SECRET": "sec", "SENTRY_APP_SLUG": "loopy-a1b2"}
+    )
+    ran = {"auth": False}
+    monkeypatch.setattr(auth, "run_sentry_auth", lambda **_k: ran.__setitem__("auth", True))
+
+    result = _invoke(["auth", "sentry", "--root", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "loopy-a1b2" in result.output and "configured" in result.output
+    assert ran["auth"] is False  # showed status, did not start token collection
+
+
+def test_command_starts_auth_when_unregistered(tmp_path, monkeypatch):
+    """With no stored secret, `loopy auth sentry` starts token collection."""
+    ran = {"auth": False}
+    monkeypatch.setattr(auth, "run_sentry_auth", lambda **_k: ran.__setitem__("auth", True))
+
+    result = _invoke(["auth", "sentry", "--root", str(tmp_path)])
+    assert result.exit_code == 0
+    assert ran["auth"] is True
+
+
+def test_command_force_reruns_auth_even_when_registered(tmp_path, monkeypatch):
+    """--force overrides the status short-circuit and re-runs token collection."""
+    write_control_plane_env(tmp_path, {"SENTRY_WEBHOOK_SECRET": "sec"})
+    ran = {"auth": False}
+    monkeypatch.setattr(auth, "run_sentry_auth", lambda **_k: ran.__setitem__("auth", True))
+
+    result = _invoke(["auth", "sentry", "--root", str(tmp_path), "--force"])
+    assert result.exit_code == 0
+    assert ran["auth"] is True

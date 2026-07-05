@@ -89,7 +89,7 @@ injected (scoped, short-lived) into the sandbox on *both* `loopy run` and `loopy
 
 ```bash
 loopy auth github          # App Manifest flow; ~2 clicks; writes .loopy/ + loopy.env
-loopy auth status          # verify, then visit the printed install URL to pick repos
+loopy auth github          # re-run once configured to verify + reprint the install URL
 ```
 
 With an App configured you can leave `GITHUB_TOKEN` out of `base.env` entirely. Without one,

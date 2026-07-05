@@ -253,7 +253,7 @@ def _load_creds(root: str | Path):  # -> AppCredentials
 
 # After the manifest flow *creates* the App, installing it on repos is a separate manual
 # step on GitHub. Poll this often, for at most this long, for the install to land before
-# giving up and pointing the user at `loopy auth status` to finish later.
+# giving up and pointing the user at `loopy auth github` to finish later.
 _INSTALL_POLL_INTERVAL_SECONDS = 3
 _INSTALL_WAIT_TIMEOUT_SECONDS = 300
 
@@ -305,14 +305,14 @@ def _wait_for_installation(
             if monotonic() >= deadline:
                 typer.echo(
                     "  ⓘ Timed out waiting for the install. Finish it on GitHub, then run "
-                    "`loopy auth status` to verify."
+                    "`loopy auth github` to verify."
                 )
                 return None
             sleep(poll_interval)
     except KeyboardInterrupt:
         typer.echo(
             "\n  (skipped — App created but not installed yet. Install it, then run "
-            "`loopy auth status`.)"
+            "`loopy auth github`.)"
         )
         return None
 
@@ -428,23 +428,7 @@ def run_github_auth(
     )
 
 
-@auth_app.command()
-def github(
-    org: str | None = typer.Option(None, "--org", help="Create under this org (default: account)."),
-    name: str | None = typer.Option(None, "--name", help="App name (default: loopy[-org])."),
-    port: int = typer.Option(DEFAULT_PORT, "--port", help="Local callback port (0 = ephemeral)."),
-    root: Path = typer.Option(Path("."), "--root", help="Project root (where loopy.env lives)."),
-    force: bool = typer.Option(False, "--force", help="Overwrite existing stored App credentials."),
-    no_browser: bool = typer.Option(False, "--no-browser", help="Print the URL, don't open it."),
-) -> None:
-    """Create your own GitHub App via the manifest flow and store its credentials."""
-    run_github_auth(org=org, name=name, port=port, root=root, force=force, no_browser=no_browser)
-
-
-@auth_app.command()
-def status(
-    root: Path = typer.Option(Path("."), "--root", help="Project root (where loopy.env lives)."),
-) -> None:
+def _github_status(root: str | Path) -> None:
     """Show stored GitHub App credentials and verify they can mint tokens."""
     from loopy_runtime.scm import github_app
 
@@ -457,6 +441,29 @@ def status(
 
     typer.echo(typer.style("  ✓", fg=typer.colors.GREEN) + f" GitHub App id {creds.app_id} set")
     _verify(root)
+
+
+@auth_app.command()
+def github(
+    org: str | None = typer.Option(None, "--org", help="Create under this org (default: account)."),
+    name: str | None = typer.Option(None, "--name", help="App name (default: loopy[-org])."),
+    port: int = typer.Option(DEFAULT_PORT, "--port", help="Local callback port (0 = ephemeral)."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root (where loopy.env lives)."),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing stored App credentials."),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Print the URL, don't open it."),
+) -> None:
+    """Show the GitHub App status if one is registered, else create it via the manifest flow.
+
+    `loopy auth github` shows and verifies the stored GitHub App when credentials already
+    exist; otherwise it runs the manifest flow to create one. Pass --force to re-run the
+    flow and overwrite existing credentials.
+    """
+    from loopy_runtime.secrets import load_control_plane_env
+
+    if not force and load_control_plane_env(root).get("GITHUB_APP_ID"):
+        _github_status(root)
+        return
+    run_github_auth(org=org, name=name, port=port, root=root, force=force, no_browser=no_browser)
 
 
 # ── Sentry: create a Custom Integration so `Sentry.*` built-ins have a producer ──────────
@@ -663,6 +670,24 @@ def _fail_sentry(exc) -> None:  # -> NoReturn
     raise typer.Exit(code=1)
 
 
+def _sentry_status(root: str | Path) -> None:
+    """Show the stored Sentry Custom Integration credentials."""
+    from loopy_runtime.secrets import load_control_plane_env
+
+    slug = load_control_plane_env(root).get("SENTRY_APP_SLUG")
+    detail = f" '{slug}'" if slug else ""
+    typer.echo(
+        typer.style("  ✓", fg=typer.colors.GREEN)
+        + f" Sentry integration{detail} configured (SENTRY_WEBHOOK_SECRET set)"
+    )
+    typer.echo(
+        typer.style(
+            "  Re-run with --force to recreate, --update to repoint its webhook URL.",
+            fg=typer.colors.BRIGHT_BLACK,
+        )
+    )
+
+
 @auth_app.command()
 def sentry(
     org: str | None = typer.Option(
@@ -687,11 +712,22 @@ def sentry(
         False, "--update", help="Repoint the stored integration's webhook URL."
     ),
 ) -> None:
-    """Create a Sentry Custom Integration for the built-in `Sentry.*` events.
+    """Show the Sentry integration status if one is registered, else create it.
 
-    Reads the bootstrap token from $SENTRY_AUTH_TOKEN (else prompts). The token creates the
-    integration and is not stored; only the Client Secret (SENTRY_WEBHOOK_SECRET) is.
+    When a Client Secret is already stored, `loopy auth sentry` prints its status;
+    otherwise it creates a Custom Integration for the built-in `Sentry.*` events. Reads the
+    bootstrap token from $SENTRY_AUTH_TOKEN (else prompts). The token creates the integration
+    and is not stored; only the Client Secret (SENTRY_WEBHOOK_SECRET) is. Pass --force to
+    recreate, --update to repoint the webhook URL, or --manual to paste a secret.
     """
+    from loopy_runtime.secrets import load_control_plane_env
+
+    if (
+        not (force or manual or update)
+        and load_control_plane_env(root).get("SENTRY_WEBHOOK_SECRET")
+    ):
+        _sentry_status(root)
+        return
     run_sentry_auth(
         org=org,
         webhook_url=webhook_url,

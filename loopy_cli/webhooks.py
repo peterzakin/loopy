@@ -191,7 +191,7 @@ def sync_github_webhooks(
                 "recreate the App with `loopy auth github --force`"
             )
         if status == 404:
-            return "the App is not installed on this repo — run `loopy auth status` for the URL"
+            return "the App is not installed on this repo — run `loopy auth github` for the URL"
         return str(exc)
 
     for slug in repos:
