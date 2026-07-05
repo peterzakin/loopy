@@ -441,6 +441,12 @@ def _github_status(root: str | Path) -> None:
 
     typer.echo(typer.style("  ✓", fg=typer.colors.GREEN) + f" GitHub App id {creds.app_id} set")
     _verify(root)
+    typer.echo(
+        typer.style(
+            "  Re-run with --force to create a new App and overwrite these credentials.",
+            fg=typer.colors.BRIGHT_BLACK,
+        )
+    )
 
 
 @auth_app.command()

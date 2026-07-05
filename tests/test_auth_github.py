@@ -389,6 +389,7 @@ def test_command_shows_status_when_registered(monkeypatch, tmp_path):
     result = _invoke(["auth", "github", "--root", str(tmp_path)])
     assert result.exit_code == 0
     assert "42" in result.output  # reported the stored App id
+    assert "--force" in result.output  # surfaced how to run the flow again
     assert ran["auth"] is False  # showed status, did not start the manifest flow
 
 
