@@ -274,3 +274,17 @@ def test_help_rejects_subcommand_of_a_leaf():
     result = runner.invoke(app, ["help", "run", "extra"])
     assert result.exit_code == 1
     assert "no subcommands" in result.output
+
+
+def test_bare_loopy_prints_help_and_exits_zero():
+    """A bare `loopy` (no subcommand) prints the command overview and exits 0 — a request to
+    see what the tool does, not a usage error (Typer's default would be exit 2)."""
+    result = runner.invoke(app, [])
+    assert result.exit_code == 0, result.output
+    for command in ("init", "compile", "doctor", "run", "trigger", "help", "auth"):
+        assert command in result.output
+
+
+def test_bare_loopy_matches_help_flag():
+    """The no-args overview is the same output as `loopy --help`."""
+    assert runner.invoke(app, []).output == runner.invoke(app, ["--help"]).output
