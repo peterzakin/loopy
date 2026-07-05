@@ -676,3 +676,45 @@ def test_init_refuses_without_a_terminal(tmp_path):
     assert result.exit_code == 1
     assert "needs a terminal" in result.output
     assert not (tmp_path / "demo").exists()  # nothing scaffolded on refusal
+
+
+def test_explain_github_webhooks_when_url_present(tmp_path, capsys):
+    """With LOOPY_PUBLIC_URL recorded, the closing guidance points straight at the one
+    command that registers native Github.* delivery, and names the delivery endpoint."""
+    from loopy_runtime.secrets import write_control_plane_env
+
+    write_control_plane_env(tmp_path, {"LOOPY_PUBLIC_URL": "https://loopy.example.com"})
+
+    loopy_cli._explain_github_webhooks(tmp_path, "byo")
+
+    out = capsys.readouterr().out
+    assert "Native GitHub events" in out
+    assert "loopy webhooks github" in out
+    assert "https://loopy.example.com/hooks/github" in out
+    # No URL to acquire, so we don't send them down the bootstrap / set-it-yourself path.
+    assert "No LOOPY_PUBLIC_URL yet" not in out
+
+
+def test_explain_github_webhooks_byo_without_url_offers_both_paths(tmp_path, capsys):
+    """Bring-your-own with no URL yet: get one first — either bootstrap it or set it by hand —
+    then register delivery. Both options are named."""
+    loopy_cli._explain_github_webhooks(tmp_path, "byo")
+
+    out = capsys.readouterr().out
+    assert "No LOOPY_PUBLIC_URL yet" in out
+    assert "loopy deploy bootstrap" in out
+    assert "loopy init" in out  # the set-it-yourself path
+    assert "loopy webhooks github" in out
+
+
+def test_explain_github_webhooks_bootstrap_without_url_points_at_deploy(tmp_path, capsys):
+    """Bootstrap target mints the URL at deploy, so the guidance leads with that single
+    command rather than the bring-your-own fork."""
+    loopy_cli._explain_github_webhooks(tmp_path, "bootstrap")
+
+    out = capsys.readouterr().out
+    assert "No LOOPY_PUBLIC_URL yet" in out
+    assert "loopy deploy bootstrap" in out
+    assert "loopy webhooks github" in out
+    # The bootstrap path doesn't send them to hand-edit loopy.env / re-run init.
+    assert "set it yourself" not in out
