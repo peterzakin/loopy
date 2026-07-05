@@ -2264,17 +2264,16 @@ def env(
 ) -> None:
     """Print the production environment block to paste into your platform's env settings.
 
-    Emits, from your local config, the variables to set on the host: the engine's control-plane
-    creds (from loopy.env), REDIS_URL as an editable placeholder, and one comment-delimited group
-    per sandbox emitting its `<PREFIX>_<KEY>` passthrough vars (values read from the sandbox's
-    env_file). LOOPY_PUBLIC_URL is omitted — it is laptop-side. This prints secrets to stdout on
-    purpose, for a one-shot paste into a platform's ".env import" field; it is never logged. Do
-    not commit the output.
+    Emits, from your local config, the engine's control-plane creds (from loopy.env) and
+    REDIS_URL as an editable placeholder. LOOPY_PUBLIC_URL is omitted — it is laptop-side.
+    Sandbox secrets are not emitted here: each sandbox reads its own `env_file`, which a deploy
+    pushes to the target directly. This prints secrets to stdout on purpose, for a one-shot paste
+    into a platform's ".env import" field; it is never logged. Do not commit the output.
     """
-    from loopy_core.registry.sandbox_env import sandbox_env_prefix
-    from loopy_runtime.secrets import load_control_plane_env, parse_env_file
+    from loopy_runtime.secrets import load_control_plane_env
 
-    registry = _compile_or_exit(path).project.registry
+    # Compile so an uncompilable project errors before we emit anything.
+    _compile_or_exit(path)
     root = Path(path)
     control = load_control_plane_env(root)
 
@@ -2290,19 +2289,6 @@ def env(
         "# LOOPY_PUBLIC_URL is laptop-side (webhook registration, loopy admin) — "
         "keep it in your local loopy.env, not here"
     )
-
-    for name in sorted(registry.sandboxes):
-        sandbox = registry.sandboxes[name]
-        if not sandbox.env:
-            continue
-        prefix = sandbox_env_prefix(name)
-        values: dict[str, str] = {}
-        for rel in sandbox.env_file:
-            values.update(parse_env_file(root / rel))
-        lines.append("")
-        lines.append(f"# --- Sandbox: {name} — forwarded to the agent (prefix stripped) ---")
-        for key in sandbox.env:
-            lines.append(f"{prefix}_{key}={values.get(key, '')}")
 
     typer.echo("\n".join(lines))
 

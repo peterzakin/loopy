@@ -71,8 +71,7 @@ sandboxes:
   BaseSandbox:
     provider: daytona                          # or `docker` for a local run
     image: { debian_slim: "3.12", apt: [git, gh], workdir: /home/loopy, user: loopy }
-    env_file: secrets/base.env                   # supplies these keys in local dev
-    env: [ANTHROPIC_API_KEY]                     # forwarded from the platform env in production
+    env_file: secrets/base.env             # injected as the sandbox's env (e.g. ANTHROPIC_API_KEY)
     __REPOS_LINE__
 
 agents:
