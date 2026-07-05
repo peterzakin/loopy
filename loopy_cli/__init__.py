@@ -486,6 +486,11 @@ def init(
     # sees the *actual* remaining gaps — anything resolved above is already gone.
     _report_remaining_setup(target, name, deploy_target)
 
+    # The built-in `Github.*` sensors only fire once GitHub can deliver to the engine, and
+    # that hinges on one thing (a public URL) with a different next step on each side. Spell
+    # it out rather than leaving it implicit in the commands list above.
+    _explain_github_webhooks(target, deploy_target)
+
 
 def _prompt_for_repos() -> list[str]:
     """Ask which repo(s) the agent should work on, strongly discouraging the repo-less path.
@@ -883,6 +888,103 @@ def _report_remaining_setup(target: Path, name: str, deploy_target: str) -> None
             + typer.style(
                 "             # compiles + starts the engine", fg=typer.colors.BRIGHT_BLACK
             )
+        )
+    typer.echo()
+
+
+def _explain_github_webhooks(target: Path, deploy_target: str) -> None:
+    """Explain how to turn on the built-in `Github.*` events, branching on the public URL.
+
+    The GitHub sensors deliver over *repo* webhooks (not an App webhook), registered once by
+    `loopy webhooks github` — but GitHub can only deliver to a public HTTPS URL, so the whole
+    step hinges on whether `LOOPY_PUBLIC_URL` is set yet. That single fork has a genuinely
+    different next command on each side, so we say it plainly rather than leaving the user to
+    infer it from the commands list:
+
+    - URL already recorded: `loopy webhooks github` works right now — that's the next command.
+    - No URL yet: get one first. The bootstrap target mints it at `loopy deploy bootstrap`;
+      bring-your-own means recording a domain or dev-tunnel URL (`loopy init` re-prompts, or
+      set `LOOPY_PUBLIC_URL` in loopy.env by hand). Then `loopy webhooks github`.
+    """
+    from loopy_cli.deploy_target import TARGET_BOOTSTRAP
+    from loopy_runtime.secrets import load_control_plane_env
+
+    public_url = load_control_plane_env(target).get("LOOPY_PUBLIC_URL")
+
+    typer.echo(
+        typer.style("  Native GitHub events", bold=True)
+        + typer.style(
+            "  (the built-in Github.* sensors — PRs, issues, pushes)",
+            fg=typer.colors.BRIGHT_BLACK,
+        )
+    )
+    typer.echo(
+        typer.style(
+            "    These fire only once GitHub delivers repo webhooks to the engine. "
+            "`loopy webhooks github`",
+            fg=typer.colors.BRIGHT_BLACK,
+        )
+    )
+    typer.echo(
+        typer.style(
+            "    registers that delivery; it needs a public HTTPS URL (LOOPY_PUBLIC_URL) to "
+            "deliver to.",
+            fg=typer.colors.BRIGHT_BLACK,
+        )
+    )
+
+    if public_url:
+        typer.echo(
+            "    "
+            + typer.style("✓", fg=typer.colors.GREEN)
+            + f" LOOPY_PUBLIC_URL is set ({public_url}) — GitHub delivers to "
+            + typer.style(f"{public_url}/hooks/github", fg=typer.colors.BRIGHT_BLACK)
+            + "."
+        )
+        typer.echo("    Next:")
+        typer.echo(
+            typer.style("      loopy webhooks github", fg=typer.colors.BRIGHT_WHITE)
+            + typer.style("  # register delivery now", fg=typer.colors.BRIGHT_BLACK)
+        )
+    else:
+        typer.echo(
+            "    "
+            + typer.style("⚠", fg=typer.colors.YELLOW)
+            + " No LOOPY_PUBLIC_URL yet — set one before registering delivery:"
+        )
+        if deploy_target == TARGET_BOOTSTRAP:
+            typer.echo(
+                typer.style("      loopy deploy bootstrap", fg=typer.colors.BRIGHT_WHITE)
+                + typer.style(
+                    "  # provisions the host and writes LOOPY_PUBLIC_URL for you",
+                    fg=typer.colors.BRIGHT_BLACK,
+                )
+            )
+        else:
+            typer.echo(
+                typer.style(
+                    "      • bootstrap it: ", fg=typer.colors.BRIGHT_BLACK
+                )
+                + typer.style("loopy deploy bootstrap", fg=typer.colors.BRIGHT_WHITE)
+                + typer.style(
+                    "  (provisions a host and writes LOOPY_PUBLIC_URL)",
+                    fg=typer.colors.BRIGHT_BLACK,
+                )
+            )
+            typer.echo(
+                typer.style(
+                    "      • or set it yourself: re-run ", fg=typer.colors.BRIGHT_BLACK
+                )
+                + typer.style("loopy init", fg=typer.colors.BRIGHT_WHITE)
+                + typer.style(
+                    ", or add LOOPY_PUBLIC_URL (a domain or dev-tunnel URL) to loopy.env",
+                    fg=typer.colors.BRIGHT_BLACK,
+                )
+            )
+        typer.echo(
+            typer.style("      then ", fg=typer.colors.BRIGHT_BLACK)
+            + typer.style("loopy webhooks github", fg=typer.colors.BRIGHT_WHITE)
+            + typer.style("  # register delivery", fg=typer.colors.BRIGHT_BLACK)
         )
     typer.echo()
 
