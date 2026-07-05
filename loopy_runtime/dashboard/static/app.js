@@ -22,6 +22,10 @@ const state = {
 const $ = (sel) => document.querySelector(sel);
 
 // ── helpers ──────────────────────────────────────────────────────────────
+// API and asset URLs are relative (no leading slash) so they resolve against the
+// document's base — the page serves either at the site root (`loopy admin`, the remote
+// proxy) or under `/admin` when mounted on the engine's webhook server, and a leading
+// slash would send every request to the wrong prefix and 404.
 async function getJSON(url) {
   const res = await fetch(url, { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -180,7 +184,7 @@ async function refreshRuns() {
   const q = state.filter ? `?state=${encodeURIComponent(state.filter)}` : "";
   let runs;
   try {
-    runs = await getJSON(`/api/runs${q}`);
+    runs = await getJSON(`api/runs${q}`);
   } catch (e) {
     return; // transient; the next poll retries
   }
@@ -226,7 +230,7 @@ async function refreshDetail() {
   if (!state.selected) return;
   let detail;
   try {
-    detail = await getJSON(`/api/runs/${encodeURIComponent(state.selected)}`);
+    detail = await getJSON(`api/runs/${encodeURIComponent(state.selected)}`);
   } catch (e) {
     return;
   }
@@ -300,7 +304,7 @@ async function loadSensors() {
   root.replaceChildren();
   let d;
   try {
-    d = await getJSON("/api/sensors");
+    d = await getJSON("api/sensors");
   } catch (e) {
     root.appendChild(el("div", "empty", "Could not load sensors."));
     return;
@@ -353,7 +357,7 @@ async function loadWorkflows() {
   root.replaceChildren();
   let d;
   try {
-    d = await getJSON("/api/workflows");
+    d = await getJSON("api/workflows");
   } catch (e) {
     root.appendChild(el("div", "empty", "Could not load workflows."));
     return;
@@ -493,7 +497,7 @@ async function loadRegistry() {
   root.replaceChildren();
   let d;
   try {
-    d = await getJSON("/api/registry");
+    d = await getJSON("api/registry");
   } catch (e) {
     root.appendChild(el("div", "empty", "Could not load registry."));
     return;
@@ -614,7 +618,7 @@ function initFilters() {
 
 async function loadMeta() {
   try {
-    const meta = await getJSON("/api/meta");
+    const meta = await getJSON("api/meta");
     state.manifest = !!meta.manifest_present;
   } catch (e) {
     state.manifest = null;

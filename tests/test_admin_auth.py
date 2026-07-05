@@ -143,6 +143,28 @@ def test_engine_mounts_admin_open_on_loopback():
     assert client.get("/admin/healthz").json() == {"ok": True}
 
 
+def test_mounted_admin_assets_load_under_the_prefix():
+    # Regression: with root-relative paths the UI shell's CSS/JS 404 under the /admin mount
+    # (assets live at /admin/static/*, not /static/*), leaving the dashboard unstyled. The
+    # shell must use document-relative paths so they resolve against the prefix.
+    import re
+
+    client, _ = _engine_with_admin("127.0.0.1", {})
+
+    # A bare /admin (no trailing slash) redirects to /admin/, which is the base the browser
+    # resolves relative asset URLs against.
+    assert client.get("/admin", follow_redirects=False).status_code == 307
+    index = client.get("/admin/")
+    assert index.status_code == 200
+
+    refs = re.findall(r'(?:href|src)="([^"]+)"', index.text)
+    assets = [r for r in refs if "static/" in r]
+    assert assets, "expected the shell to reference its static assets"
+    for ref in assets:
+        assert not ref.startswith("/"), f"asset {ref!r} is root-relative and breaks under /admin"
+        assert client.get(f"/admin/{ref}").status_code == 200
+
+
 def test_engine_skips_admin_mount_without_token_on_non_loopback():
     # fail-closed by absence: the engine still serves webhooks, but /admin does not exist
     client, mounted = _engine_with_admin("0.0.0.0", {})
