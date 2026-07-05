@@ -52,9 +52,8 @@ def _sandbox(sb: Sandbox) -> dict:
         "image": sb.image,
         "network": sb.network,
         "env_file": sb.env_file,
-        "repos": [
-            {"url": r.url, "ref": r.ref, "path": r.path, "depth": r.depth} for r in sb.repos
-        ],
+        "env": sb.env,
+        "repos": [{"url": r.url, "ref": r.ref, "path": r.path, "depth": r.depth} for r in sb.repos],
     }
 
 

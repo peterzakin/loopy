@@ -140,6 +140,7 @@
     },
     "sandboxes": {
       "default": {
+        "env": [],
         "env_file": [
           "secrets/base.env"
         ],
@@ -151,9 +152,7 @@
           "user": "daytona",
           "workdir": "/home/daytona"
         },
-        "network": [
-          "github.com"
-        ],
+        "network": [],
         "provider": "daytona",
         "repos": [
           {

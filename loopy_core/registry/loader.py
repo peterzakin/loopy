@@ -25,6 +25,11 @@ from loopy_core.registry.model import (
     Sandbox,
     WorkflowLimit,
 )
+from loopy_core.registry.sandbox_env import (
+    is_reserved_env_key,
+    is_valid_env_name,
+    sandbox_env_prefix,
+)
 from loopy_core.registry.types import desugar
 from loopy_core.span import Span, span_at
 
@@ -96,6 +101,7 @@ def load_registry(inv: Inventory, diags: DiagnosticCollector) -> Registry:
     limits = _load_limits(data.get("limits"), file, _line_of(data, "limits"), diags)
 
     _check_naming(sandboxes, agents, events, diags)
+    _check_env_namespaces(sandboxes, diags)
 
     return Registry(sandboxes=sandboxes, agents=agents, events=events, limits=limits)
 
@@ -160,9 +166,7 @@ def _load_limits(value: object, file: str, line: int, diags: DiagnosticCollector
     return Limits(cascade_spend=cascade_spend, workflows=workflows)
 
 
-def _load_sandboxes(
-    sb_map: Mapping, file: str, diags: DiagnosticCollector
-) -> dict[str, Sandbox]:
+def _load_sandboxes(sb_map: Mapping, file: str, diags: DiagnosticCollector) -> dict[str, Sandbox]:
     out: dict[str, Sandbox] = {}
     for name, body in sb_map.items():
         body = body or {}
@@ -175,16 +179,86 @@ def _load_sandboxes(
                 f"sandbox '{name}' must declare a provider: (local | docker | daytona)",
                 span=span_at(file, _line_of(sb_map, name)),
             )
+        env = _as_str_list(body.get("env"))
+        _check_env_keys(name, env, file, _line_of(sb_map, name), diags)
         out[name] = Sandbox(
             name=name,
             provider=provider,
             image=dict(body.get("image") or {}),
             network=list(body.get("network") or []),
             env_file=_as_str_list(body.get("env_file")),  # path reference only; not read here
+            env=env,  # names only; values resolve at run time (env_file / platform env)
             repos=_load_repos(body.get("repos"), file, _line_of(sb_map, name), diags),
             span=span_at(file, _line_of(sb_map, name)),
         )
     return out
+
+
+def _check_env_keys(
+    sandbox: str, env: list[str], file: str, line: int, diags: DiagnosticCollector
+) -> None:
+    """E216: every `env:` entry must be a valid env-var name and not a control-plane key.
+
+    Rejects wildcards (a `*` is not a valid name, so there is no forward-everything hatch) and
+    reserved names (`LOOPY_*`, `DAYTONA_API_KEY`, ...) whose forwarding would leak an infra
+    secret into an untrusted sandbox. The check is applied to the *resolved* variable name the
+    runtime actually reads — `<PREFIX>_<KEY>`, where PREFIX comes from the sandbox name — not
+    just the bare key, so a reserved name can't be reconstructed by splitting it across the
+    name/key boundary (e.g. a sandbox named `Github` with `env: [APP_PRIVATE_KEY]` would resolve
+    to `GITHUB_APP_PRIVATE_KEY`)."""
+    prefix = sandbox_env_prefix(sandbox)
+    for key in env:
+        if not is_valid_env_name(key):
+            diags.error(
+                codes.E216,
+                f"sandbox '{sandbox}' env: entry {key!r} is not a valid environment variable "
+                f"name (letters, digits, underscore; no wildcards)",
+                span=span_at(file, line),
+            )
+            continue
+        resolved = f"{prefix}_{key}"
+        if is_reserved_env_key(key):
+            diags.error(
+                codes.E216,
+                f"sandbox '{sandbox}' env: may not forward the control-plane key {key!r} "
+                f"(reserved for the engine; forwarding it would leak an infra secret)",
+                span=span_at(file, line),
+            )
+        elif is_reserved_env_key(resolved):
+            diags.error(
+                codes.E216,
+                f"sandbox '{sandbox}' env: entry {key!r} resolves to the control-plane variable "
+                f"{resolved!r} (the sandbox name prefixes it); rename the sandbox or drop the key "
+                f"so it can't read an infra secret",
+                span=span_at(file, line),
+            )
+
+
+def _check_env_namespaces(sandboxes: dict[str, Sandbox], diags: DiagnosticCollector) -> None:
+    """E217: two sandboxes must not forward the same production env variable.
+
+    A forwarded key resolves to `<PREFIX>_<KEY>` in the engine environment. If two distinct
+    sandboxes resolve a declared key to the same variable name, one platform variable would feed
+    both — ambiguous. Checking the resolved name (not just the prefix) covers both a shared name
+    prefix (`Web-app` and `Web_app`, both key `KEY` -> `WEB_APP_KEY`) and a cross-prefix
+    reconstruction (`Web` + `APP_KEY` vs `Web_app` + `KEY`, both `WEB_APP_KEY`)."""
+    owners: dict[str, str] = {}  # resolved var name -> first sandbox that forwards it
+    for sb in sandboxes.values():
+        prefix = sandbox_env_prefix(sb.name)
+        seen_here: set[str] = set()  # dedupe within one sandbox; iterate env in order
+        for key in sb.env:
+            resolved = f"{prefix}_{key}"
+            if resolved in seen_here:
+                continue
+            seen_here.add(resolved)
+            owner = owners.setdefault(resolved, sb.name)
+            if owner != sb.name:
+                diags.error(
+                    codes.E217,
+                    f"sandbox '{sb.name}' forwards the same platform variable '{resolved}' as "
+                    f"sandbox '{owner}'; one env var can't feed both. Rename a sandbox or key.",
+                    span=sb.span,
+                )
 
 
 def _load_repos(value: object, file: str, line: int, diags: DiagnosticCollector) -> list[Repo]:
@@ -205,9 +279,7 @@ def _load_repos(value: object, file: str, line: int, diags: DiagnosticCollector)
         elif isinstance(item, Mapping):
             url = item.get("url")
             if not isinstance(url, str) or not url.strip():
-                diags.error(
-                    codes.E212, "a repo entry is missing a 'url'", span=span_at(file, line)
-                )
+                diags.error(codes.E212, "a repo entry is missing a 'url'", span=span_at(file, line))
                 continue
             depth = item.get("depth", 1)
             repos.append(

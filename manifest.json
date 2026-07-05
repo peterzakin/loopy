@@ -142,6 +142,7 @@
     },
     "sandboxes": {
       "default": {
+        "env": [],
         "env_file": [
           "secrets/base.env"
         ],
