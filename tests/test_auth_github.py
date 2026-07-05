@@ -358,7 +358,7 @@ def test_run_github_auth_no_browser_skips_open(monkeypatch, tmp_path):
 
 def test_wait_for_installation_times_out(monkeypatch, tmp_path):
     # Never installed → the wait gives up at the deadline and returns None (the caller
-    # then points the user at `loopy auth status`) rather than blocking forever.
+    # then points the user at `loopy auth github`) rather than blocking forever.
     monkeypatch.setattr(auth, "_load_creds", lambda root: object())
     monkeypatch.setattr(github_app, "list_installations", lambda creds, **k: [])
     clock = iter([0.0, 0.0, 999.0])  # deadline check, first poll, then past the deadline
@@ -366,3 +366,48 @@ def test_wait_for_installation_times_out(monkeypatch, tmp_path):
         tmp_path, timeout=10, sleep=lambda _s: None, monotonic=lambda: next(clock)
     )
     assert result is None
+
+
+# ── `loopy auth github`: status when registered, else create ─────────────────
+
+
+def _invoke(args):
+    from typer.testing import CliRunner
+
+    from loopy_cli import app
+
+    return CliRunner().invoke(app, args)
+
+
+def test_command_shows_status_when_registered(monkeypatch, tmp_path):
+    """Stored App creds make `loopy auth github` verify + report, not re-run the flow."""
+    write_control_plane_env(tmp_path, {"GITHUB_APP_ID": "42", "GITHUB_APP_PRIVATE_KEY": "PEM"})
+    ran = {"auth": False}
+    monkeypatch.setattr(auth, "run_github_auth", lambda **_k: ran.__setitem__("auth", True))
+    monkeypatch.setattr(auth, "_verify", lambda root: None)
+
+    result = _invoke(["auth", "github", "--root", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "42" in result.output  # reported the stored App id
+    assert ran["auth"] is False  # showed status, did not start the manifest flow
+
+
+def test_command_starts_flow_when_unregistered(monkeypatch, tmp_path):
+    """With no stored App, `loopy auth github` runs the manifest flow."""
+    ran = {"auth": False}
+    monkeypatch.setattr(auth, "run_github_auth", lambda **_k: ran.__setitem__("auth", True))
+
+    result = _invoke(["auth", "github", "--root", str(tmp_path)])
+    assert result.exit_code == 0
+    assert ran["auth"] is True
+
+
+def test_command_force_reruns_flow_even_when_registered(monkeypatch, tmp_path):
+    """--force overrides the status short-circuit and re-runs the manifest flow."""
+    write_control_plane_env(tmp_path, {"GITHUB_APP_ID": "42", "GITHUB_APP_PRIVATE_KEY": "PEM"})
+    ran = {"auth": False}
+    monkeypatch.setattr(auth, "run_github_auth", lambda **_k: ran.__setitem__("auth", True))
+
+    result = _invoke(["auth", "github", "--root", str(tmp_path), "--force"])
+    assert result.exit_code == 0
+    assert ran["auth"] is True
