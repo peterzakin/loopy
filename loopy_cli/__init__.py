@@ -1416,7 +1416,7 @@ def run(
 
     from loopy_runtime.bus.factory import make_event_bus
     from loopy_runtime.config import ConfigError, resolve, resolve_redis_url
-    from loopy_runtime.manifest_model import load_manifest
+    from loopy_runtime.manifest_model import ManifestSchemaError, load_manifest
     from loopy_runtime.receiver import LocalEventReceiver
     from loopy_runtime.secrets import load_control_plane_env, load_sensor_env
     from loopy_runtime.sensors.loader import (
@@ -1459,6 +1459,9 @@ def run(
             f"--out {manifest}` first, or pass the manifest path.",
             err=True,
         )
+        raise typer.Exit(code=1) from exc
+    except ManifestSchemaError as exc:
+        typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     # Sensor-layer secrets: a single runner-wide `sensors/.env`, merged into the process env so
     # in-process @sensor functions read them via os.environ. Non-override (setdefault) so a value

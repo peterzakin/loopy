@@ -9,7 +9,25 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+# The manifest schema version this engine can read. Must equal the compiler's
+# `loopy_core.compile.manifest.SCHEMA_VERSION` — they ship together in the same wheel, and
+# `test_supported_schema_version_tracks_compiler` pins them equal so a bump can't land in one
+# without the other. Extra keys are tolerated (see `_Model`), so only a *major* shape change
+# (a field's type flipping, a key moving) warrants bumping this and gating on it.
+SUPPORTED_SCHEMA_VERSION = "2"
+
+
+class ManifestSchemaError(Exception):
+    """A manifest was compiled for a schema version this engine can't read.
+
+    Raised before Pydantic validation so a version skew surfaces as one clear line naming both
+    versions and the remedy, instead of a wall of `model_type` errors from every field the new
+    shape moved. The usual cause is an engine image older than the CLI that compiled the manifest
+    (a re-deploy that reused a cached `loopy-engine:<version>` image, or a dev CLI that has run
+    ahead of the last published engine release).
+    """
 
 
 class _Model(BaseModel):
@@ -171,4 +189,28 @@ class Manifest(_Model):
 
 
 def load_manifest(path: str | Path) -> Manifest:
-    return Manifest.model_validate(json.loads(Path(path).read_text()))
+    doc = json.loads(Path(path).read_text())
+    # Gate on schema_version *before* Pydantic. A too-new manifest fails validation field by field
+    # (every moved key becomes its own error), which reads as a bug in the manifest rather than the
+    # real cause — a stale engine. Check the contract version first and say so plainly.
+    version = doc.get("schema_version")
+    if version is not None and str(version) != SUPPORTED_SCHEMA_VERSION:
+        raise ManifestSchemaError(
+            f"manifest schema_version {version!r} is not readable by this engine "
+            f"(it supports {SUPPORTED_SCHEMA_VERSION!r}). The engine is out of sync with the CLI "
+            f"that compiled this manifest — its image is older than the manifest's schema. "
+            f"Rebuild/redeploy the engine so its version matches the CLI (for an unreleased build, "
+            f"`loopy deploy bootstrap --engine-source <checkout>`)."
+        )
+    try:
+        return Manifest.model_validate(doc)
+    except ValidationError as exc:
+        # A validation failure on a version we *do* claim to support is still most often a skew
+        # (e.g. the version wasn't bumped when the shape changed). Point at that rather than let a
+        # raw Pydantic dump be the whole story.
+        raise ManifestSchemaError(
+            f"manifest at {path} did not match this engine's schema (declared schema_version "
+            f"{version!r}, engine supports {SUPPORTED_SCHEMA_VERSION!r}). This usually means the "
+            f"engine image is out of sync with the CLI that compiled the manifest; "
+            f"rebuild/redeploy the engine to match.\n\n{exc}"
+        ) from exc
