@@ -74,14 +74,13 @@ def test_dockerfile_rejects_nonexistent_directory(tmp_path):
     assert not (tmp_path / "nope").exists()  # no partial write / dir creation
 
 
-def test_dockerfile_refuses_overwrite_without_force(tmp_path):
+def test_dockerfile_overwrites_existing(tmp_path):
+    # The files are generated artifacts pinned to the loopy version, so regenerating overwrites
+    # an existing Dockerfile in place (keeps the pin current after an upgrade) — no flag needed.
     project = _project(tmp_path)
     (project / "Dockerfile").write_text("hand-written")
     result = runner.invoke(app, ["dockerfile", str(project)])
-    assert result.exit_code == 1
-    assert (project / "Dockerfile").read_text() == "hand-written"  # untouched
-    forced = runner.invoke(app, ["dockerfile", str(project), "--force"])
-    assert forced.exit_code == 0
+    assert result.exit_code == 0
     assert (project / "Dockerfile").read_text().startswith("# Generated")
 
 
