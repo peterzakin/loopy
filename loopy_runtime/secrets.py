@@ -90,6 +90,14 @@ class EnvFileSecretsResolver:
                     f"env_file {rel!r} for sandbox '{sandbox_name}' escapes the project root"
                 )
             if not path.is_file():
+                # A declared env_file is the local-dev source; in production it is absent from
+                # the image (gitignored, kept out by .dockerignore) and the `env:` passthrough
+                # supplies these values from the engine environment instead. So a missing file is
+                # only fatal when there is no passthrough to cover it — otherwise a correctly
+                # configured deploy would crash on boot. A genuinely missing required credential
+                # is still caught downstream by the harness's own required-key check.
+                if spec.env:
+                    continue
                 raise FileNotFoundError(
                     f"env_file {rel!r} for sandbox '{sandbox_name}' not found at {path}"
                 )
@@ -110,6 +118,18 @@ class EnvFileSecretsResolver:
             if namespaced in self._environ:
                 env[key] = self._environ[namespaced]
         return env
+
+
+def parse_env_file(path: str | Path) -> dict[str, str]:
+    """Parse one dotenv file into a `KEY=VALUE` map, or `{}` if it is absent.
+
+    A thin public wrapper over the dotenv parser for tooling (e.g. `loopy env`) that needs a
+    file's raw pairs without the sandbox-injection semantics of `EnvFileSecretsResolver` — no
+    namespaced overlay, and a missing file yields an empty map rather than an error."""
+    path = Path(path)
+    if not path.is_file():
+        return {}
+    return _parse_dotenv(path.read_text())
 
 
 def load_sensor_env(root: str | Path) -> dict[str, str]:

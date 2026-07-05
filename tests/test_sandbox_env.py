@@ -74,6 +74,24 @@ def test_resolver_fails_closed_on_reconstructed_reserved_name(tmp_path):
     assert resolver.resolve("Github", spec) == {}
 
 
+def test_missing_env_file_tolerated_when_env_passthrough_declared(tmp_path):
+    # Production: secrets/base.env is absent from the image; the env: passthrough supplies the
+    # value from the engine environment. The resolver must NOT crash on the missing file.
+    resolver = EnvFileSecretsResolver(tmp_path, environ={"SCRAPER_ANTHROPIC_API_KEY": "sk-ns"})
+    spec = SandboxSpec(env_file=["secrets/base.env"], env=["ANTHROPIC_API_KEY"])
+    assert resolver.resolve("Scraper", spec) == {"ANTHROPIC_API_KEY": "sk-ns"}
+
+
+def test_missing_env_file_still_errors_without_passthrough(tmp_path):
+    # No env: passthrough to fall back on, so a missing declared env_file is still a real error.
+    import pytest
+
+    resolver = EnvFileSecretsResolver(tmp_path, environ={})
+    spec = SandboxSpec(env_file=["secrets/base.env"])
+    with pytest.raises(FileNotFoundError):
+        resolver.resolve("Scraper", spec)
+
+
 def test_two_sandboxes_get_different_values_for_same_key(tmp_path):
     environ = {
         "SCRAPER_ANTHROPIC_API_KEY": "sk-scraper",
