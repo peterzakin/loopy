@@ -93,8 +93,8 @@ class RuntimeProvider:
 # The bare model-id families each provider serves. Shared between the single-provider
 # runtimes' eligibility rules and opencode's sugar, so the two never drift.
 _ANTHROPIC_MODEL_PREFIXES = ("claude-",)
-# OpenAI coding models: the gpt-* family, the o-series reasoning models, the codex-* line.
-_OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4", "codex")
+# OpenAI coding models: the gpt-* family and the codex-* line.
+_OPENAI_MODEL_PREFIXES = ("gpt-", "codex")
 
 # OpenCode provider prefix -> the env var its driver reads. The v1 set is the providers
 # whose keys loopy already recognizes; OpenCode itself supports more (openrouter, google,

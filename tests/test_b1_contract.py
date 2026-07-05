@@ -66,7 +66,6 @@ def test_model_eligibility_per_harness():
     # Each harness only drives its provider's models.
     validate_model("claude-code", "claude-opus-4-8")
     validate_model("codex", "gpt-5-codex")
-    validate_model("codex", "o3")
     validate_model("opencode", "anthropic/claude-sonnet-4-6")
     validate_model("opencode", "openai/gpt-5.5")
     # opencode also takes the bare ids the other runtimes use (sugar expands them).
@@ -83,6 +82,8 @@ def test_model_eligibility_per_harness():
         validate_model("claude-code", "gpt-5-codex")
     with pytest.raises(ValueError):
         validate_model("codex", "claude-opus-4-8")
+    with pytest.raises(ValueError):
+        validate_model("codex", "o3")  # o-series models are not supported
     with pytest.raises(ValueError):
         validate_model("opencode", "gemini-2.5-pro")  # no recognized provider serves it
 

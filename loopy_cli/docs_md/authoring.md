@@ -108,7 +108,7 @@ to it (or a step needs to loop back to a workflow's entry), it's an **event**.
 ```yaml
 # Defaults: every agent inherits these; override a field only when needed.
 # `harness.runtime` picks the agent runner: `claude-code` (Claude Code, claude-* models),
-# `codex` (OpenAI Codex, gpt-*/o-series/codex-* models), or `opencode` (OpenCode, which
+# `codex` (OpenAI Codex, gpt-*/codex-* models), or `opencode` (OpenCode, which
 # drives either family — write the bare model id; loopy expands it to opencode's
 # provider/model naming). Model must match the runtime.
 defaults:

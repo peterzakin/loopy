@@ -6,7 +6,7 @@ stream and feeds it through the shared JSON output protocol (`JsonProtocolHarnes
 
 Two provider differences from Claude Code, both handled in the base via `providers.py`:
 
-* Eligible models are OpenAI's (`gpt-*`, the o-series, `codex-*`) — enforced at
+* Eligible models are OpenAI's (`gpt-*`, `codex-*`) — enforced at
   construction by the model-eligibility rule.
 * `codex exec` reports **token usage only, no USD cost** (see the cost-budget plan), so
   `Usage.cost_usd` is None here and a `spend.usd` budget (or a cascade-wide spend cap from
