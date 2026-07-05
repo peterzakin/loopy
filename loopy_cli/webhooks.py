@@ -538,7 +538,7 @@ def deploy_webhook_lines(root: Path, public_url: str) -> list[str] | None:
         "  loopy webhooks github",
         "It registers a webhook on your repo(s) so GitHub delivers pull request,",
         f"issue, and push events to {delivery}.",
-        "Until then the engine is live but nothing triggers your workflows.",
+        "Until then GitHub-triggered workflows stay idle; cron and poll sensors run.",
     ]
 
     repos = _declared_repo_slugs(project.registry)
