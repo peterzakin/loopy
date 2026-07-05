@@ -53,10 +53,17 @@ fi
 # ── The engine image. By default the pinned PyPI release (same recipe as the shipped
 # Dockerfile.pypi, no source checkout on the instance). With a wheel shipped by
 # `loopy deploy bootstrap --engine-source`, it installs that instead, so an unreleased CLI can run
-# its own engine (the PyPI version string is frozen, so PyPI can't carry unreleased code). The
-# tag carries the wheel's content hash in source mode, so a changed wheel is a new tag and
-# forces a rebuild. Built once per tag, then reused across re-deploys.
-if ! docker image inspect "loopy-engine:$ENGINE_IMAGE_TAG" >/dev/null 2>&1; then
+# its own engine (the PyPI version string is frozen, so PyPI can't carry unreleased code).
+#
+# Whether a cached image can be reused turns on what the tag identifies. A source build's tag
+# carries the wheel's content hash, so an existing `loopy-engine:<tag>` IS the wheel we want —
+# reuse it, and a changed wheel is a new tag that rebuilds. A PyPI build's tag is just the frozen
+# version string (`0.1.0` throughout pre-release dev), which does NOT change when that version is
+# republished with new code — so a cached image can be older than the manifest we just compiled,
+# which boots the engine into a schema-mismatch crash-loop. Always rebuild the PyPI image with
+# --pull --no-cache so it re-fetches the current base image and wheel rather than serving a stale
+# layer or image.
+build_engine_image() {
   mkdir -p /opt/loopy/image
   rm -rf /opt/loopy/image/wheels
   if [ -n "$ENGINE_WHEEL_S3" ]; then
@@ -73,6 +80,7 @@ RUN pip install --no-cache-dir "$(ls /tmp/wheels/*.whl)[redis]"
 WORKDIR /project
 ENTRYPOINT ["loopy"]
 DOCKERFILE
+    docker build -t "loopy-engine:$ENGINE_IMAGE_TAG" /opt/loopy/image
   else
     cat > /opt/loopy/image/Dockerfile <<EOF
 FROM python:3.12-slim
@@ -80,8 +88,14 @@ RUN pip install --no-cache-dir "loopy-computer[redis]==$LOOPY_VERSION"
 WORKDIR /project
 ENTRYPOINT ["loopy"]
 EOF
+    docker build --pull --no-cache -t "loopy-engine:$ENGINE_IMAGE_TAG" /opt/loopy/image
   fi
-  docker build -t "loopy-engine:$ENGINE_IMAGE_TAG" /opt/loopy/image
+}
+
+if [ -n "$ENGINE_WHEEL_S3" ] && docker image inspect "loopy-engine:$ENGINE_IMAGE_TAG" >/dev/null 2>&1; then
+  echo "engine image loopy-engine:$ENGINE_IMAGE_TAG already built (content-hash tag); reusing"
+else
+  build_engine_image
 fi
 
 # ── The stack: same collapsed single-node topology as the bundled compose file (redis bus,
