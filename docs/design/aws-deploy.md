@@ -221,21 +221,25 @@ the script builds the image only when the versioned tag is absent — so a new
 version means a missing tag and a rebuild in place. Old image versions linger
 on the instance's disk until pruned, which is harmless at this size.
 
-**Running an unreleased build (`--engine-source`).** The default engine image
-installs `loopy-computer==<version>` from PyPI, which assumes the operator's CLI
-is a released version whose published engine matches the manifests it compiles.
-An *unreleased* CLI breaks that: the version string is frozen (e.g. `0.1.0`),
-so PyPI carries stale code whose manifest schema predates the checkout, and the
-engine rejects the CLI's manifest on load. `loopy deploy bootstrap --engine-source
-<checkout>` closes the gap: the CLI builds a wheel from that loopy checkout
+**Running an unreleased build (auto-detected; `--engine-source` / `--engine-pypi`).**
+The engine image installs `loopy-computer==<version>` from PyPI when the CLI is a
+released install, which assumes that published engine matches the manifests the CLI
+compiles. An *unreleased* CLI breaks that: the version string is frozen (e.g.
+`0.1.0`), so PyPI carries stale code whose manifest schema predates the checkout,
+and the engine rejects the CLI's manifest on load. The deploy closes the gap
+automatically: when the CLI is itself run from a loopy checkout (detected by
+walking up to the `loopy-computer` `pyproject.toml`; a site-packages install has
+none, so released users are unaffected), it builds the engine from that same tree
+so it can never lag the manifest. `--engine-source <checkout>` points at a
+different tree explicitly, and `--engine-pypi` forces the published release (e.g.
+to validate the released path). In every source-built case the CLI builds a wheel
 (`uv build`), ships it to `s3://<bucket>/<stack>/engine/<wheel>` under its real
 PEP 427 filename (read by the same instance role, already scoped to `<stack>/*`;
 the name is preserved because pip rejects a renamed wheel), and the deploy
 script installs that wheel instead of the PyPI release. The image tag carries the
 wheel's content hash (`<version>-<sha>`), so iterating on local code and
 re-deploying rebuilds the image; without the hash the frozen version would let a
-stale image linger. PyPI stays the default for released users — this is opt-in,
-for dogfooding on real infrastructure before a release.
+stale image linger.
 
 ## IAM the operator's provisioning identity needs
 

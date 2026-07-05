@@ -31,6 +31,7 @@ from loopy_cli.bootstrap import (
     build_engine_wheel,
     build_template_body,
     collect_secret_files,
+    detect_engine_source,
     eip_public_dns,
     package_project,
     render_deploy_script,
@@ -144,6 +145,34 @@ def test_build_engine_wheel_rejects_a_non_checkout(tmp_path):
     """A directory with no pyproject.toml isn't a loopy checkout — fail clearly, not mid-build."""
     with pytest.raises(RuntimeError, match="not a loopy checkout"):
         build_engine_wheel(tmp_path, tmp_path / "out")
+
+
+def test_detect_engine_source_finds_this_checkout():
+    """Run from the repo, the CLI must recognize it lives in a loopy checkout so the deploy can
+    build a matching engine instead of installing a stale frozen-version wheel from PyPI."""
+    root = detect_engine_source()
+    assert root is not None
+    assert (root / "pyproject.toml").is_file()
+    assert 'name = "loopy-computer"' in (root / "pyproject.toml").read_text()
+
+
+def test_detect_engine_source_walks_up_from_a_nested_start(tmp_path):
+    """The checkout root is found from anywhere inside it (the CLI module is a few dirs in)."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "loopy-computer"\nversion = "0.1.0"\n'
+    )
+    nested = tmp_path / "loopy_cli" / "deep"
+    nested.mkdir(parents=True)
+    assert detect_engine_source(nested / "bootstrap.py") == tmp_path
+
+
+def test_detect_engine_source_is_none_for_an_installed_wheel(tmp_path):
+    """A site-packages install has no loopy-computer pyproject above it — released users keep the
+    PyPI path. An unrelated project's pyproject must not be mistaken for the checkout."""
+    site = tmp_path / "site-packages" / "loopy_cli"
+    site.mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "some-other-app"\n')
+    assert detect_engine_source(site / "bootstrap.py") is None
 
 
 def test_render_user_data_embeds_the_deploy_script_as_base64():
