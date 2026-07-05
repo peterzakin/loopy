@@ -112,6 +112,18 @@ class EnvFileSecretsResolver:
         return env
 
 
+def parse_env_file(path: str | Path) -> dict[str, str]:
+    """Parse one dotenv file into a `KEY=VALUE` map, or `{}` if it is absent.
+
+    A thin public wrapper over the dotenv parser for tooling (e.g. `loopy env`) that needs a
+    file's raw pairs without the sandbox-injection semantics of `EnvFileSecretsResolver` — no
+    namespaced overlay, and a missing file yields an empty map rather than an error."""
+    path = Path(path)
+    if not path.is_file():
+        return {}
+    return _parse_dotenv(path.read_text())
+
+
 def load_sensor_env(root: str | Path) -> dict[str, str]:
     """Load the sensor layer's dotenv (`sensors/.env` under the project root) into an env map.
 

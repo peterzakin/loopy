@@ -38,6 +38,8 @@ def test_coding_scaffold_compiles_green(tmp_path):
     assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
     # With a repo, the starter is the coding loop: a single CodeTask-triggered workflow.
     assert "codefix" in result.project.workflows
+    # The sandbox pre-declares its env: passthrough so the project is deploy-ready (`loopy env`).
+    assert result.project.registry.sandboxes["BaseSandbox"].env == ["ANTHROPIC_API_KEY"]
 
 
 def test_minimal_scaffold_compiles_green(tmp_path):

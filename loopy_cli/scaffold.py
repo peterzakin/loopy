@@ -65,7 +65,8 @@ sandboxes:
     provider: daytona                          # or `docker` for a local run
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
     # network: [github.com, api.anthropic.com]  # optional egress allowlist; omit for open egress
-    env_file: secrets/base.env
+    env_file: secrets/base.env                   # supplies these keys in local dev
+    env: [ANTHROPIC_API_KEY]                     # forwarded from the platform env in production
     __REPOS_LINE__
 
 agents:
@@ -343,7 +344,8 @@ sandboxes:
     provider: daytona                          # or `docker` for a local run
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
     # network: [github.com, api.anthropic.com]  # optional egress allowlist; omit for open egress
-    env_file: secrets/base.env
+    env_file: secrets/base.env                   # supplies these keys in local dev
+    env: [ANTHROPIC_API_KEY]                     # forwarded from the platform env in production
     # repos: [owner/repo]
 
 agents:
