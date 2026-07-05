@@ -57,9 +57,16 @@ app.command(name="integrations")(integrations_command)
 app.add_typer(deploy_app, name="deploy")
 
 
-@app.callback()
-def main() -> None:
+@app.callback(invoke_without_command=True)
+def main(ctx: typer.Context) -> None:
     """Author, compile, and run durable agent workflows."""
+    # A bare `loopy` (no subcommand) is a request to see what the tool does, not a usage
+    # mistake. Print the full help overview and exit 0 — the same output and exit code as
+    # `loopy --help` and `loopy help`. (Typer's default here is a "Missing command." error on
+    # exit 2, and Click's `no_args_is_help` still exits 2; both read as failure to scripts.)
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 
 @app.command()
