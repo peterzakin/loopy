@@ -2118,16 +2118,15 @@ def dockerfile(
     stdout: bool = typer.Option(
         False, "--stdout", help="Print the Dockerfile to stdout and write nothing."
     ),
-    force: bool = typer.Option(
-        False, "--force", help="Overwrite an existing Dockerfile / .dockerignore."
-    ),
 ) -> None:
     """Generate a version-pinned Dockerfile (+ .dockerignore) for a git-push deploy.
 
     Writes `Dockerfile` and `.dockerignore` to the project root so a platform (Render, Railway,
     Fly, ...) can build the engine from your repo: the project is copied in and compiled at build
-    time, and the pin matches your installed loopy (regenerate after upgrading). `--stdout` prints
-    just the Dockerfile — to inspect or pipe — and writes nothing.
+    time, and the pin matches your installed loopy (regenerate after upgrading). These files are
+    generated artifacts, so an existing `Dockerfile` / `.dockerignore` is overwritten in place —
+    that keeps them current after a loopy upgrade. `--stdout` prints just the Dockerfile — to
+    inspect or pipe — and writes nothing.
     """
     from loopy_core import __version__
 
@@ -2142,13 +2141,6 @@ def dockerfile(
         raise typer.Exit(code=1)
     dockerfile_path = root / "Dockerfile"
     dockerignore_path = root / ".dockerignore"
-    existing = [p.name for p in (dockerfile_path, dockerignore_path) if p.exists()]
-    if existing and not force:
-        typer.echo(
-            f"error: {', '.join(existing)} already present in {root} — pass --force to overwrite.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
 
     dockerfile_path.write_text(content)
     dockerignore_path.write_text(_DOCKERIGNORE_TEMPLATE)
