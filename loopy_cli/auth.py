@@ -421,8 +421,7 @@ def run_github_auth(
     # provisioned host mints it at deploy). Just point at the next step.
     typer.echo(
         typer.style(
-            "  Next: `loopy webhooks github` to register event delivery "
-            "(needs LOOPY_PUBLIC_URL).",
+            "  Next: `loopy webhooks github` to register event delivery (needs LOOPY_PUBLIC_URL).",
             fg=typer.colors.BRIGHT_BLACK,
         )
     )
@@ -728,9 +727,8 @@ def sentry(
     """
     from loopy_runtime.secrets import load_control_plane_env
 
-    if (
-        not (force or manual or update)
-        and load_control_plane_env(root).get("SENTRY_WEBHOOK_SECRET")
+    if not (force or manual or update) and load_control_plane_env(root).get(
+        "SENTRY_WEBHOOK_SECRET"
     ):
         _sentry_status(root)
         return
@@ -740,6 +738,270 @@ def sentry(
         name=name,
         events=events,
         sentry_url=sentry_url,
+        root=root,
+        force=force,
+        manual=manual,
+        update=update,
+    )
+
+
+# ── Datadog: create a Webhooks-integration webhook so `Datadog.*` built-ins have a producer ──
+#
+# Datadog differs from Sentry in two ways that shape this flow. Its v1 API authenticates with
+# *two* bootstrap credentials — an API key and an Application key (whose owner can manage
+# integrations) — neither of which is stored. And Datadog has no per-integration secret to hand
+# back: the shared secret that authenticates inbound deliveries is *ours*, so this command mints
+# it, pushes it into the webhook's custom headers (an `Authorization: Bearer` header), and
+# persists the same value as `DATADOG_WEBHOOK_SECRET` for the ingress verifier to compare.
+
+DATADOG_HOOK_PATH = "/hooks/datadog"
+_DATADOG_KEY_HELP = (
+    "Get keys in Datadog: Organization Settings -> API Keys and Application Keys.\n"
+    "  The Application key's owner must be able to manage integrations."
+)
+
+
+def _datadog_keys(env: dict[str, str]) -> tuple[str, str]:
+    """Resolve the API key + Application key: environment, else hidden prompts."""
+    api_key = env.get("DD_API_KEY")
+    app_key = env.get("DD_APP_KEY") or env.get("DD_APPLICATION_KEY")
+    if not api_key or not app_key:
+        typer.echo("  " + _DATADOG_KEY_HELP)
+    if not api_key:
+        api_key = typer.prompt("  Datadog API key", hide_input=True).strip()
+    if not app_key:
+        app_key = typer.prompt("  Datadog Application key", hide_input=True).strip()
+    if not api_key or not app_key:
+        typer.echo("error: both a Datadog API key and Application key are required", err=True)
+        raise typer.Exit(code=1)
+    return api_key, app_key
+
+
+def _datadog_webhook_url(flag: str | None, env: dict[str, str]) -> str:
+    """Resolve the public webhook URL: --webhook-url -> $LOOPY_PUBLIC_URL -> prompt.
+
+    Mirrors `_sentry_webhook_url`: the public base is shared config; here we append
+    `/hooks/datadog` and warn (not fail) on a localhost/non-https answer, since Datadog must
+    reach it over public HTTPS."""
+    import urllib.parse
+
+    from loopy_runtime import config
+
+    base = config.resolve_public_url(flag, env=env)
+    if not base:
+        typer.echo(
+            "\n  Datadog delivers webhooks to a public HTTPS URL. In local dev, expose "
+            "`loopy run`\n  with a tunnel (e.g. `cloudflared tunnel --url http://127.0.0.1:8000`)."
+        )
+        base = typer.prompt("  Public base URL (or full /hooks/datadog URL)").strip()
+    parts = urllib.parse.urlsplit(base)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        raise typer.BadParameter(f"webhook URL must be an absolute http(s) URL, got {base!r}")
+    if parts.scheme != "https" or parts.hostname in ("localhost", "127.0.0.1"):
+        typer.echo(
+            typer.style("  warning:", fg=typer.colors.YELLOW)
+            + f" {base} isn't public HTTPS; Datadog won't reach it until you tunnel/deploy."
+        )
+    return config.hook_url(base, DATADOG_HOOK_PATH)
+
+
+def write_datadog_credentials(root: str | Path, *, secret: str, name: str) -> Path:
+    """Persist the shared secret (+ the webhook name, for --update) into gitignored loopy.env."""
+    from loopy_runtime.secrets import CONTROL_PLANE_ENV_FILE, write_control_plane_env
+
+    env_path = write_control_plane_env(
+        root, {"DATADOG_WEBHOOK_SECRET": secret, "DATADOG_WEBHOOK_NAME": name}
+    )
+    _ensure_gitignored(root, CONTROL_PLANE_ENV_FILE)
+    return env_path
+
+
+def _bearer_headers(secret: str) -> str:
+    """The webhook's Custom Headers JSON carrying the shared secret the ingress verifier checks."""
+    return json.dumps({"Authorization": f"Bearer {secret}"})
+
+
+def _fail_datadog(exc) -> None:  # -> NoReturn
+    """Turn a Datadog API error into a clean CLI exit, with scope guidance on a 401/403."""
+    if getattr(exc, "status", None) in (401, 403):
+        typer.echo(
+            f"error: the keys can't manage integrations ({exc.status}). Use a Datadog API key and\n"
+            "  an Application key whose owner can manage integrations (Organization Settings ->\n"
+            "  Application Keys). Or run `loopy auth datadog --manual`.",
+            err=True,
+        )
+    else:
+        typer.echo(f"error: {exc}", err=True)
+    raise typer.Exit(code=1)
+
+
+def _datadog_status(root: str | Path) -> None:
+    """Show the stored Datadog webhook credentials."""
+    from loopy_runtime.secrets import load_control_plane_env
+
+    name = load_control_plane_env(root).get("DATADOG_WEBHOOK_NAME")
+    detail = f" '{name}'" if name else ""
+    typer.echo(
+        typer.style("  ✓", fg=typer.colors.GREEN)
+        + f" Datadog webhook{detail} configured (DATADOG_WEBHOOK_SECRET set)"
+    )
+    typer.echo(
+        typer.style(
+            "  Re-run with --force to recreate, --update to repoint its webhook URL.",
+            fg=typer.colors.BRIGHT_BLACK,
+        )
+    )
+
+
+def run_datadog_auth(
+    *,
+    site: str | None = None,
+    webhook_url: str | None = None,
+    name: str = "loopy",
+    root: Path = Path("."),
+    force: bool = False,
+    manual: bool = False,
+    update: bool = False,
+) -> None:
+    """Create (or update) a Datadog webhook and store the shared secret it authenticates with."""
+    from loopy_runtime.scm import datadog_app
+    from loopy_runtime.secrets import load_control_plane_env
+
+    env = _project_env(root)
+    site = site or env.get("DD_SITE") or datadog_app.DATADOG_DEFAULT_SITE
+    base_url = datadog_app.api_base(site)
+    stored = load_control_plane_env(root)
+
+    typer.echo(typer.style("\n  🔐  loopy auth datadog", fg=typer.colors.CYAN, bold=True))
+    typer.echo(typer.style("  " + "─" * 40, fg=typer.colors.BRIGHT_BLACK))
+
+    # --manual: no API keys. Mint a secret, persist it, and print the payload + headers to paste
+    # into the integration tile by hand.
+    if manual:
+        secret = secrets.token_urlsafe(32)
+        env_path = write_datadog_credentials(root, secret=secret, name=name)
+        typer.echo(
+            typer.style("  ✓", fg=typer.colors.GREEN)
+            + f" wrote DATADOG_WEBHOOK_SECRET to {env_path}"
+        )
+        typer.echo(
+            f"\n  Create a webhook in Datadog (Integrations -> Webhooks) named '{name}', "
+            "URL your public\n  /hooks/datadog, then paste these two fields:"
+        )
+        typer.echo("\n  Payload:\n" + datadog_app.CANONICAL_PAYLOAD)
+        typer.echo("\n  Custom Headers:\n  " + _bearer_headers(secret))
+        typer.echo(
+            f"\n  Finally, add @webhook-{name} to the message of each monitor you want to drive "
+            "a workflow.\n"
+        )
+        return
+
+    # --update: repoint the stored webhook's URL, re-sending the headers so the secret survives.
+    if update:
+        wname = stored.get("DATADOG_WEBHOOK_NAME") or name
+        secret = stored.get("DATADOG_WEBHOOK_SECRET")
+        if not secret:
+            typer.echo(
+                "error: no DATADOG_WEBHOOK_SECRET in loopy.env; run `loopy auth datadog` first.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        api_key, app_key = _datadog_keys(env)
+        url = _datadog_webhook_url(webhook_url, env)
+        try:
+            datadog_app.update_webhook(
+                api_key,
+                app_key,
+                wname,
+                url=url,
+                custom_headers=_bearer_headers(secret),
+                base_url=base_url,
+            )
+        except datadog_app.DatadogAPIError as exc:
+            _fail_datadog(exc)
+        typer.echo(
+            typer.style("  ✓", fg=typer.colors.GREEN) + f" updated '{wname}' webhook URL to {url}"
+        )
+        return
+
+    if stored.get("DATADOG_WEBHOOK_SECRET") and not force:
+        typer.echo(
+            "error: DATADOG_WEBHOOK_SECRET already set in loopy.env; "
+            "re-run with --force to overwrite.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    api_key, app_key = _datadog_keys(env)
+    url = _datadog_webhook_url(webhook_url, env)
+    # The secret is ours (Datadog hands back nothing to persist): mint it, push it into the
+    # webhook's headers, and store the same value for the ingress verifier.
+    secret = secrets.token_urlsafe(32)
+    typer.echo(f"  → creating webhook '{name}' (site {site})")
+    try:
+        datadog_app.create_webhook(
+            api_key,
+            app_key,
+            name=name,
+            url=url,
+            payload=datadog_app.CANONICAL_PAYLOAD,
+            custom_headers=_bearer_headers(secret),
+            base_url=base_url,
+        )
+    except datadog_app.DatadogAPIError as exc:
+        _fail_datadog(exc)
+    env_path = write_datadog_credentials(root, secret=secret, name=name)
+    typer.echo(
+        typer.style("  ✓", fg=typer.colors.GREEN)
+        + f" created '{name}'; wrote DATADOG_WEBHOOK_SECRET + DATADOG_WEBHOOK_NAME to {env_path}"
+    )
+    typer.echo(
+        f"\n  Next: add @webhook-{name} to the message of each monitor you want to drive a"
+        "\n  workflow, then trigger one to confirm delivery. A Datadog webhook fires nothing"
+        "\n  until a monitor references it.\n"
+    )
+
+
+@auth_app.command()
+def datadog(
+    site: str | None = typer.Option(
+        None, "--site", help="Datadog site (default: $DD_SITE, else datadoghq.com)."
+    ),
+    webhook_url: str | None = typer.Option(
+        None, "--webhook-url", help="Public URL; default $LOOPY_PUBLIC_URL + /hooks/datadog."
+    ),
+    name: str = typer.Option(
+        "loopy", "--name", help="Webhook name (referenced as @webhook-<name>)."
+    ),
+    root: Path = typer.Option(Path("."), "--root", help="Project root (where loopy.env lives)."),
+    force: bool = typer.Option(
+        False, "--force", help="Overwrite an existing DATADOG_WEBHOOK_SECRET."
+    ),
+    manual: bool = typer.Option(
+        False, "--manual", help="Skip the API; print the payload + headers to paste in the UI."
+    ),
+    update: bool = typer.Option(False, "--update", help="Repoint the stored webhook's URL."),
+) -> None:
+    """Show the Datadog webhook status if one is registered, else create it.
+
+    When a secret is already stored, `loopy auth datadog` prints its status; otherwise it
+    creates a webhook in Datadog's Webhooks integration for the built-in `Datadog.*` events.
+    Reads the bootstrap API key + Application key from $DD_API_KEY / $DD_APP_KEY (else prompts);
+    neither is stored. loopy mints the shared secret, pushes it into the webhook's headers, and
+    stores it as DATADOG_WEBHOOK_SECRET. Pass --force to recreate, --update to repoint the URL,
+    or --manual to set it up by hand.
+    """
+    from loopy_runtime.secrets import load_control_plane_env
+
+    if not (force or manual or update) and load_control_plane_env(root).get(
+        "DATADOG_WEBHOOK_SECRET"
+    ):
+        _datadog_status(root)
+        return
+    run_datadog_auth(
+        site=site,
+        webhook_url=webhook_url,
+        name=name,
         root=root,
         force=force,
         manual=manual,

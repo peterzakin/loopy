@@ -32,7 +32,10 @@ from loopy_core.builtins import provider_for
 # Built-in providers with a dedicated delivery-wiring path whose absence is already reported
 # elsewhere (GitHub by `registration_findings`), so the generic secret check skips them to
 # avoid a duplicate finding. The per-provider fix hint for the rest:
-_WEBHOOK_SECRET_FIX = {"sentry": "run `loopy auth sentry` (or set it in loopy.env)"}
+_WEBHOOK_SECRET_FIX = {
+    "sentry": "run `loopy auth sentry` (or set it in loopy.env)",
+    "datadog": "run `loopy auth datadog` (or set it in loopy.env)",
+}
 _SECRET_CHECK_SKIP = frozenset({"github"})
 
 # The exact values the scaffold writes. Each is *present* (so presence checks pass) but not

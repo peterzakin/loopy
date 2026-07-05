@@ -94,12 +94,12 @@ def load_webhook_sensor(spec: SensorSpec, root: str | Path) -> Callable[[dict], 
 
 def builtin_webhook_sensor(spec: SensorSpec) -> Callable[[dict], Event | None]:
     """Resolve a platform-shipped built-in sensor: look its payload->fields mapper up by
-    `emits` (no user module to import) and wrap the result in a runtime `Event`. The mapper
-    returns None for deliveries that aren't this event's concern."""
-    from loopy_runtime.scm.github_builtins import BUILTIN_MAPPERS as GITHUB_MAPPERS
-    from loopy_runtime.scm.sentry_builtins import MAPPERS as SENTRY_MAPPERS
+    (provider, emits) in the built-in registry (no user module to import) and wrap the result
+    in a runtime `Event`. The mapper returns None for deliveries that aren't this event's
+    concern."""
+    from loopy_runtime.scm.builtin_registry import mapper_for
 
-    mapper = {**GITHUB_MAPPERS, **SENTRY_MAPPERS}.get(spec.emits)
+    mapper = mapper_for(spec.provider, spec.emits)
     if mapper is None:
         raise KeyError(f"no built-in mapper registered for '{spec.emits}'")
 

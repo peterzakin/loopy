@@ -1494,11 +1494,20 @@ def run(
     # source) so hand-written sensors sharing a built-in path — e.g. examples/github — stay
     # verified too. Absent a secret we run unverified (dev only) and say so loudly, once per
     # provider.
-    from loopy_runtime.scm import github_webhook, sentry_webhook
+    from loopy_core.builtins import BUILTIN_PROVIDERS
+    from loopy_runtime.scm.builtin_registry import VERIFIER_FACTORY_BY_PROVIDER
 
+    # path prefix -> (secret env, verifier factory), derived from the built-in provider catalog
+    # so a new provider is picked up automatically. Keyed by path (not sensor source) so a
+    # hand-written sensor sharing a built-in path — e.g. examples/github — stays verified too.
+    # GitHub/Sentry factories build an HMAC-over-body verifier; Datadog's builds a header-token
+    # compare (its webhook signs no body). Both satisfy the runner's verify(body, headers) seam.
     edge_verifiers = {
-        "/hooks/github": ("GITHUB_WEBHOOK_SECRET", github_webhook.signature_verifier),
-        "/hooks/sentry": ("SENTRY_WEBHOOK_SECRET", sentry_webhook.signature_verifier),
+        provider.webhook_path: (
+            provider.secret_env,
+            VERIFIER_FACTORY_BY_PROVIDER[provider.name],
+        )
+        for provider in BUILTIN_PROVIDERS
     }
     warned_unverified: set[str] = set()
     for sensor in m.sensors:

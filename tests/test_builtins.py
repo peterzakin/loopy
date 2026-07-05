@@ -13,8 +13,8 @@ from loopy_core.compile import codes
 from loopy_core.compile.manifest import to_manifest
 from loopy_core.compile.pipeline import compile_project
 from loopy_core.events.codegen import generate_events
+from loopy_runtime.scm.builtin_registry import MAPPERS_BY_PROVIDER
 from loopy_runtime.scm.github_builtins import BUILTIN_MAPPERS
-from loopy_runtime.scm.sentry_builtins import MAPPERS as SENTRY_MAPPERS
 from tests.helpers import assert_code, write_project
 from tests.helpers import codes as result_codes
 
@@ -155,11 +155,11 @@ def test_builtin_events_excluded_from_codegen(tmp_path):
 def test_catalog_and_mappers_agree():
     """The core contracts and the runtime mappers must cover the same events with the same
     field names — the single guard against the two halves drifting. Every provider in the
-    catalog must have a runtime mapper set, and each pair must cover the same events."""
-    runtime_mappers = {"github": BUILTIN_MAPPERS, "sentry": SENTRY_MAPPERS}
-    assert {p.name for p in BUILTIN_PROVIDERS} == set(runtime_mappers)
+    catalog must have a runtime mapper set (and vice versa), and each pair must cover the same
+    events. Driven off the registry so a new provider is covered without editing this test."""
+    assert {p.name for p in BUILTIN_PROVIDERS} == set(MAPPERS_BY_PROVIDER)
     for provider in BUILTIN_PROVIDERS:
-        assert set(provider.events) == set(runtime_mappers[provider.name]), provider.name
+        assert set(provider.events) == set(MAPPERS_BY_PROVIDER[provider.name]), provider.name
 
 
 def test_each_mapper_returns_exactly_its_contract_fields():

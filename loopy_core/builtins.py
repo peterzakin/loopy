@@ -13,10 +13,10 @@ Agents, by contrast, are always declared explicitly in `registry.yml` — there 
 built-in agent catalog. `loopy init` scaffolds an explicit agent per supported runtime
 (claude-code / codex / opencode) so the yaml is visible and editable from day one.
 
-Each provider's prefix (`Github.`, `Sentry.`) is reserved: a user may not declare an
-event or author a sensor in it (enforced in `compile/builtins.py`). Names are Capitalized
-so they read like the existing event namespace; the dotted form mirrors the provider's
-own event/action vocabulary.
+Each provider's prefix (`Github.`, `Sentry.`, `Datadog.`) is reserved: a user may not
+declare an event or author a sensor in it (enforced in `compile/builtins.py`). Names are
+Capitalized so they read like the existing event namespace; the dotted form mirrors the
+provider's own event/action vocabulary.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from dataclasses import dataclass
 # Reserved namespaces — user events/sensors may not use these prefixes.
 GITHUB_PREFIX = "Github."
 SENTRY_PREFIX = "Sentry."
+DATADOG_PREFIX = "Datadog."
 
 # event name -> {field: terse type}. Kept in lockstep with BUILTIN_MAPPERS (runtime).
 GITHUB_EVENTS: dict[str, dict[str, str]] = {
@@ -107,6 +108,39 @@ SENTRY_EVENTS: dict[str, dict[str, str]] = {
 }
 
 
+# event name -> {field: terse type}. Kept in lockstep with the Datadog MAPPERS (runtime).
+# Unlike GitHub/Sentry, Datadog webhooks carry *no fixed payload*: the body is whatever the
+# user templates in the Webhooks integration tile. So the built-in prescribes a canonical
+# payload (docs/plans/integrations/datadog.md) built from `$`-variables, and these mappers
+# read exactly that shape. Both events discriminate on the body's `transition` field, so the
+# runner needs no header plumbing (the same body-only fan-out as the other providers). A
+# future `Datadog.NoData` / `Datadog.EventTriggered` / `Datadog.SecuritySignal` is a contract
+# + mapper entry, no framework change.
+DATADOG_EVENTS: dict[str, dict[str, str]] = {
+    # A monitor crossed into alert: transition in {Triggered, Re-Triggered, Warn}.
+    "Datadog.MonitorAlerted": {
+        "monitor_id": "str",  # $ALERT_ID — the monitor's id
+        "title": "str",  # $EVENT_TITLE
+        "body": "str",  # $EVENT_MSG — the monitor message
+        "alert_type": "enum[error, warning, info, success]",  # $ALERT_TYPE
+        "priority": "str",  # $ALERT_PRIORITY — P1..P5, or "" if unset
+        "metric": "str",  # $ALERT_METRIC — "" for non-metric monitors
+        "scope": "str",  # $ALERT_SCOPE — the tags that triggered it
+        "host": "str",  # $HOSTNAME — "" if not host-scoped
+        "transition": "str",  # the raw $ALERT_TRANSITION, carried through
+        "url": "url",  # $LINK — permalink to the alert
+    },
+    # A monitor recovered: transition == Recovered. Closes the loop / drives the confirm step.
+    "Datadog.MonitorRecovered": {
+        "monitor_id": "str",
+        "title": "str",
+        "scope": "str",
+        "host": "str",
+        "url": "url",
+    },
+}
+
+
 @dataclass(frozen=True)
 class BuiltinProvider:
     """A platform-shipped webhook provider: its reserved event-name prefix, the single
@@ -127,6 +161,9 @@ BUILTIN_PROVIDERS: tuple[BuiltinProvider, ...] = (
     ),
     BuiltinProvider(
         "sentry", SENTRY_PREFIX, "/hooks/sentry", SENTRY_EVENTS, "SENTRY_WEBHOOK_SECRET"
+    ),
+    BuiltinProvider(
+        "datadog", DATADOG_PREFIX, "/hooks/datadog", DATADOG_EVENTS, "DATADOG_WEBHOOK_SECRET"
     ),
 )
 

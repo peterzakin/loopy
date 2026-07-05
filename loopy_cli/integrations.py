@@ -23,6 +23,7 @@ from loopy_core.builtins import BUILTIN_PROVIDERS, provider_for
 _SECRET_FIX = {
     "github": "loopy webhooks github",
     "sentry": "loopy auth sentry",
+    "datadog": "loopy auth datadog",
 }
 
 
