@@ -57,6 +57,37 @@ def _as_str_list(value: object) -> list[str]:
     return [str(value)]
 
 
+def _named_entries(
+    raw_map: Mapping, kind: str, file: str, diags: DiagnosticCollector
+) -> list[tuple[str, object]]:
+    """(name, body) pairs whose key is a non-empty string, reporting E001 for a malformed key.
+
+    YAML permits null, numeric, and blank mapping keys (`~:`, `123:`, `"":`). Left unchecked
+    these reach name-handling code (`sandbox_env_prefix`, pydantic `str` fields) and crash the
+    compiler with a raw traceback instead of a diagnostic. Filtering them here — with a clean
+    E001, the same code the top-level 'must be a mapping' check uses — keeps `loopy compile`
+    from ever crashing on a malformed registry, and lets the rest of the loader assume str names.
+    """
+    if not isinstance(raw_map, Mapping):
+        diags.error(
+            codes.E001,
+            f"the {kind} section must map names to {kind} definitions",
+            span=span_at(file, 1),
+        )
+        return []
+    entries: list[tuple[str, object]] = []
+    for name, body in raw_map.items():
+        if isinstance(name, str) and name.strip():
+            entries.append((name, body))
+        else:
+            diags.error(
+                codes.E001,
+                f"{kind} keys must be non-empty strings (got {name!r})",
+                span=span_at(file, _line_of(raw_map, name)),
+            )
+    return entries
+
+
 def load_registry(inv: Inventory, diags: DiagnosticCollector) -> Registry:
     if inv.registry_path is None:
         diags.error(
@@ -96,7 +127,7 @@ def load_registry(inv: Inventory, diags: DiagnosticCollector) -> Registry:
     default_agent = (defaults.get("agent") or {}) if isinstance(defaults, Mapping) else {}
 
     sandboxes = _load_sandboxes(data.get("sandboxes") or {}, file, diags)
-    agents = _load_agents(data.get("agents") or {}, default_agent, file)
+    agents = _load_agents(data.get("agents") or {}, default_agent, file, diags)
     events = _load_events(data.get("events") or {}, file, diags)
     limits = _load_limits(data.get("limits"), file, _line_of(data, "limits"), diags)
 
@@ -168,7 +199,7 @@ def _load_limits(value: object, file: str, line: int, diags: DiagnosticCollector
 
 def _load_sandboxes(sb_map: Mapping, file: str, diags: DiagnosticCollector) -> dict[str, Sandbox]:
     out: dict[str, Sandbox] = {}
-    for name, body in sb_map.items():
+    for name, body in _named_entries(sb_map, "sandbox", file, diags):
         body = body or {}
         provider = body.get("provider")
         # `provider:` is required on every sandbox — where an agent runs is an explicit
@@ -308,9 +339,11 @@ def _scalar(value: object) -> str | None:
     return None
 
 
-def _load_agents(ag_map: Mapping, default_agent: Mapping, file: str) -> dict[str, Agent]:
+def _load_agents(
+    ag_map: Mapping, default_agent: Mapping, file: str, diags: DiagnosticCollector
+) -> dict[str, Agent]:
     out: dict[str, Agent] = {}
-    for name, body in ag_map.items():
+    for name, body in _named_entries(ag_map, "agent", file, diags):
         body = body or {}
         # model / harness / sandbox: scalar override, else inherit from defaults.agent.
         model = _scalar(body.get("model", default_agent.get("model")))
@@ -333,7 +366,7 @@ def _load_agents(ag_map: Mapping, default_agent: Mapping, file: str) -> dict[str
 
 def _load_events(ev_map: Mapping, file: str, diags: DiagnosticCollector) -> dict[str, Event]:
     out: dict[str, Event] = {}
-    for name, body in ev_map.items():
+    for name, body in _named_entries(ev_map, "event", file, diags):
         # An event body *is* its field map: `EventName: { key: type, ... }`.
         raw_fields = body or {}
         fields: dict[str, dict] = {}
