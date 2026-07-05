@@ -34,6 +34,7 @@ import base64
 import io
 import json
 import re
+import sys
 import tarfile
 import time
 from pathlib import Path
@@ -509,6 +510,105 @@ def _http_status(url: str) -> int:
         return response.status
 
 
+class _StatusBoard:
+    """First-deploy progress as one rewriting checklist instead of a scroll of log lines.
+
+    A fresh deploy runs three long phases back to back (stack up, CloudFront propagates,
+    engine answers) and can take ~15 min. As plain `echo` lines that scrolls past and the
+    operator loses track of which phase is slow — which matters here because the two slow
+    phases fail for unrelated reasons (CDN propagation vs. a crashing image build), so
+    "where am I" is the first thing they need to know.
+
+    On a TTY the board redraws its rows in place (cursor-up + clear-line per row) so the
+    phases read as a live checklist with per-phase elapsed times. Off a TTY (CI logs,
+    redirected output) the cursor can't move, so every update prints one plain line and
+    nothing is rewritten — piped logs stay linear, and the periodic detail ticks still
+    show life so the run never reads as hung.
+    """
+
+    _MARKS = {"pending": "·", "running": "→", "done": "✓", "failed": "✗"}
+
+    def __init__(self, title, phases, *, out=None, clock=time.monotonic, tty=None):
+        # phases: list of (key, label, running_hint). running_hint is the ETA shown while
+        # the phase is in flight (e.g. "~2-4 min"); detail set later overrides it.
+        self._out = out if out is not None else sys.stdout
+        self._clock = clock
+        self._tty = self._out.isatty() if tty is None else tty
+        self._order = [key for key, _label, _hint in phases]
+        self._label = {key: label for key, label, _hint in phases}
+        self._hint = {key: hint for key, _label, hint in phases}
+        self._state = {key: "pending" for key in self._order}
+        self._detail = {key: "" for key in self._order}
+        self._started_at = {}
+        self._elapsed = {}
+        self._drawn = False
+        self._out.write(title + "\n")
+        self._out.flush()
+        self._render()
+
+    def _fmt_elapsed(self, seconds):
+        seconds = int(seconds)
+        return f"{seconds // 60}m{seconds % 60:02d}s"
+
+    def _row(self, key):
+        mark = self._MARKS[self._state[key]]
+        label = self._label[key]
+        if self._state[key] == "done":
+            tail = f"({self._fmt_elapsed(self._elapsed[key])})"
+        elif self._state[key] == "failed":
+            tail = self._detail[key] or "failed"
+        elif self._state[key] == "running":
+            tail = self._detail[key] or self._hint[key]
+        else:
+            tail = self._hint[key]
+        return f"  {mark} {label}" + (f"   {tail}" if tail else "")
+
+    def _render(self):
+        rows = [self._row(key) for key in self._order]
+        if not self._tty:
+            return  # off-TTY updates are line-per-event; see _emit_line
+        if self._drawn:
+            self._out.write(f"\033[{len(rows)}A")  # back up to the first row
+        for row in rows:
+            self._out.write("\r\033[K" + row + "\n")  # clear then rewrite each row
+        self._out.flush()
+        self._drawn = True
+
+    def _emit_line(self, text):
+        # Off-TTY fallback: one plain line per event, no cursor motion.
+        self._out.write(text + "\n")
+        self._out.flush()
+
+    def enter(self, key):
+        self._state[key] = "running"
+        self._started_at[key] = self._clock()
+        if self._tty:
+            self._render()
+        else:
+            hint = self._hint[key]
+            self._emit_line(f"deploy: {self._label[key]}" + (f" ({hint})…" if hint else "…"))
+
+    def detail(self, key, text):
+        # Strip a leading heartbeat indent so the text sits cleanly in the row.
+        self._detail[key] = text.strip().lstrip("… ").strip()
+        if self._tty:
+            self._render()
+        else:
+            self._emit_line(f"  … {self._detail[key]}")
+
+    def _finish(self, key, state):
+        started = self._started_at.get(key)
+        self._elapsed[key] = self._clock() - started if started is not None else 0
+        self._state[key] = state
+        if self._tty:
+            self._render()
+        else:
+            self._emit_line(self._row(key).strip())
+
+    def complete(self, key, *, ok=True):
+        self._finish(key, "done" if ok else "failed")
+
+
 def wait_until_serving(
     public_url: str,
     *,
@@ -802,6 +902,7 @@ def bootstrap(
     # new URL. A fresh stack needs two passes: the EIP's DNS name (the CloudFront origin) only
     # exists after pass 1 creates the address.
     existed = _stack_exists(cf, stack)
+    board = None
     if existed:
         origin = eip_public_dns(_stack_outputs(cf, stack)["PublicIp"], resolved_region)
         typer.echo(
@@ -811,20 +912,25 @@ def bootstrap(
         _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": origin})
     else:
         _require_default_vpc(ec2)  # fail fast before provisioning if the region has none
-        typer.echo(
-            "deploy: this is a first deploy — it runs several minutes end to end (instance boot, "
-            "image build, then CloudFront). Safe to leave it; the URL is printed when it's live."
+        # First deploy runs three long phases back to back; show them as one live checklist
+        # (the update path stays plain — it's a single fast phase) so the operator can see
+        # which phase is slow across the ~15-min wait. See `_StatusBoard`.
+        board = _StatusBoard(
+            f"deploy: first deploy of {stack} in {resolved_region} (runs several minutes end "
+            "to end; safe to leave, the URL prints when it's live)",
+            [
+                ("stack", "stack up (instance + address)", "~2-4 min"),
+                ("cdn", "CloudFront distribution", "~5-10 min to propagate globally"),
+                ("healthz", "engine answering /healthz", "first boot builds the image"),
+            ],
         )
-        typer.echo(
-            f"deploy: creating stack {stack} in {resolved_region} (instance + address; ~2-4 min)…"
-        )
+        board.enter("stack")
         _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": ""})
         origin = eip_public_dns(_stack_outputs(cf, stack)["PublicIp"], resolved_region)
-        typer.echo(
-            f"deploy: fronting {origin} with CloudFront "
-            "(a fresh distribution takes ~5-10 min to deploy globally)…"
-        )
+        board.complete("stack")
+        board.enter("cdn")
         _apply_stack(cf, stack, template_body, {**base_parameters, "OriginDomain": origin})
+        board.complete("cdn")
 
     outputs = _stack_outputs(cf, stack)
     public_ip = outputs["PublicIp"]
@@ -877,12 +983,18 @@ def bootstrap(
 
     # "Stack complete" only means the instance launched. Wait for the engine to actually answer
     # through CloudFront (user-data's image build + a fresh distribution's edge propagation both
-    # trail CREATE_COMPLETE) so the printed URL works when the user hits it.
-    typer.echo(
-        f"deploy: waiting for the engine to answer at {public_url}/healthz "
-        "(first boot builds the image and the CDN propagates; up to ~10 min)…"
-    )
-    serving = wait_until_serving(public_url, echo=typer.echo)
+    # trail CREATE_COMPLETE) so the printed URL works when the user hits it. On a first deploy the
+    # heartbeat feeds the checklist's healthz row; on an update it's a plain waiting line.
+    if board is not None:
+        board.enter("healthz")
+        serving = wait_until_serving(public_url, echo=lambda line: board.detail("healthz", line))
+        board.complete("healthz", ok=serving)
+    else:
+        typer.echo(
+            f"deploy: waiting for the engine to answer at {public_url}/healthz "
+            "(first boot builds the image and the CDN propagates; up to ~10 min)…"
+        )
+        serving = wait_until_serving(public_url, echo=typer.echo)
 
     typer.echo("")
     verb = "updated" if existed else "done"

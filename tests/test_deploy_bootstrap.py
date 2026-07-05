@@ -28,6 +28,7 @@ from loopy_cli.bootstrap import (
     _put_secret_files,
     _refresh_instance,
     _require_default_vpc,
+    _StatusBoard,
     build_engine_wheel,
     build_template_body,
     collect_secret_files,
@@ -476,6 +477,81 @@ def test_wait_until_serving_emits_a_heartbeat_while_waiting():
     )
     assert lines, "expected at least one heartbeat line"
     assert any("elapsed" in line and "504" in line for line in lines)
+
+
+def _board(out, *, tty, clock):
+    """A three-phase board matching the first-deploy checklist, with an injected clock."""
+    return _StatusBoard(
+        "deploy: first deploy",
+        [
+            ("stack", "stack up", "~2-4 min"),
+            ("cdn", "CloudFront", "~5-10 min"),
+            ("healthz", "engine answering /healthz", "first boot builds the image"),
+        ],
+        out=out,
+        tty=tty,
+        clock=clock,
+    )
+
+
+def test_status_board_tty_rewrites_in_place_with_a_final_checklist():
+    """On a TTY the board redraws in place (ANSI cursor-up), so the final frame is the whole
+    checklist with done marks and per-phase elapsed — not one line appended per event."""
+    ticks = iter([0, 130, 130, 530])  # enter/complete pairs → 2m10s, then 6m40s
+    out = io.StringIO()
+    board = _board(out, tty=True, clock=lambda: next(ticks))
+    board.enter("stack")
+    board.complete("stack")
+    board.enter("cdn")
+    board.complete("cdn")
+    text = out.getvalue()
+
+    assert "\033[3A" in text  # backs up over all three rows to rewrite them
+    assert "✓ stack up   (2m10s)" in text
+    assert "✓ CloudFront   (6m40s)" in text
+    # The still-pending phase keeps its hint and the pending mark.
+    assert "· engine answering /healthz" in text
+
+
+def test_status_board_non_tty_emits_one_plain_line_per_event():
+    """Off a TTY the cursor can't move, so each state change is one plain line and there are
+    no ANSI escapes — piped CI logs stay linear and readable."""
+    ticks = iter([0, 5])
+    out = io.StringIO()
+    board = _board(out, tty=False, clock=lambda: next(ticks))
+    board.enter("stack")
+    board.detail("stack", "… still waiting (2m30s elapsed; last: 504)")
+    board.complete("stack")
+    text = out.getvalue()
+
+    assert "\033[" not in text  # no cursor motion off a TTY
+    assert "deploy: stack up (~2-4 min)…" in text
+    assert "still waiting (2m30s elapsed; last: 504)" in text
+    assert "✓ stack up   (0m05s)" in text
+
+
+def test_status_board_marks_a_timed_out_phase_as_failed():
+    """A healthz timeout completes the phase as failed (✗), so the checklist shows which
+    phase didn't come up rather than a stalled running row."""
+    ticks = iter([0, 600])
+    out = io.StringIO()
+    board = _board(out, tty=True, clock=lambda: next(ticks))
+    board.enter("healthz")
+    board.complete("healthz", ok=False)
+    assert "✗ engine answering /healthz" in out.getvalue()
+
+
+def test_status_board_running_row_shows_latest_detail_over_hint():
+    """Once a heartbeat sets detail on the running phase, the row shows that detail (the live
+    status) instead of the static ETA hint."""
+    out = io.StringIO()
+    board = _board(out, tty=True, clock=lambda: 0)
+    board.enter("healthz")
+    board.detail("healthz", "still waiting (3m20s elapsed; last: 502)")
+    lines = out.getvalue().splitlines()
+    healthz_rows = [ln for ln in lines if "engine answering /healthz" in ln]
+    assert healthz_rows[-1].endswith("still waiting (3m20s elapsed; last: 502)")
+    assert "first boot builds the image" not in healthz_rows[-1]
 
 
 def test_engine_diagnostics_returns_logs_on_timeout():
