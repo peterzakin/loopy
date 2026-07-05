@@ -90,6 +90,14 @@ class EnvFileSecretsResolver:
                     f"env_file {rel!r} for sandbox '{sandbox_name}' escapes the project root"
                 )
             if not path.is_file():
+                # A declared env_file is the local-dev source; in production it is absent from
+                # the image (gitignored, kept out by .dockerignore) and the `env:` passthrough
+                # supplies these values from the engine environment instead. So a missing file is
+                # only fatal when there is no passthrough to cover it — otherwise a correctly
+                # configured deploy would crash on boot. A genuinely missing required credential
+                # is still caught downstream by the harness's own required-key check.
+                if spec.env:
+                    continue
                 raise FileNotFoundError(
                     f"env_file {rel!r} for sandbox '{sandbox_name}' not found at {path}"
                 )

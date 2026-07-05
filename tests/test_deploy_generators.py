@@ -62,6 +62,16 @@ def test_dockerfile_writes_both_files(tmp_path):
     # The .dockerignore is load-bearing: it keeps secrets out of a local image build.
     assert "loopy.env" in dockerignore
     assert "secrets/" in dockerignore
+    # Excludes dotenv files anywhere, so a non-default env_file path is covered too.
+    assert "**/*.env" in dockerignore
+
+
+def test_dockerfile_rejects_nonexistent_directory(tmp_path):
+    result = runner.invoke(app, ["dockerfile", str(tmp_path / "nope")])
+    assert result.exit_code == 1
+    # A clean typer.Exit, not an uncaught FileNotFoundError traceback.
+    assert isinstance(result.exception, SystemExit)
+    assert not (tmp_path / "nope").exists()  # no partial write / dir creation
 
 
 def test_dockerfile_refuses_overwrite_without_force(tmp_path):
