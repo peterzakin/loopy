@@ -94,7 +94,7 @@ def test_render_deploy_script_runs_the_same_collapsed_topology_as_compose():
 
 
 def test_render_deploy_script_is_rerunnable():
-    """The restart path (rm -f then run) and skip-build-if-present make it safe to re-run."""
+    """The restart path (rm -f then run) and the content-hash reuse guard make it safe to re-run."""
     script = _render()
     assert "docker rm -f loopy-redis loopy-engine" in script
     assert 'docker image inspect "loopy-engine:$ENGINE_IMAGE_TAG"' in script
@@ -106,6 +106,23 @@ def test_render_deploy_script_defaults_to_pypi_install():
     assert 'ENGINE_WHEEL_S3=""' in script
     assert 'ENGINE_IMAGE_TAG="0.1.0"' in script
     assert "loopy-computer[redis]==$LOOPY_VERSION" in script
+
+
+def test_image_reuse_is_gated_on_a_source_build_so_pypi_always_rebuilds():
+    """Reuse-if-present is gated on a shipped wheel (a source build, whose tag is a content hash).
+    A PyPI build's tag is the frozen version string — unchanged when that version is republished
+    with new code — so it falls through to a rebuild every deploy, dodging the stale-engine boot
+    crash-loop this deploy fix targets. (The script carries both branches; the shell selects at
+    run time on $ENGINE_WHEEL_S3.)"""
+    script = _render()
+    # The inspect guard can only *skip* a build when a wheel was shipped — never for the PyPI path.
+    guard = 'if [ -n "$ENGINE_WHEEL_S3" ] && docker image inspect "loopy-engine:$ENGINE_IMAGE_TAG"'
+    assert guard in script
+    # Source build: plain build (the content-hash tag makes the image reusable next time).
+    assert 'docker build -t "loopy-engine:$ENGINE_IMAGE_TAG" /opt/loopy/image' in script
+    # PyPI build: cache-busting rebuild so a republished frozen version is actually re-fetched.
+    pypi_build = "docker build --pull --no-cache -t"
+    assert f'{pypi_build} "loopy-engine:$ENGINE_IMAGE_TAG" /opt/loopy/image' in script
 
 
 def test_render_deploy_script_installs_shipped_wheel_when_source_built():
