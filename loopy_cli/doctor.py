@@ -112,6 +112,99 @@ class Finding:
     hint: str | None = None
 
 
+@dataclass(frozen=True)
+class NextAction:
+    """One suggested next step for a project: the `command` to run and `why` it's next."""
+
+    command: str
+    why: str
+
+
+# The single path GitHub delivers to (mirrors `webhooks.GITHUB_HOOK_PATH`; duplicated as a
+# literal because `webhooks` imports from this module, so importing it back would be circular).
+_GITHUB_HOOK_PATH = "/hooks/github"
+
+
+def next_actions(
+    project,  # noqa: ANN001 - loopy_core.compile.model.Project
+    *,
+    read_env: Callable[[str], dict[str, str] | None],
+    control_plane_env: Mapping[str, str],
+) -> list[NextAction]:
+    """The guided onboarding ladder a bare `loopy` prints inside a project directory.
+
+    Answers "what should I do next here?" from *local* state only — no network, so bare
+    `loopy` stays instant and offline (unlike `check_repo_access`/`registration_findings`,
+    which reach GitHub). The order matches the setup a first run needs: get a public URL for
+    deliveries, wire git auth for repo clones, then point GitHub's repo webhooks at the engine.
+    Each step is self-gating on what the project actually declares, so a repo-less or
+    webhook-less project only sees the steps that apply to it. An empty list ⇒ nothing left to
+    wire up.
+
+    Because it can't see GitHub's side without a network call, it suggests the idempotent
+    `loopy webhooks github` whenever its prerequisites (an App and a public URL) are met rather
+    than trying to prove a hook is already registered — re-running it is a no-op if it is.
+    """
+    registry = project.registry
+
+    # What the compiled project actually declares.
+    declares_repos = any(sandbox.repos for sandbox in registry.sandboxes.values())
+    webhook_sensors = [
+        s for s in project.sensors if getattr(s.trigger, "kind", None) == "webhook"
+    ]
+    uses_github = any(s.trigger.path == _GITHUB_HOOK_PATH for s in webhook_sensors)
+
+    # Local state: the public URL and whichever git-auth path is wired.
+    public_url = (control_plane_env.get("LOOPY_PUBLIC_URL") or "").strip()
+    app_configured = bool(control_plane_env.get("GITHUB_APP_ID"))
+    token_in_env_file = False
+    seen_env_files: list[str] = []
+    for sandbox in registry.sandboxes.values():
+        for rel in sandbox.env_file:
+            if rel in seen_env_files:
+                continue
+            seen_env_files.append(rel)
+            env = read_env(rel)
+            if env and env.get("GITHUB_TOKEN"):
+                token_in_env_file = True
+    git_auth = app_configured or token_in_env_file
+
+    actions: list[NextAction] = []
+
+    # 1. A public URL — webhook sensors have nowhere to receive deliveries without one.
+    if webhook_sensors and not public_url:
+        actions.append(
+            NextAction(
+                "loopy deploy bootstrap",
+                "no LOOPY_PUBLIC_URL yet — provision a host that mints one, or set "
+                "LOOPY_PUBLIC_URL in loopy.env for your own hosting",
+            )
+        )
+
+    # 2. Git auth — a sandbox that clones repos needs a GitHub App (the manifest flow) or a token.
+    if declares_repos and not git_auth:
+        actions.append(
+            NextAction(
+                "loopy auth github",
+                "sandboxes clone repos but no git auth is wired — create a GitHub App, or add "
+                "GITHUB_TOKEN to the env_file",
+            )
+        )
+
+    # 3. GitHub delivery — with an App and a URL in place, register the repo webhooks. (Gated on
+    #    the App specifically, not a token: `loopy webhooks github` registers via App creds.)
+    if uses_github and app_configured and public_url:
+        actions.append(
+            NextAction(
+                "loopy webhooks github",
+                "register GitHub delivery so Github.* events reach the engine (re-runnable; "
+                "add --check to just verify)",
+            )
+        )
+
+    return actions
+
+
 def _repo_slug(url: str) -> str:
     """Normalize a `Repo.url` to a lowercase `owner/name` for comparison.
 

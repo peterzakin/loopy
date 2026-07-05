@@ -288,3 +288,54 @@ def test_bare_loopy_prints_help_and_exits_zero():
 def test_bare_loopy_matches_help_flag():
     """The no-args overview is the same output as `loopy --help`."""
     assert runner.invoke(app, []).output == runner.invoke(app, ["--help"]).output
+
+
+def _clear_project_env(monkeypatch) -> None:
+    """Drop any inherited state that would change the next-steps ladder under test."""
+    for key in ("GITHUB_APP_ID", "LOOPY_PUBLIC_URL", "GITHUB_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
+
+
+def test_bare_loopy_in_project_prints_next_steps(tmp_path, monkeypatch):
+    """Inside a project directory a bare `loopy` prints the guided next-steps ladder instead of
+    the command overview — the onboarding path for "what do I do next here?"."""
+    root = tmp_path / "demo"
+    scaffold_project(root, "demo", repos=["me/app"])
+    _clear_project_env(monkeypatch)
+    monkeypatch.chdir(root)
+
+    result = runner.invoke(app, [])
+    assert result.exit_code == 0, result.output
+    assert "Suggested next steps" in result.output
+    # No URL and no git auth yet: the first two rungs of the ladder.
+    assert "loopy deploy bootstrap" in result.output
+    assert "loopy auth github" in result.output
+    # It's the ladder, not the overview — no Typer usage banner.
+    assert "Usage: loopy" not in result.output
+
+
+def test_bare_loopy_in_configured_project_suggests_webhooks(tmp_path, monkeypatch):
+    """With an App and a public URL wired, the ladder's remaining rung is registering delivery."""
+    root = tmp_path / "demo"
+    scaffold_project(root, "demo", repos=["me/app"])
+    _clear_project_env(monkeypatch)
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.setenv("LOOPY_PUBLIC_URL", "https://x.example")
+    monkeypatch.chdir(root)
+
+    result = runner.invoke(app, [])
+    assert result.exit_code == 0, result.output
+    assert "loopy webhooks github" in result.output
+    assert "loopy deploy bootstrap" not in result.output
+
+
+def test_bare_loopy_outside_project_still_prints_overview(tmp_path, monkeypatch):
+    """Outside a project (no registry.yml) a bare `loopy` is unchanged: the command overview."""
+    _clear_project_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, [])
+    assert result.exit_code == 0, result.output
+    assert "Suggested next steps" not in result.output
+    for command in ("init", "compile", "doctor", "run"):
+        assert command in result.output
