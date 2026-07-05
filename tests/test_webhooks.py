@@ -19,6 +19,7 @@ from loopy_cli.webhooks import (
     BUILTIN_HOOK_EVENTS,
     HookSync,
     SyncReport,
+    deploy_webhook_lines,
     github_hook_events,
     registration_findings,
     sync_github_webhooks,
@@ -420,3 +421,54 @@ def test_findings_quiet_without_app(tmp_path, monkeypatch):
     monkeypatch.delenv("GITHUB_APP_ID", raising=False)
     findings = registration_findings(project, target, control_env={"LOOPY_PUBLIC_URL": _URL})
     assert findings == []
+
+
+# --- post-deploy webhook summary --------------------------------------------
+
+
+def test_deploy_lines_none_without_github_sensors(tmp_path):
+    # Minimal scaffold ships its review workflow disabled — nothing listens for GitHub, so the
+    # deploy summary stays silent about webhooks rather than nudging a command that'd do nothing.
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo")
+    assert deploy_webhook_lines(target, _URL) is None
+
+
+def test_deploy_lines_confirm_when_all_registered(tmp_path, monkeypatch):
+    target, _ = _github_project(tmp_path)
+    _write_app_creds(target)
+    monkeypatch.setattr(
+        webhooks,
+        "sync_github_webhooks",
+        lambda root, **kw: SyncReport(results=[HookSync("me/app", "ok", "delivers")]),
+    )
+    lines = deploy_webhook_lines(target, _URL)
+    assert lines is not None and len(lines) == 1
+    assert lines[0].startswith("registered")
+    assert _DELIVERY in lines[0]
+
+
+def test_deploy_lines_nudge_when_unregistered(tmp_path, monkeypatch):
+    target, _ = _github_project(tmp_path)
+    _write_app_creds(target)
+    monkeypatch.setattr(
+        webhooks,
+        "sync_github_webhooks",
+        lambda root, **kw: SyncReport(results=[HookSync("me/app", "missing", "no webhook")]),
+    )
+    lines = deploy_webhook_lines(target, _URL)
+    assert lines is not None
+    joined = "\n".join(lines)
+    assert "loopy webhooks github" in joined
+    assert "smart next step" in joined
+    assert _DELIVERY in joined  # explains where events would be delivered
+
+
+def test_deploy_lines_nudge_when_check_cannot_run(tmp_path, monkeypatch):
+    """No App configured ⇒ the live check can't run; fall back to the nudge rather than
+    claiming a state we couldn't verify."""
+    target, _ = _github_project(tmp_path)
+    monkeypatch.delenv("GITHUB_APP_ID", raising=False)
+    lines = deploy_webhook_lines(target, _URL)
+    assert lines is not None
+    assert "loopy webhooks github" in "\n".join(lines)

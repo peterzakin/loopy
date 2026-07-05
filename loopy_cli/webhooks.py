@@ -500,3 +500,61 @@ def registration_findings(project, root: Path, *, control_env) -> list[Finding]:
             )
         )
     return findings
+
+
+def deploy_webhook_lines(root: Path, public_url: str) -> list[str] | None:
+    """Post-deploy summary text for GitHub webhook wiring, as value-column lines.
+
+    The first line is the summary value (the caller prints it right after the
+    `webhooks:` label); any further lines are continuations the caller indents to
+    the same column. Returns None when the project has no `/hooks/github` sensors —
+    the deploy has nothing to say about GitHub delivery.
+
+    A live `--check` against GitHub distinguishes two states:
+    - already wired (every declared repo delivers here): a one-line confirmation.
+    - not wired, or we can't confirm (no App, no repos, API error): a short blurb
+      that `loopy webhooks github` is the next step and what it does.
+
+    Any failure to check degrades to the nudge — pointing at the next command is
+    always safe, and the command itself is idempotent, so an over-eager nudge costs
+    nothing. Deliberately never registers anything; that stays an explicit step.
+    """
+    from loopy_core.compile.pipeline import compile_project
+    from loopy_runtime.scm.github_app import GitHubAppError, MissingCredentials
+
+    project = compile_project(root).project
+    if project is None:
+        return None  # a broken project is surfaced elsewhere; nothing to add here
+    uses_github = any(
+        s.trigger.kind == "webhook" and s.trigger.path == GITHUB_HOOK_PATH
+        for s in project.sensors
+    )
+    if not uses_github:
+        return None
+
+    delivery = f"{public_url.rstrip('/')}{GITHUB_HOOK_PATH}"
+    nudge = [
+        "not registered yet — a smart next step. Run:",
+        "  loopy webhooks github",
+        "It registers a webhook on your repo(s) so GitHub delivers pull request,",
+        f"issue, and push events to {delivery}.",
+        "Until then the engine is live but nothing triggers your workflows.",
+    ]
+
+    repos = _declared_repo_slugs(project.registry)
+    if not repos:
+        return nudge
+    try:
+        report = sync_github_webhooks(
+            root,
+            repos=repos,
+            events=github_hook_events(project.sensors),
+            public_url=public_url,
+            check=True,
+        )
+    except (MissingCredentials, GitHubAppError, OSError):
+        return nudge
+
+    if report.results and all(r.action == "ok" for r in report.results):
+        return [f"registered — GitHub delivers to {delivery}"]
+    return nudge
