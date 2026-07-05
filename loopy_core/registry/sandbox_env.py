@@ -43,6 +43,7 @@ RESERVED_ENV_KEYS: frozenset[str] = frozenset(
         "GITHUB_APP_PRIVATE_KEY",
         "GITHUB_WEBHOOK_SECRET",
         "SENTRY_WEBHOOK_SECRET",
+        "SENTRY_AUTH_TOKEN",  # bootstraps the Sentry integration; read by `loopy auth sentry`
     }
 )
 

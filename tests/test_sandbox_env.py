@@ -63,6 +63,17 @@ def test_declared_but_absent_key_is_not_injected(tmp_path):
     assert resolver.resolve("Scraper", spec) == {}
 
 
+def test_resolver_fails_closed_on_reconstructed_reserved_name(tmp_path):
+    # Defense in depth: even if a (hand-edited/stale) manifest declares a key whose namespaced
+    # form reconstructs a control-plane var, the resolver must not forward it. Sandbox `Github`
+    # + `APP_PRIVATE_KEY` -> `GITHUB_APP_PRIVATE_KEY`, which is reserved.
+    resolver = EnvFileSecretsResolver(
+        tmp_path, environ={"GITHUB_APP_PRIVATE_KEY": "-----REAL APP KEY-----"}
+    )
+    spec = SandboxSpec(env=["APP_PRIVATE_KEY"])
+    assert resolver.resolve("Github", spec) == {}
+
+
 def test_two_sandboxes_get_different_values_for_same_key(tmp_path):
     environ = {
         "SCRAPER_ANTHROPIC_API_KEY": "sk-scraper",

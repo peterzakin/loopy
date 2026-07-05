@@ -201,7 +201,12 @@ def _check_env_keys(
 
     Rejects wildcards (a `*` is not a valid name, so there is no forward-everything hatch) and
     reserved names (`LOOPY_*`, `DAYTONA_API_KEY`, ...) whose forwarding would leak an infra
-    secret into an untrusted sandbox."""
+    secret into an untrusted sandbox. The check is applied to the *resolved* variable name the
+    runtime actually reads — `<PREFIX>_<KEY>`, where PREFIX comes from the sandbox name — not
+    just the bare key, so a reserved name can't be reconstructed by splitting it across the
+    name/key boundary (e.g. a sandbox named `Github` with `env: [APP_PRIVATE_KEY]` would resolve
+    to `GITHUB_APP_PRIVATE_KEY`)."""
+    prefix = sandbox_env_prefix(sandbox)
     for key in env:
         if not is_valid_env_name(key):
             diags.error(
@@ -210,36 +215,50 @@ def _check_env_keys(
                 f"name (letters, digits, underscore; no wildcards)",
                 span=span_at(file, line),
             )
-        elif is_reserved_env_key(key):
+            continue
+        resolved = f"{prefix}_{key}"
+        if is_reserved_env_key(key):
             diags.error(
                 codes.E216,
                 f"sandbox '{sandbox}' env: may not forward the control-plane key {key!r} "
                 f"(reserved for the engine; forwarding it would leak an infra secret)",
                 span=span_at(file, line),
             )
+        elif is_reserved_env_key(resolved):
+            diags.error(
+                codes.E216,
+                f"sandbox '{sandbox}' env: entry {key!r} resolves to the control-plane variable "
+                f"{resolved!r} (the sandbox name prefixes it); rename the sandbox or drop the key "
+                f"so it can't read an infra secret",
+                span=span_at(file, line),
+            )
 
 
 def _check_env_namespaces(sandboxes: dict[str, Sandbox], diags: DiagnosticCollector) -> None:
-    """E217: distinct sandbox names must not collide under the production env namespace.
+    """E217: two sandboxes must not forward the same production env variable.
 
-    `<PREFIX>_<KEY>` disambiguates a sandbox's forwarded vars in the engine environment, so two
-    names that normalize to the same prefix (e.g. `Web-app` and `Web_app`) would make those
-    vars ambiguous. Only enforced when a colliding sandbox actually declares `env:` — an unused
-    namespace can't be ambiguous, and this keeps the check from breaking unrelated projects."""
-    by_prefix: dict[str, list[Sandbox]] = defaultdict(list)
+    A forwarded key resolves to `<PREFIX>_<KEY>` in the engine environment. If two distinct
+    sandboxes resolve a declared key to the same variable name, one platform variable would feed
+    both — ambiguous. Checking the resolved name (not just the prefix) covers both a shared name
+    prefix (`Web-app` and `Web_app`, both key `KEY` -> `WEB_APP_KEY`) and a cross-prefix
+    reconstruction (`Web` + `APP_KEY` vs `Web_app` + `KEY`, both `WEB_APP_KEY`)."""
+    owners: dict[str, str] = {}  # resolved var name -> first sandbox that forwards it
     for sb in sandboxes.values():
-        by_prefix[sandbox_env_prefix(sb.name)].append(sb)
-    for prefix, group in by_prefix.items():
-        if len(group) < 2 or not any(sb.env for sb in group):
-            continue
-        first = group[0]
-        for sb in group[1:]:
-            diags.error(
-                codes.E217,
-                f"sandbox '{sb.name}' shares the env namespace '{prefix}_' with "
-                f"'{first.name}'; forwarded vars would be ambiguous. Rename one.",
-                span=sb.span,
-            )
+        prefix = sandbox_env_prefix(sb.name)
+        seen_here: set[str] = set()  # dedupe within one sandbox; iterate env in order
+        for key in sb.env:
+            resolved = f"{prefix}_{key}"
+            if resolved in seen_here:
+                continue
+            seen_here.add(resolved)
+            owner = owners.setdefault(resolved, sb.name)
+            if owner != sb.name:
+                diags.error(
+                    codes.E217,
+                    f"sandbox '{sb.name}' forwards the same platform variable '{resolved}' as "
+                    f"sandbox '{owner}'; one env var can't feed both. Rename a sandbox or key.",
+                    span=sb.span,
+                )
 
 
 def _load_repos(value: object, file: str, line: int, diags: DiagnosticCollector) -> list[Repo]:

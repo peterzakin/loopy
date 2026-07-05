@@ -117,19 +117,76 @@ def test_env_github_token_is_allowed(tmp_path):
     assert codes.E216 not in result_codes(compile_project(tmp_path))
 
 
-def test_env_namespace_collision_reports_e217(tmp_path):
-    # `Web-app` and `Web_app` both normalize to the `WEB_APP` namespace; one uses env:.
+def _named_sandbox_env(name: str, value: str) -> str:
+    return f"sandboxes:\n  {name}:\n    provider: local\n    env: {value}\n"
+
+
+def test_env_reserved_reconstructed_across_name_boundary_reports_e216(tmp_path):
+    # The bare key `APP_PRIVATE_KEY` is not reserved, but sandbox `Github` prefixes it to the
+    # control-plane var GITHUB_APP_PRIVATE_KEY at run time. The gate must catch the *resolved*
+    # name, not just the bare key, or the App private key leaks into an untrusted sandbox.
+    write_project(tmp_path, {"registry.yml": _named_sandbox_env("Github", "APP_PRIVATE_KEY")})
+    assert_code(compile_project(tmp_path), codes.E216)
+
+
+def test_env_reserved_reconstructed_daytona_reports_e216(tmp_path):
+    write_project(tmp_path, {"registry.yml": _named_sandbox_env("Daytona", "API_KEY")})
+    assert_code(compile_project(tmp_path), codes.E216)
+
+
+def test_env_reserved_reconstructed_loopy_prefix_reports_e216(tmp_path):
+    # Sandbox `Loopy` prefixes any key into the reserved LOOPY_ namespace.
+    write_project(tmp_path, {"registry.yml": _named_sandbox_env("Loopy", "ADMIN_TOKEN")})
+    assert_code(compile_project(tmp_path), codes.E216)
+
+
+def test_env_ordinary_prefixed_name_is_allowed(tmp_path):
+    # A normal sandbox name + key resolves to a non-reserved var, so it must compile clean.
+    write_project(
+        tmp_path,
+        {"registry.yml": _named_sandbox_env("Scraper", "[ANTHROPIC_API_KEY, GITHUB_TOKEN]")},
+    )
+    assert codes.E216 not in result_codes(compile_project(tmp_path))
+
+
+def test_env_namespace_collision_same_prefix_reports_e217(tmp_path):
+    # `Web-app` and `Web_app` both normalize to `WEB_APP`; both forward the same key, so both
+    # resolve to `WEB_APP_ANTHROPIC_API_KEY` — one platform var would feed both sandboxes.
     registry = (
         "sandboxes:\n"
         "  Web-app:\n    provider: local\n    env: ANTHROPIC_API_KEY\n"
-        "  Web_app:\n    provider: local\n"
+        "  Web_app:\n    provider: local\n    env: ANTHROPIC_API_KEY\n"
+    )
+    write_project(tmp_path, {"registry.yml": registry})
+    assert_code(compile_project(tmp_path), codes.E217)
+
+
+def test_env_namespace_collision_cross_prefix_reports_e217(tmp_path):
+    # Different prefixes, different keys, but the same resolved var: `Web` + `APP_KEY` and
+    # `Web_app` + `KEY` both reconstruct `WEB_APP_KEY`.
+    registry = (
+        "sandboxes:\n"
+        "  Web:\n    provider: local\n    env: APP_KEY\n"
+        "  Web_app:\n    provider: local\n    env: KEY\n"
     )
     write_project(tmp_path, {"registry.yml": registry})
     assert_code(compile_project(tmp_path), codes.E217)
 
 
 def test_env_namespace_collision_ignored_without_env(tmp_path):
-    # Same prefix collision, but neither declares env: — no ambiguity, so no diagnostic.
+    # Same prefix collision, but neither declares env: — no forwarded var, so no ambiguity.
     registry = "sandboxes:\n  Web-app:\n    provider: local\n  Web_app:\n    provider: local\n"
+    write_project(tmp_path, {"registry.yml": registry})
+    assert codes.E217 not in result_codes(compile_project(tmp_path))
+
+
+def test_env_distinct_sandboxes_same_key_no_collision(tmp_path):
+    # Two normally-named sandboxes forwarding the same key resolve to distinct platform vars
+    # (SCRAPER_* vs REVIEWER_*), so there is no collision.
+    registry = (
+        "sandboxes:\n"
+        "  Scraper:\n    provider: local\n    env: ANTHROPIC_API_KEY\n"
+        "  Reviewer:\n    provider: local\n    env: ANTHROPIC_API_KEY\n"
+    )
     write_project(tmp_path, {"registry.yml": registry})
     assert codes.E217 not in result_codes(compile_project(tmp_path))

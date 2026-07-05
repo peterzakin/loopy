@@ -25,7 +25,7 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
-from loopy_core.registry.sandbox_env import sandbox_env_prefix
+from loopy_core.registry.sandbox_env import is_reserved_env_key, sandbox_env_prefix
 from loopy_runtime.manifest_model import SandboxSpec
 
 # The sensor layer's dotenv, relative to the project root. Runner-wide (one file for all
@@ -101,6 +101,12 @@ class EnvFileSecretsResolver:
         prefix = sandbox_env_prefix(sandbox_name)
         for key in spec.env:
             namespaced = f"{prefix}_{key}"
+            # Fail closed: a control-plane variable must never cross into the sandbox, even if a
+            # hand-edited or stale manifest declares a key whose namespaced form reconstructs one
+            # (e.g. sandbox `Github` + `APP_PRIVATE_KEY` -> `GITHUB_APP_PRIVATE_KEY`). The compiler
+            # rejects this (E216); enforce it here too, since this is where the real name is built.
+            if is_reserved_env_key(namespaced):
+                continue
             if namespaced in self._environ:
                 env[key] = self._environ[namespaced]
         return env
