@@ -36,21 +36,23 @@ def test_coding_scaffold_compiles_green(tmp_path):
 
     result = compile_project(target)
     assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
-    # With a repo, the starter is the coding loop: a single CodeTask-triggered workflow.
-    assert "codefix" in result.project.workflows
+    # With a repo, the default loop is scaffolded live: a single Github.PullRequestOpened workflow.
+    assert "review" in result.project.workflows
     # The sandbox pre-declares its env: passthrough so the project is deploy-ready (`loopy env`).
     assert result.project.registry.sandboxes["BaseSandbox"].env == ["ANTHROPIC_API_KEY"]
 
 
 def test_minimal_scaffold_compiles_green(tmp_path):
-    """No repo ⇒ the minimal scaffold: a trimmed registry with no workflow, valid as written."""
+    """No repo ⇒ the minimal scaffold: the review workflow ships disabled, so compile sees no
+    workflow at all — the `.disabled` file is skipped by the discovery glob."""
     target = tmp_path / "demo"
     scaffold_project(target, "demo")
 
     result = compile_project(target)
     assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
-    # Deliberately bare: no starter workflow at all — the registry points at wiring GitHub.
+    # The disabled workflow is inert: discovery globs workflows/*/*.md, so .md.disabled is skipped.
     assert not result.project.workflows
+    assert (target / "workflows" / "review" / "code-review.md.disabled").is_file()
     # No repo declared, and crucially never the old unpushable placeholder.
     assert result.project.registry.sandboxes["BaseSandbox"].repos == []
     assert "octocat" not in (target / "registry.yml").read_text().lower()
@@ -92,9 +94,7 @@ def test_coding_scaffold_writes_canonical_layout(tmp_path):
     rels = {p.as_posix() for p in created}
     assert {
         "registry.yml",
-        "workflows/codefix/open-pr.md",
-        "skills/codefix/SKILL.md",
-        "sensors/sensors.py",
+        "workflows/review/code-review.md",
         "secrets/base.env",
         "loopy.env",
         ".gitignore",
@@ -108,21 +108,25 @@ def test_coding_scaffold_writes_canonical_layout(tmp_path):
 
 
 def test_minimal_scaffold_writes_trimmed_layout(tmp_path):
-    """The no-repo scaffold is just the registry + env files: no workflow, skill, or sensor."""
+    """The no-repo scaffold ships the review workflow disabled, plus the registry + env files —
+    but no skill or sensor, and no *live* (discovered) workflow."""
     target = tmp_path / "demo"
     created = scaffold_project(target, "demo")
 
     rels = {p.as_posix() for p in created}
     assert {
         "registry.yml",
+        "workflows/review/code-review.md.disabled",
         "secrets/base.env",
         "loopy.env",
         ".gitignore",
         "README.md",
         "AGENTS.md",
     } == rels
-    # No starter files leak into the minimal scaffold.
-    assert not (target / "workflows").exists()
+    # The default workflow ships disabled — same content as the coding scaffold's, minus discovery.
+    assert (target / "workflows" / "review" / "code-review.md.disabled").is_file()
+    assert not (target / "workflows" / "review" / "code-review.md").exists()
+    # No skill or sensor in the minimal scaffold.
     assert not (target / "skills").exists()
     assert not (target / "sensors").exists()
     assert "# demo" in (target / "registry.yml").read_text()
@@ -146,10 +150,10 @@ def test_scaffold_writes_agents_md_for_both_scaffolds(tmp_path):
         # And the sentinel was actually replaced.
         assert "__STARTER_BLOCK__" not in agents_md
 
-    # The coding tail names the starter's own entry event; the minimal tail says there is no
-    # workflow yet and steers the agent to wire GitHub access before building.
+    # The coding tail names the default workflow's built-in entry event; the minimal tail says the
+    # workflow ships disabled and steers the agent to wire GitHub access before enabling it.
     coding_md = (tmp_path / "coding" / "AGENTS.md").read_text()
-    assert "--event CodeTask" in coding_md
+    assert "--event Github.PullRequestOpened" in coding_md
     minimal_md = (tmp_path / "minimal" / "AGENTS.md").read_text()
     assert "without GitHub access" in minimal_md
     assert "loopy auth github" in minimal_md
@@ -314,7 +318,7 @@ def test_init_without_github_auth_scaffolds_minimal(tmp_path, monkeypatch):
 
     result = compile_project(tmp_path / "demo")
     assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
-    # The minimal registry: no starter workflow, no declared repo.
+    # The minimal scaffold: the review workflow ships disabled (not discovered), no declared repo.
     assert not result.project.workflows
     assert result.project.registry.sandboxes["BaseSandbox"].repos == []
 

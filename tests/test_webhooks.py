@@ -240,10 +240,13 @@ def test_sync_without_app_raises_missing_credentials(tmp_path, monkeypatch):
 
 
 def _github_project(tmp_path, *, repos=("me/app",)):
-    """A compiled project that actually listens for GitHub webhooks: the coding scaffold
-    plus one workflow triggered by a built-in `Github.*` event."""
+    """A compiled project that listens for GitHub webhooks via exactly one built-in `Github.*`
+    trigger — a Github.Push step. The coding scaffold's own default workflow listens on
+    Github.PullRequestOpened, so we drop it here to keep the trigger set to just the push event
+    these tests assert on."""
     target = tmp_path / "demo"
     scaffold_project(target, "demo", repos=list(repos))
+    (target / "workflows" / "review" / "code-review.md").unlink()  # keep only the push trigger
     step = target / "workflows" / "watch" / "on-push.md"
     step.parent.mkdir(parents=True)
     step.write_text("---\non: Github.Push\nagent: Claude\n---\nSay hi to {{ event.pusher }}.\n")
@@ -377,8 +380,10 @@ def test_cli_list_with_no_webhook_sensors(tmp_path):
 
 
 def test_findings_empty_without_github_sensors(tmp_path):
+    # The minimal scaffold ships its review workflow disabled, so nothing listens for GitHub
+    # webhooks — a project with no github sensors produces no registration findings.
     target = tmp_path / "demo"
-    scaffold_project(target, "demo", repos=["me/app"])
+    scaffold_project(target, "demo")
     project = compile_project(target).project
     assert registration_findings(project, target, control_env={}) == []
 

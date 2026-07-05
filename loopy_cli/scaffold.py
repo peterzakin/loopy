@@ -2,9 +2,16 @@
 
 Kept out of the CLI module so the (multi-line, brace-heavy) templates don't clutter the
 command wiring, and so the scaffold is unit-testable as plain data. The canonical layout
-mirrors `examples/codefix` (the smallest runnable loop): one `CodeTask` event → a
-`claude-code` agent that edits a checkout and opens a PR. A freshly scaffolded project
-compiles green out of the box — `tests/test_init_scaffold.py` guards that.
+mirrors `examples/github` (the smallest event-driven loop): the built-in
+`Github.PullRequestOpened` event → a `claude-code` agent that reviews the opened PR's diff
+and posts review comments. A freshly scaffolded project compiles green out of the box —
+`tests/test_init_scaffold.py` guards that.
+
+Two shapes, chosen by GitHub access. With a repo, the review workflow is scaffolded live. With
+none (a path `loopy init` strongly discourages), the *same* workflow ships **disabled** — as
+`workflows/review/code-review.md.disabled`, a name the discovery glob (`workflows/*/*.md`)
+skips so the project still compiles green — and every entry file points at wiring GitHub
+access, then renaming the file to enable it.
 """
 
 from __future__ import annotations
@@ -53,8 +60,8 @@ def validate_project_name(name: str) -> str:
 
 
 _REGISTRY_YML = """\
-# __PROJECT_NAME__ — a CodeTask drives a claude-code agent to edit a repo and open a PR.
-# Docs: `loopy docs`. Validate edits: `loopy compile .`.
+# __PROJECT_NAME__ — the default loop: a pull request is opened → a claude-code agent reviews
+# the diff and posts review comments. Docs: `loopy docs`. Validate edits: `loopy compile .`.
 
 defaults:
   agent:
@@ -63,71 +70,47 @@ defaults:
 sandboxes:
   BaseSandbox:
     provider: daytona                          # or `docker` for a local run
-    image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
+    image: { debian_slim: "3.12", apt: [git, gh], workdir: /home/loopy, user: loopy }
     env_file: secrets/base.env                   # supplies these keys in local dev
     env: [ANTHROPIC_API_KEY]                     # forwarded from the platform env in production
     __REPOS_LINE__
 
 agents:
-  Claude:   { model: claude-opus-4-8, harness: claude-code, skills: [codefix] }
-  Codex:    { model: gpt-5.5, harness: codex, skills: [codefix] }
-  OpenCode: { model: claude-sonnet-4-6, harness: opencode, skills: [codefix] }
+  Claude:   { model: claude-opus-4-8, harness: claude-code }
+  Codex:    { model: gpt-5.5, harness: codex }
+  OpenCode: { model: claude-sonnet-4-6, harness: opencode }
 
-events:
-  CodeTask:       # loopy trigger --event CodeTask --fields '{"task": ..., "branch": ...}'
-    task: str
-    branch: str
-  PROpened:
-    pr_url: url
-    summary: str
+# events: the review loop triggers on the built-in `Github.PullRequestOpened` — its contract
+# and a sensor on /hooks/github are injected by the compiler, so there's nothing to declare
+# here. Register an event only when you add a workflow that `emits:` one for another to consume.
 """
 
-_OPEN_PR_MD = """\
+# The default workflow — mirrors examples/github/workflows/review/code-review.md. Shipped live
+# in the repo-backed scaffold and, byte-for-byte identical, as the `.disabled` file in the
+# no-repo scaffold (enabling it there is a rename, not a rewrite).
+_REVIEW_MD = """\
 ---
-on: CodeTask
+on: Github.PullRequestOpened
 agent: Claude
 output:
-  pr_url: url
-  summary: str
-emits: PROpened
+  verdict: str
+  comments_posted: int
 budget: { wall_clock: 15, spend: { usd: 2 } }
 ---
-A checkout of the target repository is already in your workspace — the sandbox cloned it at
-startup, and a GitHub token is wired into git, so `git push` and PR creation just work.
+A checkout of {{ event.repo }} is already in your workspace, with a GitHub token wired into
+git and the `gh` CLI — so fetching branches and posting review comments just work.
 
-Make the change described by the task: {{ event.task }}.
+Review pull request #{{ event.number }} — "{{ event.title }}" — which merges branch
+`{{ event.branch }}` into `{{ event.base }}`.
 
-Then:
-1. Create a new branch named `{{ event.branch }}`.
-2. Commit your edit with a clear message.
-3. Push the branch and open a pull request against the default branch. Include the loopy run
-   id (the `$LOOPY_RUN_ID` environment variable) in the PR body so it can be traced to this run.
+1. Fetch the PR branch and produce the diff against `{{ event.base }}`.
+2. Review it for correctness bugs, security issues, and clear simplifications. Focus on
+   high-confidence findings; don't nitpick style.
+3. Post each finding as an inline review comment on {{ event.url }} via `gh` (the injected
+   token authenticates you). If it's clean, leave a single approving summary comment.
 
-Return the pull request URL and a one-line summary of the change.
-"""
-
-_SKILL_MD = """\
-# codefix
-
-Make a focused code change in a checkout and open a pull request for it.
-
-- Keep the diff minimal — change only what the task asks for; don't reformat untouched code.
-- Match the surrounding style and conventions of the file you're editing.
-- Use a descriptive branch name and a commit message that states the change, not the process.
-- The PR body should say what changed and why, in a sentence or two.
-- Don't push directly to the default branch; always open a PR from your branch.
-"""
-
-_SENSORS_PY = """\
-from loopy import sensor
-from loopy.events import CodeTask  # generated by `loopy compile` — optional, for your typechecker
-
-
-@sensor(poll="10m", emits="CodeTask")  # `emits` is the contract the compiler reads
-def task_queue(req) -> CodeTask:
-    \"\"\"Stub: return a CodeTask per queued request (None emits nothing). A real one might read
-    Linear, a GitHub label, a spreadsheet. You can also fire one with `loopy trigger`.\"\"\"
-    return None
+Return your overall verdict (e.g. "approve" or "changes requested") and the number of
+comments you posted.
 """
 
 _DEV_ENV = """\
@@ -165,21 +148,25 @@ sensors/.env
 _README_MD = """\
 # __PROJECT_NAME__
 
-A Loopy project, scaffolded by `loopy init`. One `CodeTask` event drives a `claude-code`
-agent that edits a checkout and opens a pull request.
+A Loopy project, scaffolded by `loopy init`. The default loop reacts to the built-in
+`Github.PullRequestOpened` event: when a pull request is opened, a `claude-code` agent reviews
+the diff and posts review comments on it.
 
 ## Run it
 
 ```bash
-loopy auth github            # wire git auth (writes loopy.env, gitignored)
+loopy auth github            # wire git auth + the App that delivers PR events (writes loopy.env)
 # then set ANTHROPIC_API_KEY in secrets/base.env
 
 loopy doctor                 # a green compile is not a runnable project — check creds/repos
+loopy webhooks github        # register the PR webhook on your repo(s) (needs LOOPY_PUBLIC_URL)
 loopy run                    # start the engine (compiles first); --in-process = no-Docker
 
-# fire one task by hand to watch the loop end-to-end:
-loopy trigger . --event CodeTask \\
-  --fields '{"task": "add a CONTRIBUTING.md", "branch": "codefix/contributing"}'
+# no open PR handy? drive the loop by hand with a sample payload:
+loopy trigger . --event Github.PullRequestOpened \\
+  --fields '{"number": 1, "repo": "octocat/Hello-World", "title": "Add widget", \\
+             "branch": "feat/widget", "base": "main", \\
+             "url": "https://github.com/octocat/Hello-World/pull/1"}'
 ```
 
 Run every command from this directory. [`AGENTS.md`](AGENTS.md) is the one-page map a coding
@@ -248,7 +235,7 @@ loopy trigger . --event <EventName> --fields '{"field": "value"}' --json
   `enum[a, b, c]`. Anything else is E201.
 - Every step's `agent:` must exist in `registry.yml` (E501); every sandbox declares
   `provider: local | docker | daytona` (E214); every agent resolves to a sandbox (E506).
-- Defined entities are **Capitalized** (`CodeTask`, `Claude`) and referenced by exact
+- Defined entities are **Capitalized** (`ReviewPosted`, `Claude`) and referenced by exact
   name. Filenames, step names, and event *fields* stay lowercase.
 - A sensor declares its event statically — `@sensor(poll="10m", emits="EventName")` or
   `@sensor(webhook="/hooks/x", emits="EventName")`. The compiler reads the decorator and
@@ -300,39 +287,43 @@ __STARTER_BLOCK__
 """
 
 _CODING_STARTER_BLOCK = """\
-One workflow, `codefix`: a `CodeTask` event drives the `Claude` agent to edit a checkout
-of the repo(s) in `sandboxes.BaseSandbox.repos` and open a pull request (emits
-`PROpened`). Fire one end-to-end:
+One workflow, `review`: the built-in `Github.PullRequestOpened` event drives the `Claude`
+agent to review the opened PR's diff (in a checkout of the repo(s) in
+`sandboxes.BaseSandbox.repos`) and post review comments on it. Live GitHub deliveries need
+the webhook registered (`loopy webhooks github`); until then, drive it by hand:
 
 ```bash
-loopy trigger . --event CodeTask \\
-  --fields '{"task": "add a CONTRIBUTING.md", "branch": "codefix/contributing"}' --json
+loopy trigger . --event Github.PullRequestOpened \\
+  --fields '{"number": 1, "repo": "octocat/Hello-World", "title": "Add widget", \\
+             "branch": "feat/widget", "base": "main", \\
+             "url": "https://github.com/octocat/Hello-World/pull/1"}' --json
 ```\
 """
 
 _MINIMAL_STARTER_BLOCK = """\
-None yet. This project was initialized **without GitHub access**, so `loopy init` wrote only
-the registry and env files — no workflow, no skill, no sensor. Loopy is built around agents
-that work on repos (clone a checkout, edit, open a PR); before building anything, close that
-gap:
+The default workflow — a PR is opened → the `Claude` agent reviews the diff and posts comments
+— ships **disabled** as `workflows/review/code-review.md.disabled`. This project was
+initialized **without GitHub access**, and the review loop needs a repo to check out and a
+GitHub token to post with, so nothing runs until you close that gap:
 
 1. Run `loopy auth github` (needs a human and a browser — ask the user to run it, or put a
    `GITHUB_TOKEN` in `secrets/base.env`).
 2. Add the repo(s) to `sandboxes.BaseSandbox.repos` in `registry.yml`.
-3. Add a workflow under `workflows/<name>/` (one `.md` step per file) and register its events
-   in `registry.yml` — `loopy docs` has the full authoring reference.\
+3. Rename `workflows/review/code-review.md.disabled` to `code-review.md` (dropping the
+   `.disabled` suffix), then `loopy compile .`. The compiler picks it up as a live workflow.\
 """
 
 
-# --- the no-repo scaffold: a trimmed-down registry, no starter workflow ------------------------
-# Scaffolded when `loopy init` is given no repo — a path init strongly discourages. Loopy is
-# built around agents that work on repos, so without one there is no starter workflow to write:
-# the scaffold is just a minimal registry.yml plus the env files, and every file points at the
-# same next step (wire GitHub access, then build).
+# --- the no-repo scaffold: the review workflow, shipped disabled --------------------------------
+# Scaffolded when `loopy init` is given no repo — a path init strongly discourages. The default
+# review workflow still ships, but disabled (`code-review.md.disabled`, which the discovery glob
+# skips), because it needs a repo to check out and a GitHub token to post with. Every file points
+# at the same next steps: wire GitHub access, name the repo, then rename the file to enable it.
 
 _MINIMAL_REGISTRY_YML = """\
-# __PROJECT_NAME__ — minimal registry (no GitHub access, so no starter workflow yet).
-# Next: `loopy auth github`, uncomment `repos:` below, add a workflow. Docs: `loopy docs`.
+# __PROJECT_NAME__ — the default review loop (a PR is opened → an agent reviews it) ships
+# DISABLED here (no GitHub access yet): see workflows/review/code-review.md.disabled.
+# Enable it: `loopy auth github`, uncomment `repos:` below, drop the file's `.disabled` suffix.
 
 defaults:
   agent:
@@ -341,7 +332,7 @@ defaults:
 sandboxes:
   BaseSandbox:
     provider: daytona                          # or `docker` for a local run
-    image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
+    image: { debian_slim: "3.12", apt: [git, gh], workdir: /home/loopy, user: loopy }
     env_file: secrets/base.env                   # supplies these keys in local dev
     env: [ANTHROPIC_API_KEY]                     # forwarded from the platform env in production
     # repos: [owner/repo]
@@ -351,29 +342,32 @@ agents:
   Codex:    { model: gpt-5.5, harness: codex }
   OpenCode: { model: claude-sonnet-4-6, harness: opencode }
 
-# events: register each event a workflow uses in `on:`/`emits:`, then add workflows/.
+# events: the review loop triggers on the built-in `Github.PullRequestOpened` — nothing to
+# declare. Register an event only when you add a workflow that `emits:` one for another to consume.
 """
 
 _MINIMAL_README_MD = """\
 # __PROJECT_NAME__
 
-A minimal Loopy project, scaffolded by `loopy init` **without GitHub access**: a registry
-(sandbox + agents) and the env files, but no starter workflow. Loopy is built around agents
-that work on repos (clone a checkout, edit, open a PR), so without one there is nothing
-useful to run yet.
+A Loopy project, scaffolded by `loopy init` **without GitHub access**. The default loop — a
+pull request is opened → a `claude-code` agent reviews the diff and posts comments — ships
+**disabled** as `workflows/review/code-review.md.disabled`, because the review loop needs a
+repo to check out and a GitHub token to post with.
 
-## Finish the setup
+## Enable the default loop
 
 ```bash
-loopy auth github            # wire git auth (writes loopy.env, gitignored)
+loopy auth github            # wire git auth + the App that delivers PR events (writes loopy.env)
 # then, in registry.yml: uncomment BaseSandbox `repos:` and name your repo(s),
-# set ANTHROPIC_API_KEY in secrets/base.env, and add a workflow under workflows/.
+# and set ANTHROPIC_API_KEY in secrets/base.env
 
+mv workflows/review/code-review.md.disabled workflows/review/code-review.md
+loopy compile --check .      # the compiler now picks up the workflow; validate it
 loopy doctor                 # a green compile is not a runnable project — check what's missing
 ```
 
-Then `loopy run` starts the engine and `loopy trigger . --event <Event> --fields '{...}'`
-fires one run by hand. [`AGENTS.md`](AGENTS.md) is the one-page map a coding agent reads first.
+Then `loopy webhooks github` registers the PR webhook and `loopy run` starts the engine.
+[`AGENTS.md`](AGENTS.md) is the one-page map a coding agent reads first.
 """
 
 
@@ -383,12 +377,11 @@ def _render_repos_line(repos: list[str]) -> str:
 
 
 def _coding_files(repos: list[str]) -> dict[str, str]:
-    """The repo-backed starter: a CodeTask → edit-a-checkout → open-a-PR loop."""
+    """The repo-backed starter: a Github.PullRequestOpened → review-the-diff → post-comments loop.
+    """
     return {
         "registry.yml": _REGISTRY_YML.replace(_REPOS_LINE, _render_repos_line(repos)),
-        "workflows/codefix/open-pr.md": _OPEN_PR_MD,
-        "skills/codefix/SKILL.md": _SKILL_MD,
-        "sensors/sensors.py": _SENSORS_PY,
+        "workflows/review/code-review.md": _REVIEW_MD,
         "secrets/base.env": _DEV_ENV,
         "loopy.env": _LOOPY_ENV,
         ".gitignore": _GITIGNORE,
@@ -398,9 +391,14 @@ def _coding_files(repos: list[str]) -> dict[str, str]:
 
 
 def _minimal_files() -> dict[str, str]:
-    """The no-repo scaffold: a trimmed-down registry + env files, no starter workflow."""
+    """The no-repo scaffold: the review workflow shipped disabled, plus the registry + env files.
+
+    The workflow ships as `code-review.md.disabled` — a name the discovery glob skips — so the
+    project compiles green while the default loop waits for GitHub access to be wired.
+    """
     return {
         "registry.yml": _MINIMAL_REGISTRY_YML,
+        "workflows/review/code-review.md.disabled": _REVIEW_MD,
         "secrets/base.env": _DEV_ENV,
         "loopy.env": _LOOPY_ENV,
         ".gitignore": _GITIGNORE,
@@ -417,10 +415,11 @@ def scaffold_project(
     `target` is created if absent; an existing **non-empty** directory is refused so we never
     clobber work. The caller is expected to have validated `name` via `validate_project_name`.
 
-    The scaffold is chosen by repo access. With one or more `repos`, you get the coding starter
-    (edit a checkout, open a PR). With none — a path `loopy init` strongly discourages — there is
-    no starter workflow at all: just a trimmed-down registry.yml plus the env files, every one of
-    them pointing at wiring GitHub access as the next step.
+    The scaffold is chosen by repo access. With one or more `repos`, the review workflow is
+    scaffolded live (a PR is opened → an agent reviews the diff and posts comments). With none —
+    a path `loopy init` strongly discourages — the same workflow ships disabled
+    (`code-review.md.disabled`, a name discovery skips, so it stays out of compile) and every
+    file points at wiring GitHub access, then renaming it to enable, as the next step.
     """
     from loopy_runtime.secrets import load_control_plane_env, write_control_plane_env
 
