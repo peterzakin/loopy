@@ -6,9 +6,12 @@ environment into the sandbox): parsing, manifest serialization, and the two comp
 
 from __future__ import annotations
 
+import pytest
+
 from loopy_core.compile import codes
 from loopy_core.compile.manifest import to_manifest
 from loopy_core.compile.pipeline import compile_project
+from loopy_core.registry.sandbox_env import RESERVED_ENV_KEYS
 from tests.helpers import assert_code, write_project
 from tests.helpers import codes as result_codes
 
@@ -98,6 +101,15 @@ def test_env_absent_is_empty(tmp_path):
 def test_env_reserved_control_plane_key_reports_e216(tmp_path):
     write_project(tmp_path, {"registry.yml": _sandbox_env("DAYTONA_API_KEY")})
     assert_code(compile_project(tmp_path), codes.E216, file="registry.yml")
+
+
+@pytest.mark.parametrize("reserved", sorted(RESERVED_ENV_KEYS))
+def test_every_reserved_key_is_rejected_by_e216(tmp_path, reserved):
+    # Each denylist entry is load-bearing against a reconstruction leak; forwarding any of them
+    # bare must be rejected. (Uses the `default` sandbox so the resolved name is DEFAULT_<KEY>,
+    # isolating the bare-key branch of the check.)
+    write_project(tmp_path, {"registry.yml": _sandbox_env(reserved)})
+    assert_code(compile_project(tmp_path), codes.E216)
 
 
 def test_env_reserved_loopy_prefix_reports_e216(tmp_path):

@@ -66,12 +66,39 @@ def test_declared_but_absent_key_is_not_injected(tmp_path):
 def test_resolver_fails_closed_on_reconstructed_reserved_name(tmp_path):
     # Defense in depth: even if a (hand-edited/stale) manifest declares a key whose namespaced
     # form reconstructs a control-plane var, the resolver must not forward it. Sandbox `Github`
-    # + `APP_PRIVATE_KEY` -> `GITHUB_APP_PRIVATE_KEY`, which is reserved.
+    # + `APP_PRIVATE_KEY` -> `GITHUB_APP_PRIVATE_KEY`, which is reserved (RESERVED_ENV_KEYS branch).
     resolver = EnvFileSecretsResolver(
         tmp_path, environ={"GITHUB_APP_PRIVATE_KEY": "-----REAL APP KEY-----"}
     )
     spec = SandboxSpec(env=["APP_PRIVATE_KEY"])
     assert resolver.resolve("Github", spec) == {}
+
+
+def test_resolver_fails_closed_on_reconstructed_loopy_prefix(tmp_path):
+    # The other guard branch: a name that reconstructs the reserved LOOPY_ prefix. Sandbox
+    # `Loopy` + `ADMIN_TOKEN` -> `LOOPY_ADMIN_TOKEN`, reserved via the prefix rule, not the set.
+    resolver = EnvFileSecretsResolver(tmp_path, environ={"LOOPY_ADMIN_TOKEN": "loopy_sk_admin"})
+    spec = SandboxSpec(env=["ADMIN_TOKEN"])
+    assert resolver.resolve("Loopy", spec) == {}
+
+
+def test_manifest_env_round_trips_through_runtime_spec():
+    # extra="ignore" on the runtime model would silently drop `env` if it weren't a declared
+    # field. Round-trip a compiled manifest's sandbox env through the runtime SandboxSpec.
+    import tempfile
+    from pathlib import Path
+
+    from loopy_core.compile.manifest import to_manifest
+    from loopy_core.compile.pipeline import compile_project
+    from loopy_runtime.manifest_model import Manifest
+
+    root = Path(tempfile.mkdtemp())
+    (root / "registry.yml").write_text(
+        "sandboxes:\n  default:\n    provider: local\n    env: [ANTHROPIC_API_KEY, GITHUB_TOKEN]\n"
+    )
+    manifest_dict = to_manifest(compile_project(root).project)
+    spec = Manifest.model_validate(manifest_dict).registry.sandboxes["default"]
+    assert spec.env == ["ANTHROPIC_API_KEY", "GITHUB_TOKEN"]
 
 
 def test_missing_env_file_tolerated_when_env_passthrough_declared(tmp_path):
