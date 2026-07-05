@@ -236,7 +236,7 @@ def test_duplicate_name_across_categories_reports_e211(tmp_path):
 
 def test_null_sandbox_key_reports_e001_not_crash(tmp_path):
     # A null YAML key (`~:`) must produce a clean diagnostic, not crash the compiler
-    # (regression: it used to hit sandbox_env_prefix(None) with an uncaught TypeError).
+    # (a non-string sandbox name must be caught as E001, not propagated to name-handling code).
     write_project(tmp_path, {"registry.yml": "sandboxes:\n  ~:\n    provider: local\n"})
     assert_code(compile_project(tmp_path), codes.E001, file="registry.yml")
 

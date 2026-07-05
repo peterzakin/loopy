@@ -2,12 +2,11 @@
 
 Three surfaces, one parser:
   * **Sandbox secrets** — defined at the sandbox (decision), resolved here at run time,
-    injected into the sandbox, never logged/recorded. Two sources feed a sandbox's env: the
-    `env_file` path(s) it references (the local-dev source, bare canonical keys), and the
-    engine's own process environment under a per-sandbox namespace (the production source).
-    For each name the sandbox declares in `env:`, the engine reads `<PREFIX>_<KEY>` (e.g.
-    `BASESANDBOX_ANTHROPIC_API_KEY`) and injects the canonical `<KEY>`, so two sandboxes can
-    hold different values for the same key and the namespaced value wins over the file.
+    injected into the sandbox, never logged/recorded. A sandbox's env comes from the
+    `env_file` path(s) it references: the parsed `KEY=VALUE` pairs are injected as the
+    sandbox's environment (the sandbox inherits nothing from the engine's process env). The
+    file is the single source in every mode — local dev reads it in place, and a deploy pushes
+    it to the target (e.g. SSM) so it is present in production too.
   * **Sensor secrets** — a single runner-wide `sensors/.env` (`load_sensor_env`); sensors run
     in-process and trusted-by-co-location today, so they share the engine's process env rather
     than a per-sensor reference.
@@ -21,11 +20,9 @@ Three surfaces, one parser:
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from pathlib import Path
 
-from loopy_core.registry.sandbox_env import is_reserved_env_key, sandbox_env_prefix
 from loopy_runtime.manifest_model import SandboxSpec
 
 # The sensor layer's dotenv, relative to the project root. Runner-wide (one file for all
@@ -68,18 +65,17 @@ class StaticSecretsResolver:
 
 
 class EnvFileSecretsResolver:
-    """Resolves a sandbox's env from two sources: its `env_file`(s) and namespaced passthrough.
+    """Resolves a sandbox's env from the `env_file`(s) it references, read relative to root.
 
-    `env_file` (the local-dev source) is read relative to the project root. Then, for each name
-    the sandbox declares in `env:`, the sandbox's `<PREFIX>_<KEY>` variable in `environ` (the
-    engine's process env — the production source) is injected under the canonical `<KEY>`,
-    overriding any `env_file` value so the real/platform environment always wins. `environ`
-    defaults to `os.environ` and is injectable for tests. Values are never logged or recorded.
+    Each declared file is parsed and merged in order (a later file's key wins). A declared file
+    that is missing is an error: the file is the single source of a sandbox's secrets, so a
+    deploy pushes it to the target (e.g. SSM) and it is present wherever the engine runs. `root`
+    anchors the paths; a file that escapes the project root is rejected. Values are never logged
+    or recorded.
     """
 
-    def __init__(self, root: str | Path, environ: Mapping[str, str] | None = None):
+    def __init__(self, root: str | Path):
         self.root = Path(root).resolve()
-        self._environ = os.environ if environ is None else environ
 
     def resolve(self, sandbox_name: str, spec: SandboxSpec) -> dict[str, str]:
         env: dict[str, str] = {}
@@ -90,33 +86,10 @@ class EnvFileSecretsResolver:
                     f"env_file {rel!r} for sandbox '{sandbox_name}' escapes the project root"
                 )
             if not path.is_file():
-                # A declared env_file is the local-dev source; in production it is absent from
-                # the image (gitignored, kept out by .dockerignore) and the `env:` passthrough
-                # supplies these values from the engine environment instead. So a missing file is
-                # only fatal when there is no passthrough to cover it — otherwise a correctly
-                # configured deploy would crash on boot. A genuinely missing required credential
-                # is still caught downstream by the harness's own required-key check.
-                if spec.env:
-                    continue
                 raise FileNotFoundError(
                     f"env_file {rel!r} for sandbox '{sandbox_name}' not found at {path}"
                 )
             env.update(_parse_dotenv(path.read_text()))
-        # Production passthrough: pull each declared key from the sandbox's namespace in the
-        # engine environment, stripping the prefix. A declared key that is absent in both the
-        # env_file and the environment is simply not injected (the harness's own required-key
-        # check surfaces a genuinely missing credential with an actionable message).
-        prefix = sandbox_env_prefix(sandbox_name)
-        for key in spec.env:
-            namespaced = f"{prefix}_{key}"
-            # Fail closed: a control-plane variable must never cross into the sandbox, even if a
-            # hand-edited or stale manifest declares a key whose namespaced form reconstructs one
-            # (e.g. sandbox `Github` + `APP_PRIVATE_KEY` -> `GITHUB_APP_PRIVATE_KEY`). The compiler
-            # rejects this (E216); enforce it here too, since this is where the real name is built.
-            if is_reserved_env_key(namespaced):
-                continue
-            if namespaced in self._environ:
-                env[key] = self._environ[namespaced]
         return env
 
 

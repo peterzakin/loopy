@@ -193,7 +193,6 @@ def _manifest() -> Manifest:
                         "image": {"debian_slim": "3.12"},
                         "network": ["github.com"],
                         "env_file": ["secrets/base.env", "secrets/extra.env"],
-                        "env": ["ANTHROPIC_API_KEY"],
                         "repos": [{"url": "acme/runbooks", "depth": 1}],
                     }
                 },
@@ -283,9 +282,7 @@ def test_build_registry_redacts_secrets():
     # non-secret fields still surface
     assert sb["network"] == ["github.com"]
     assert sb["repos"][0]["url"] == "acme/runbooks"
-    # the env: passthrough allow-list is names only (no values), so it's safe to surface —
-    # it shows which credentials the sandbox receives.
-    assert sb["env"] == ["ANTHROPIC_API_KEY"]
+    assert "env" not in sb
 
 
 def test_build_registry_shapes_agents_and_events():

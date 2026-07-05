@@ -27,11 +27,6 @@ class Sandbox(BaseModel):
     # Path(s) to env file(s) supplying this sandbox's secrets. A *reference* only —
     # the compiler records it and never reads the file (values resolve at run time).
     env_file: list[str] = Field(default_factory=list)
-    # Environment variables the engine forwards into this sandbox from its own process
-    # environment (the production path). A declared allow-list of canonical names; the
-    # runtime reads each from the sandbox's `<PREFIX>_<KEY>` namespace and strips the prefix.
-    # Values live in `env_file` (dev) or the platform env (prod), never in the manifest.
-    env: list[str] = Field(default_factory=list)
     # GitHub repos cloned into the workspace at acquire time. Auth rides
     # the credentials the runtime injects; egress must be allowed by `network`.
     repos: list[Repo] = Field(default_factory=list)

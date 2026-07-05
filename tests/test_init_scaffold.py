@@ -38,8 +38,8 @@ def test_coding_scaffold_compiles_green(tmp_path):
     assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
     # With a repo, the default loop is scaffolded live: a single Github.PullRequestOpened workflow.
     assert "review" in result.project.workflows
-    # The sandbox pre-declares its env: passthrough so the project is deploy-ready (`loopy env`).
-    assert result.project.registry.sandboxes["BaseSandbox"].env == ["ANTHROPIC_API_KEY"]
+    # The sandbox references its env_file, which supplies the agent's secrets at run time.
+    assert result.project.registry.sandboxes["BaseSandbox"].env_file == ["secrets/base.env"]
 
 
 def test_minimal_scaffold_compiles_green(tmp_path):

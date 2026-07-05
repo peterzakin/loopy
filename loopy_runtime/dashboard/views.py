@@ -134,16 +134,13 @@ def _field_rows(fields: dict[str, dict]) -> list[dict[str, Any]]:
 
 def _redact_sandbox(name: str, sb: SandboxSpec) -> dict[str, Any]:
     """A sandbox view with secrets removed. `env_file` is a list of paths to gitignored secret
-    files; we never expose the paths or values — only that N are configured. `env` is the
-    passthrough allow-list: variable *names* only (no values, compiler-guaranteed non-reserved),
-    so the names are safe to surface and show which credentials the sandbox receives."""
+    files; we never expose the paths or values — only that N are configured."""
     return {
         "name": name,
         "provider": sb.provider,
         "image": dict(sb.image),
         "network": list(sb.network),
         "repos": [{"url": r.url, "ref": r.ref, "path": r.path, "depth": r.depth} for r in sb.repos],
-        "env": list(sb.env),
         "secrets": {"redacted": True, "count": len(sb.env_file)},
     }
 

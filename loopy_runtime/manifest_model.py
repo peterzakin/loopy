@@ -47,10 +47,6 @@ class SandboxSpec(_Model):
     image: dict = Field(default_factory=dict)
     network: list[str] = Field(default_factory=list)
     env_file: list[str] = Field(default_factory=list)
-    # Canonical env-var names the engine forwards from its own environment into this sandbox
-    # (the production path). Compiler-validated (LOOPY-E216); resolved by the secrets layer
-    # from the sandbox's `<PREFIX>_<KEY>` namespace, prefix stripped on injection.
-    env: list[str] = Field(default_factory=list)
     repos: list[RepoSpec] = Field(default_factory=list)
 
 

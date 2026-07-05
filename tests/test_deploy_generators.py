@@ -1,8 +1,8 @@
 """`loopy dockerfile` and `loopy env` — the git-push deploy generators.
 
 `loopy dockerfile` emits a version-pinned Dockerfile + .dockerignore so a platform can build
-the engine from a git push; `loopy env` prints the production env block to paste into the
-platform, forwarding each sandbox's declared `env:` keys under their `<PREFIX>_<KEY>` namespace.
+the engine from a git push; `loopy env` prints the engine's control-plane env block to paste
+into the platform (sandbox secrets ride each sandbox's own `env_file`, not this block).
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ _REGISTRY = (
     "  BaseSandbox:\n"
     "    provider: daytona\n"
     "    env_file: secrets/base.env\n"
-    "    env: [ANTHROPIC_API_KEY, GITHUB_TOKEN]\n"
     "agents:\n"
     "  Worker: { model: claude-sonnet-4-6, harness: claude-code, sandbox: BaseSandbox }\n"
 )
@@ -108,31 +107,18 @@ def test_env_omits_laptop_side_public_url(tmp_path):
     assert "LOOPY_PUBLIC_URL is laptop-side" in result.stdout
 
 
-def test_env_forwards_declared_sandbox_keys_namespaced(tmp_path):
+def test_env_omits_sandbox_secrets(tmp_path):
+    # Sandbox secrets ride each sandbox's env_file, not this block: the env_file values never
+    # appear in the control-plane output.
     result = runner.invoke(app, ["env", str(_project(tmp_path))])
-    assert "BASESANDBOX_ANTHROPIC_API_KEY=sk-ant-real" in result.stdout
-    assert "BASESANDBOX_GITHUB_TOKEN=ghp_real" in result.stdout
-
-
-def test_env_excludes_undeclared_env_file_keys(tmp_path):
-    # OPENAI_API_KEY is in the env_file but not declared in env:, so it is not forwarded.
-    result = runner.invoke(app, ["env", str(_project(tmp_path))])
-    assert "OPENAI" not in result.stdout
-
-
-def test_env_missing_env_file_yields_empty_placeholders(tmp_path):
-    # A declared env_file that isn't on disk must not crash; keys emit with empty values.
-    (tmp_path / "registry.yml").write_text(_REGISTRY)
-    (tmp_path / "loopy.env").write_text(_LOOPY_ENV)
-    result = runner.invoke(app, ["env", str(tmp_path)])
-    assert result.exit_code == 0
-    assert "BASESANDBOX_ANTHROPIC_API_KEY=" in result.stdout
+    assert "sk-ant-real" not in result.stdout
+    assert "ghp_real" not in result.stdout
+    assert "BASESANDBOX" not in result.stdout
 
 
 def test_env_fails_on_uncompilable_project(tmp_path):
-    # A project that doesn't compile (reserved env: key, E216) must not emit a deploy block.
-    (tmp_path / "registry.yml").write_text(
-        "sandboxes:\n  BaseSandbox:\n    provider: local\n    env: [DAYTONA_API_KEY]\n"
-    )
+    # A project that doesn't compile (sandbox missing its required provider, E214) must not
+    # emit a deploy block.
+    (tmp_path / "registry.yml").write_text("sandboxes:\n  BaseSandbox:\n    image: {}\n")
     result = runner.invoke(app, ["env", str(tmp_path)])
     assert result.exit_code == 1
