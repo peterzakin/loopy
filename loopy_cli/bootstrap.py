@@ -1012,7 +1012,16 @@ def bootstrap(
         typer.echo(f"    (re-check any time: curl {public_url}/healthz)")
     typer.echo(f"  origin:    {public_ip} (CloudFront-only ingress; direct hits are refused)")
     typer.echo(f"  url:       wrote LOOPY_PUBLIC_URL={public_url} to loopy.env")
-    typer.echo("  webhooks:  loopy webhooks github  (registers GitHub delivery to the URL above)")
+    # Don't parrot `loopy webhooks github` unconditionally — check whether GitHub is already
+    # pointing here, and only nudge (with what the command does) when it isn't. A project with
+    # no GitHub sensors gets no webhook line at all.
+    from loopy_cli.webhooks import deploy_webhook_lines
+
+    webhook_lines = deploy_webhook_lines(root_abs, public_url)
+    if webhook_lines:
+        typer.echo(f"  webhooks:  {webhook_lines[0]}")
+        for line in webhook_lines[1:]:
+            typer.echo(f"             {line}")
     # /admin is blocked at CloudFront on this mode (the edge->origin hop is plain HTTP, so the
     # bearer token must not travel it). Reach the dashboard over an SSM tunnel instead — bare
     # `loopy admin` recognizes the CloudFront URL, prints the tunnel command (from the instance
