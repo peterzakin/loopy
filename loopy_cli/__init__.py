@@ -401,10 +401,12 @@ def init(
     `loopy doctor`). There is no non-interactive mode: setup is a conversation with a human
     (git auth alone needs a browser), so `init` requires a terminal.
 
-    Git auth is the gate for the starter workflow: loopy is built around agents that work on
-    code, so without git auth wired (or, past that, without a repo to act on) there is nothing
-    runnable to scaffold — `init` writes only a trimmed-down registry.yml plus the env files,
-    no workflow, and points at wiring GitHub as the next step.
+    The default workflow is a PR reviewer: a pull request is opened → an agent reviews the diff
+    and posts review comments. Git auth is its gate: loopy is built around agents that work on
+    code, so without git auth wired (or, past that, without a repo to act on) that loop can't
+    run. `init` still scaffolds it, but disabled (as `code-review.md.disabled`), alongside a
+    trimmed-down registry.yml, and points at wiring GitHub — then renaming the file — as the
+    next step.
     """
     from loopy_cli.scaffold import InvalidProjectName, scaffold_project, validate_project_name
 
@@ -443,12 +445,12 @@ def init(
     # `scaffold_project` (run below) preserves those values under its own template.
     github_authed = _offer_github_auth(target)
 
-    # Git auth is the gate for the starter workflow. Loopy is built around agents that clone a
-    # checkout, edit it, and open a PR, so without git auth wired there is nothing runnable to
-    # scaffold — we skip straight to the minimal registry (no workflow) rather than ask which
-    # repo(s) to name into a project that can't reach them. With auth in place, ask which repo(s)
-    # the workflow should act on; blank is allowed but strongly discouraged, and confirmed
-    # explicitly, and we never fall back to a placeholder repo.
+    # Git auth is the gate for the default (PR-review) workflow. Loopy is built around agents that
+    # work on a checkout, so without git auth wired that loop can't run — we skip straight to the
+    # minimal scaffold (which ships the workflow disabled) rather than ask which repo(s) to name
+    # into a project that can't reach them. With auth in place, ask which repo(s) the workflow
+    # should act on; blank is allowed but strongly discouraged, and confirmed explicitly, and we
+    # never fall back to a placeholder repo.
     repos = _prompt_for_repos() if github_authed else []
 
     try:
@@ -476,8 +478,8 @@ def init(
     # `loopy webhooks github` step, surfaced as a next step below once a public URL exists
     # (on the bootstrap target that URL doesn't arrive until `loopy deploy bootstrap`).
 
-    # A repo-less scaffold is deliberately bare — no starter workflow. Repeat the warning the
-    # user already confirmed past, and point at the way out.
+    # A repo-less scaffold ships the default workflow disabled — nothing runs yet. Repeat the
+    # warning the user already confirmed past, and point at the way out.
     if not repos:
         _note_minimal_mode()
 
@@ -490,11 +492,11 @@ def init(
 def _prompt_for_repos() -> list[str]:
     """Ask which repo(s) the agent should work on, strongly discouraging the repo-less path.
 
-    A repo is what the starter `codefix` workflow clones to edit and open a PR against —
-    loopy is built around agents that work on code, so without one there is no starter
-    workflow to scaffold, just a trimmed-down registry. Blank is therefore never a silent
-    default: it takes an explicit confirmation (declining re-asks for repos), and we never
-    fall back to an unpushable placeholder.
+    A repo is what the default `review` workflow checks out to review an opened PR and post
+    comments on — loopy is built around agents that work on code, so without one the default
+    loop ships disabled. Blank is therefore never a silent default: it takes an explicit
+    confirmation (declining re-asks for repos), and we never fall back to an unpushable
+    placeholder.
     """
     while True:
         raw = typer.prompt(
@@ -512,7 +514,7 @@ def _prompt_for_repos() -> list[str]:
         )
         typer.echo(
             typer.style(
-                "    Without one you get a bare registry.yml and no starter workflow — "
+                "    Without one the default PR-review workflow ships disabled — "
                 "there is nothing useful to run until GitHub access is wired.",
                 fg=typer.colors.BRIGHT_BLACK,
             )
@@ -522,18 +524,18 @@ def _prompt_for_repos() -> list[str]:
 
 
 def _note_minimal_mode() -> None:
-    """A minimal scaffold (no git auth, or no repo) is deliberately bare.
+    """A minimal scaffold (no git auth, or no repo) ships the default workflow disabled.
 
     Warn, and name the way out."""
     typer.echo(
         "  "
         + typer.style("⚠", fg=typer.colors.YELLOW)
-        + " Minimal scaffold — a trimmed-down registry.yml and env files, no starter workflow."
+        + " Minimal scaffold — the default PR-review workflow ships disabled (no GitHub access)."
     )
     typer.echo(
         typer.style(
-            "    To make this project useful: run `loopy auth github`, add repo(s) to "
-            "sandboxes.BaseSandbox.repos, then add a workflow (`loopy docs` has the reference).",
+            "    To enable it: run `loopy auth github`, add repo(s) to sandboxes.BaseSandbox.repos,"
+            " then rename workflows/review/code-review.md.disabled to drop `.disabled`.",
             fg=typer.colors.BRIGHT_BLACK,
         )
     )
