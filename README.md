@@ -149,7 +149,7 @@ more agents and events.)
 # Defaults: every agent inherits these; override a field only when needed.
 # `model` and `harness` are both required on every agent (here they come from defaults).
 # `harness` picks the agent runner: `claude-code` (Claude Code, claude-* models),
-# `codex` (OpenAI Codex, gpt-*/o-series/codex-* models), or `opencode` (OpenCode, which
+# `codex` (OpenAI Codex, gpt-*/codex-* models), or `opencode` (OpenCode, which
 # drives either family — write the bare model id; loopy expands it to opencode's
 # provider/model naming). The model must be one its harness can drive; nothing is
 # inferred, and `loopy compile` rejects a cross-provider pairing (a gpt-* model on
