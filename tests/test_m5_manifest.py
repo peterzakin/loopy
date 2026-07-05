@@ -150,6 +150,64 @@ def test_golden_snapshot_is_committed():
     assert json.loads(GOLDEN.read_text())["schema_version"] == "2"
 
 
+# ── Engine-side schema-version gate (version skew → one clear error) ─────────────
+
+
+def test_supported_schema_version_tracks_compiler():
+    """The reader's supported version and the writer's stamped version ship together and must
+    agree; a bump in one without the other is exactly the skew this gate exists to catch."""
+    from loopy_core.compile.manifest import SCHEMA_VERSION
+    from loopy_runtime.manifest_model import SUPPORTED_SCHEMA_VERSION
+
+    assert SUPPORTED_SCHEMA_VERSION == SCHEMA_VERSION
+
+
+def test_load_manifest_reads_golden(tmp_path):
+    from loopy_runtime.manifest_model import load_manifest
+
+    path = tmp_path / "manifest.json"
+    path.write_text(GOLDEN.read_text())
+    m = load_manifest(path)
+    assert m.schema_version == "2"
+    assert m.registry.agents  # the flat model actually populated
+
+
+def test_load_manifest_rejects_newer_schema_version(tmp_path):
+    """A manifest from a newer CLI (schema_version ahead of what the engine reads) fails with one
+    actionable line, not a per-field Pydantic dump — the bootstrap crash-loop this guards."""
+    from loopy_runtime.manifest_model import ManifestSchemaError, load_manifest
+
+    doc = json.loads(GOLDEN.read_text())
+    doc["schema_version"] = "999"
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(doc))
+
+    try:
+        load_manifest(path)
+    except ManifestSchemaError as exc:
+        message = str(exc)
+        assert "999" in message and "redeploy" in message.lower()
+    else:  # pragma: no cover - the assertion below reports the miss
+        raise AssertionError("expected ManifestSchemaError for a newer schema_version")
+
+
+def test_load_manifest_wraps_shape_mismatch_on_supported_version(tmp_path):
+    """A malformed manifest that still claims the supported version (e.g. a shape change that
+    forgot to bump the version) is wrapped in ManifestSchemaError pointing at engine/CLI skew."""
+    from loopy_runtime.manifest_model import ManifestSchemaError, load_manifest
+
+    # schema_version required by the model is missing → validation fails on a "supported" doc.
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps({"registry": {}}))
+
+    try:
+        load_manifest(path)
+    except ManifestSchemaError as exc:
+        assert "out of sync" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("expected ManifestSchemaError for a shape mismatch")
+
+
 def test_every_section14_code_has_a_fixture():
     """The golden-negative contract: every §14 code is exercised by some test."""
     import re
