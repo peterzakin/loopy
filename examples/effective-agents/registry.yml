@@ -28,7 +28,7 @@ defaults:
 
 # One sandbox for the whole project. These patterns are text-in/text-out and clone no repo.
 # (Swap in `docker` for a fully local run, or add tools to `apt:` if a worker needs to run
-# code. Egress is open by default; add `network: [...]` to restrict it.)
+# code. Egress is open by default.)
 sandboxes:
   BaseSandbox:
     provider: daytona

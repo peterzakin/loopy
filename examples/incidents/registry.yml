@@ -8,8 +8,7 @@ defaults:
     model: claude-sonnet-4-6
     harness: claude-code
 
-# Sandbox — compute + egress. `image:` is the declarative build. Egress is open by default;
-# add `network: [...]` to restrict it to an allowlist of hosts.
+# Sandbox — compute + egress. `image:` is the declarative build. Egress is open by default.
 sandboxes:
   default:
     provider: daytona
