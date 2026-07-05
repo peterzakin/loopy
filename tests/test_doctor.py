@@ -16,6 +16,7 @@ from loopy_cli.doctor import (
     _repo_slug,
     check_repo_access,
     diagnose,
+    next_actions,
 )
 from loopy_cli.scaffold import scaffold_project
 from loopy_core.compile.pipeline import compile_project
@@ -351,3 +352,67 @@ def test_github_builtin_secret_is_not_double_warned(tmp_path):
     )
     findings = _diagnose(tmp_path)
     assert not any("GITHUB_WEBHOOK_SECRET" in f.message for f in findings)
+
+
+# --- next_actions: the guided ladder a bare `loopy` prints in a project dir -----------------
+
+
+def _next_actions(root, *, control_plane_env=None):
+    """Wire `next_actions` exactly as the bare-`loopy` path does, with an explicit control-plane
+    env so the test never inherits a real `GITHUB_APP_ID`/`LOOPY_PUBLIC_URL` from the host."""
+    result = compile_project(root)
+    assert result.project is not None, [d.render() for d in result.diagnostics.items]
+
+    def read_env(rel: str):
+        path = root / rel
+        return _parse_dotenv(path.read_text()) if path.is_file() else None
+
+    merged = dict(control_plane_env or {})
+    for key, value in load_control_plane_env(root).items():
+        merged.setdefault(key, value)
+    return next_actions(result.project, read_env=read_env, control_plane_env=merged)
+
+
+def test_next_actions_fresh_coding_project_wants_url_then_auth(tmp_path):
+    # A coding scaffold clones a repo and listens on /hooks/github but has neither a public URL
+    # nor git auth: the ladder is "get a URL, then wire auth", in that order. Webhooks can't be
+    # registered yet (no App), so that rung is absent.
+    root = tmp_path / "demo"
+    scaffold_project(root, "demo", repos=["me/app"])
+
+    actions = _next_actions(root)
+    commands = [a.command for a in actions]
+    assert commands == ["loopy deploy bootstrap", "loopy auth github"]
+
+
+def test_next_actions_with_app_and_url_wants_webhooks(tmp_path):
+    # Once an App and a public URL exist, the only step left is pointing GitHub's repo webhooks
+    # at the engine — the ladder's third rung.
+    root = tmp_path / "demo"
+    scaffold_project(root, "demo", repos=["me/app"])
+
+    actions = _next_actions(
+        root, control_plane_env={"GITHUB_APP_ID": "123", "LOOPY_PUBLIC_URL": "https://x.example"}
+    )
+    assert [a.command for a in actions] == ["loopy webhooks github"]
+
+
+def test_next_actions_token_auth_needs_no_auth_or_webhook_rung(tmp_path):
+    # A GITHUB_TOKEN in the env_file satisfies git auth, so the auth rung is gone. Webhook
+    # registration goes through App creds, so a token alone doesn't unlock it (manual wiring is
+    # a fine setup) — with a URL already set, nothing is suggested.
+    root = tmp_path / "demo"
+    scaffold_project(root, "demo", repos=["me/app"])
+    dev = root / "secrets/base.env"
+    dev.write_text(dev.read_text().replace("# GITHUB_TOKEN=ghp_...", "GITHUB_TOKEN=ghp_real"))
+
+    actions = _next_actions(root, control_plane_env={"LOOPY_PUBLIC_URL": "https://x.example"})
+    assert actions == []
+
+
+def test_next_actions_empty_when_nothing_left_to_wire(tmp_path):
+    # A project that clones no repos and has no webhook sensors needs none of the three rungs.
+    root = tmp_path / "demo"
+    scaffold_project(root, "demo")  # blank scaffold: no repos, no /hooks/github sensor
+
+    assert _next_actions(root) == []

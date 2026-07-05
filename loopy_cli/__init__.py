@@ -36,7 +36,9 @@ from loopy_cli.webhooks import (
     webhooks_app,
 )
 
-app = typer.Typer(add_completion=False, help="Loopy — compile and run durable agent workflows.")
+app = typer.Typer(
+    add_completion=False, help="Loopy: agent workflows that run when your data changes."
+)
 
 # `loopy auth ...` — onboarding for external creds (GitHub App manifest flow). The
 # sub-app's heavy imports are deferred into its command bodies, so registering it
@@ -61,14 +63,85 @@ app.add_typer(deploy_app, name="deploy")
 
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context) -> None:
-    """Author, compile, and run durable agent workflows."""
-    # A bare `loopy` (no subcommand) is a request to see what the tool does, not a usage
-    # mistake. Print the full help overview and exit 0 — the same output and exit code as
-    # `loopy --help` and `loopy help`. (Typer's default here is a "Missing command." error on
-    # exit 2, and Click's `no_args_is_help` still exits 2; both read as failure to scripts.)
+    """Loopy: agent workflows that run when your data changes."""
+    # A bare `loopy` (no subcommand) is a request for orientation, not a usage mistake — so it
+    # exits 0, never Typer's "Missing command." (exit 2) or Click's `no_args_is_help` (also 2),
+    # both of which read as failure to scripts. *What* it orients you toward depends on where
+    # you are: inside a project (a `registry.yml` is present) it's "what should I do next here?"
+    # — print the guided next-steps ladder; anywhere else it's "what is this tool?" — print the
+    # command overview, identical to `loopy --help` / `loopy help`.
     if ctx.invoked_subcommand is None:
-        typer.echo(ctx.get_help())
+        if (Path.cwd() / "registry.yml").is_file():
+            _print_next_steps(Path.cwd())
+        else:
+            typer.echo(ctx.get_help())
         raise typer.Exit()
+
+
+def _print_next_steps(root: Path) -> None:
+    """Bare `loopy` inside a project: compile locally, then print the guided next-steps ladder.
+
+    Local-only and network-free so it stays instant: it compiles the project (pure) and reads
+    the control-plane env, but never reaches GitHub. A project that doesn't compile can't be
+    reasoned about, so it just points at `loopy compile`; otherwise it renders the onboarding
+    actions from `doctor.next_actions`, or a "ready to run" line when nothing's left to wire.
+    """
+    from loopy_cli.doctor import next_actions
+    from loopy_core.compile.pipeline import compile_project
+    from loopy_runtime.secrets import _parse_dotenv, load_control_plane_env
+
+    typer.echo()
+    result = compile_project(root)
+    if result.diagnostics.has_errors() or result.project is None:
+        typer.echo("  " + typer.style("This project doesn't compile yet.", bold=True))
+        typer.echo("  Start here:")
+        typer.echo(
+            typer.style("    loopy compile .", fg=typer.colors.BRIGHT_WHITE)
+            + _dim("   # show the errors")
+        )
+        typer.echo(_dim("  Run `loopy help` for all commands."))
+        typer.echo()
+        return
+
+    def read_env(rel: str) -> dict[str, str] | None:
+        env_path = root / rel
+        return _parse_dotenv(env_path.read_text()) if env_path.is_file() else None
+
+    merged = dict(os.environ)
+    for key, value in load_control_plane_env(root).items():
+        merged.setdefault(key, value)  # real/platform env wins over loopy.env
+
+    actions = next_actions(result.project, read_env=read_env, control_plane_env=merged)
+
+    if actions:
+        typer.echo(
+            "  "
+            + typer.style("Suggested next steps", bold=True)
+            + _dim(" to get this project receiving events:")
+        )
+        for action in actions:
+            typer.echo(typer.style(f"    {action.command}", fg=typer.colors.BRIGHT_WHITE))
+            typer.echo(_dim(f"      {action.why}"))
+    else:
+        typer.echo(
+            "  "
+            + typer.style("✓  ready to run", fg=typer.colors.GREEN, bold=True)
+            + _dim("   — nothing left to wire up")
+        )
+
+    typer.echo()
+    typer.echo(
+        "  "
+        + typer.style("loopy doctor", fg=typer.colors.BRIGHT_WHITE)
+        + _dim("  re-checks readiness (with the live GitHub checks this skips)")
+    )
+    typer.echo(
+        "  "
+        + typer.style("loopy run", fg=typer.colors.BRIGHT_WHITE)
+        + _dim("     compiles + starts the engine")
+    )
+    typer.echo(_dim("  Run `loopy help` for all commands."))
+    typer.echo()
 
 
 @app.command()
