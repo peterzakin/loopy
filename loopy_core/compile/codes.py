@@ -33,6 +33,8 @@ E212 = "LOOPY-E212"
 E213 = "LOOPY-E213"
 E214 = "LOOPY-E214"
 E215 = "LOOPY-E215"
+E216 = "LOOPY-E216"
+E217 = "LOOPY-E217"
 
 # E3xx — templates
 E301 = "LOOPY-E301"
@@ -82,6 +84,8 @@ DESCRIPTIONS: dict[str, str] = {
     E213: "malformed registry limits: (e.g. cascade_spend without a numeric usd)",
     E214: "a sandbox definition is missing its required provider: (X1)",
     E215: "a user event/sensor uses a reserved built-in namespace (e.g. Github.*)",
+    E216: "a sandbox env: entry is not a valid var name or names a reserved control-plane key",
+    E217: "two sandbox names collide under the production env namespace (X1)",
     # E3xx — templates
     E301: "illegal template: control flow / filters / dotted path",
     E302: "event.<field> not in the triggering event's contract (T1)",

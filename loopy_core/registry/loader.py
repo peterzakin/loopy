@@ -25,6 +25,11 @@ from loopy_core.registry.model import (
     Sandbox,
     WorkflowLimit,
 )
+from loopy_core.registry.sandbox_env import (
+    is_reserved_env_key,
+    is_valid_env_name,
+    sandbox_env_prefix,
+)
 from loopy_core.registry.types import desugar
 from loopy_core.span import Span, span_at
 
@@ -96,6 +101,7 @@ def load_registry(inv: Inventory, diags: DiagnosticCollector) -> Registry:
     limits = _load_limits(data.get("limits"), file, _line_of(data, "limits"), diags)
 
     _check_naming(sandboxes, agents, events, diags)
+    _check_env_namespaces(sandboxes, diags)
 
     return Registry(sandboxes=sandboxes, agents=agents, events=events, limits=limits)
 
@@ -160,9 +166,7 @@ def _load_limits(value: object, file: str, line: int, diags: DiagnosticCollector
     return Limits(cascade_spend=cascade_spend, workflows=workflows)
 
 
-def _load_sandboxes(
-    sb_map: Mapping, file: str, diags: DiagnosticCollector
-) -> dict[str, Sandbox]:
+def _load_sandboxes(sb_map: Mapping, file: str, diags: DiagnosticCollector) -> dict[str, Sandbox]:
     out: dict[str, Sandbox] = {}
     for name, body in sb_map.items():
         body = body or {}
@@ -175,16 +179,67 @@ def _load_sandboxes(
                 f"sandbox '{name}' must declare a provider: (local | docker | daytona)",
                 span=span_at(file, _line_of(sb_map, name)),
             )
+        env = _as_str_list(body.get("env"))
+        _check_env_keys(name, env, file, _line_of(sb_map, name), diags)
         out[name] = Sandbox(
             name=name,
             provider=provider,
             image=dict(body.get("image") or {}),
             network=list(body.get("network") or []),
             env_file=_as_str_list(body.get("env_file")),  # path reference only; not read here
+            env=env,  # names only; values resolve at run time (env_file / platform env)
             repos=_load_repos(body.get("repos"), file, _line_of(sb_map, name), diags),
             span=span_at(file, _line_of(sb_map, name)),
         )
     return out
+
+
+def _check_env_keys(
+    sandbox: str, env: list[str], file: str, line: int, diags: DiagnosticCollector
+) -> None:
+    """E216: every `env:` entry must be a valid env-var name and not a control-plane key.
+
+    Rejects wildcards (a `*` is not a valid name, so there is no forward-everything hatch) and
+    reserved names (`LOOPY_*`, `DAYTONA_API_KEY`, ...) whose forwarding would leak an infra
+    secret into an untrusted sandbox."""
+    for key in env:
+        if not is_valid_env_name(key):
+            diags.error(
+                codes.E216,
+                f"sandbox '{sandbox}' env: entry {key!r} is not a valid environment variable "
+                f"name (letters, digits, underscore; no wildcards)",
+                span=span_at(file, line),
+            )
+        elif is_reserved_env_key(key):
+            diags.error(
+                codes.E216,
+                f"sandbox '{sandbox}' env: may not forward the control-plane key {key!r} "
+                f"(reserved for the engine; forwarding it would leak an infra secret)",
+                span=span_at(file, line),
+            )
+
+
+def _check_env_namespaces(sandboxes: dict[str, Sandbox], diags: DiagnosticCollector) -> None:
+    """E217: distinct sandbox names must not collide under the production env namespace.
+
+    `<PREFIX>_<KEY>` disambiguates a sandbox's forwarded vars in the engine environment, so two
+    names that normalize to the same prefix (e.g. `Web-app` and `Web_app`) would make those
+    vars ambiguous. Only enforced when a colliding sandbox actually declares `env:` — an unused
+    namespace can't be ambiguous, and this keeps the check from breaking unrelated projects."""
+    by_prefix: dict[str, list[Sandbox]] = defaultdict(list)
+    for sb in sandboxes.values():
+        by_prefix[sandbox_env_prefix(sb.name)].append(sb)
+    for prefix, group in by_prefix.items():
+        if len(group) < 2 or not any(sb.env for sb in group):
+            continue
+        first = group[0]
+        for sb in group[1:]:
+            diags.error(
+                codes.E217,
+                f"sandbox '{sb.name}' shares the env namespace '{prefix}_' with "
+                f"'{first.name}'; forwarded vars would be ambiguous. Rename one.",
+                span=sb.span,
+            )
 
 
 def _load_repos(value: object, file: str, line: int, diags: DiagnosticCollector) -> list[Repo]:
@@ -205,9 +260,7 @@ def _load_repos(value: object, file: str, line: int, diags: DiagnosticCollector)
         elif isinstance(item, Mapping):
             url = item.get("url")
             if not isinstance(url, str) or not url.strip():
-                diags.error(
-                    codes.E212, "a repo entry is missing a 'url'", span=span_at(file, line)
-                )
+                diags.error(codes.E212, "a repo entry is missing a 'url'", span=span_at(file, line))
                 continue
             depth = item.get("depth", 1)
             repos.append(

@@ -235,7 +235,8 @@ class SandboxProvider(Protocol):
 @runtime_checkable
 class SecretsResolver(Protocol):
     def resolve(self, sandbox_name: str, spec: SandboxSpec) -> Mapping[str, str]:
-        """Resolve the sandbox's env_file(s) to an env map. Never recorded/logged."""
+        """Resolve the sandbox's env from its env_file(s) and its `env:` passthrough
+        (`<PREFIX>_<KEY>` in the engine env, prefix stripped). Never recorded/logged."""
         ...
 
 
