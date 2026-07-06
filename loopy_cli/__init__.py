@@ -27,7 +27,8 @@ from pathlib import Path
 import typer
 
 from loopy_cli.auth import auth_app
-from loopy_cli.bootstrap import deploy_app
+from loopy_cli import bootstrap as _bootstrap_module  # noqa: F401 - registers `loopy deploy bootstrap`
+from loopy_cli.deploy_cmd import deploy_app
 from loopy_cli.deploy_target import TARGET_BYO
 from loopy_cli.integrations import integrations_command
 from loopy_cli.webhooks import (

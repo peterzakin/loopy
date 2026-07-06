@@ -41,10 +41,7 @@ from pathlib import Path
 
 import typer
 
-deploy_app = typer.Typer(
-    no_args_is_help=True,
-    help="Provision hosting for the engine on a named deploy target (`loopy deploy bootstrap`).",
-)
+from loopy_cli.deploy_cmd import deploy_app
 
 _DEPLOY_DIR = Path(__file__).resolve().parent / "deploy"
 TEMPLATE_PATH = _DEPLOY_DIR / "aws-stack.json"
