@@ -1,0 +1,37 @@
+# issue-triage — the issue-side companion to the `github` example's code review. When
+# someone opens a GitHub issue, one agent reads it against the code, classifies it into a
+# typed area and severity, and posts a triage comment with a concrete next step.
+#
+# The trigger is the BUILT-IN `Github.IssueOpened` event: the step names it in `on:`
+# (see workflows/), and the compiler registers the contract and synthesizes the
+# `/hooks/github` sensor — no `events:` entry and no `sensors/` module for the inbound
+# side. See ../github/README.md for the shared GitHub App and webhook setup.
+
+# Defaults — every agent inherits these; override a field only when needed.
+defaults:
+  agent:
+    sandbox: BaseSandbox
+    model: claude-sonnet-4-6
+    harness: claude-code
+
+# Sandbox — compute + egress. `gh` is on PATH so the agent can post the triage comment
+# with the injected GitHub token.
+sandboxes:
+  BaseSandbox:
+    provider: daytona
+    image: { debian_slim: "3.12", apt: [git, gh], workdir: /home/loopy, user: loopy }
+    env_file: secrets/base.env          # gitignored; resolved by the backend at run time
+    repos: [octocat/Hello-World]       # cloned into the workspace at acquire time (auth injected)
+
+# Agents — capability comes from the sandbox + the injected GitHub token + budget.
+agents:
+  Triager: {}   # classifies the issue and posts the comment
+
+# Events — outbound only; Github.IssueOpened is built in. The enum fields double as the
+# classification vocabulary the agent must choose from, so the label is validated, not
+# free text. Swap the members to match your own labels.
+events:
+  IssueTriaged:
+    area: enum[bug, feature, docs, question, security]
+    severity: enum[low, medium, high, critical]
+    comment_url: url

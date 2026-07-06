@@ -1,0 +1,38 @@
+# uptime — the smallest look at the sensor layer. A poll sensor checks a health endpoint
+# every few minutes and emits an `Incident` only when it is down; a second workflow reacts
+# by opening a GitHub issue. Turning a raw signal into a typed event, and only when it
+# matters, is the whole job of a sensor.
+#
+# `Incident` is emitted by the sensor (sensors/sensors.py) and consumed by the workflow
+# (workflows/respond/); `Acknowledged` is the terminal announcement. Both are declared
+# here because they cross the bus.
+
+# Defaults — every agent inherits these; override a field only when needed.
+defaults:
+  agent:
+    sandbox: BaseSandbox
+    model: claude-sonnet-4-6
+    harness: claude-code
+
+# Sandbox — compute + egress. `gh` is on PATH so the agent can open the outage issue with
+# the injected GitHub token.
+sandboxes:
+  BaseSandbox:
+    provider: daytona
+    image: { debian_slim: "3.12", apt: [git, gh], workdir: /home/loopy, user: loopy }
+    env_file: secrets/base.env          # gitignored; resolved by the backend at run time
+    repos: [octocat/Hello-World]       # cloned into the workspace at acquire time (auth injected)
+
+# Agents — capability comes from the sandbox + the injected GitHub token + budget.
+agents:
+  Responder: {}   # opens a GitHub issue for the outage
+
+# Events — the bus contract. A step's `on:` may only name an event registered here.
+events:
+  # published by the poll sensor, only when the check fails
+  Incident:
+    url: url
+    status: int
+  # emitted by the respond step — a downstream workflow could subscribe (none here)
+  Acknowledged:
+    issue_url: url
