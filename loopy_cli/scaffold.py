@@ -28,10 +28,6 @@ _NAME = "__PROJECT_NAME__"
 # `init` time (or an empty list). Same `.replace` rationale as `_NAME`.
 _REPOS_LINE = "__REPOS_LINE__"
 
-# Sentinel for the starter-specific tail of AGENTS.md (what the scaffolded workflow does and
-# how to fire it — or, for the minimal no-repo scaffold, what's missing and how to close it).
-_STARTER_BLOCK = "__STARTER_BLOCK__"
-
 # A project name doubles as the new directory name, so keep it a single safe path segment.
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -168,148 +164,8 @@ loopy trigger . --event Github.PullRequestOpened \\
              "url": "https://github.com/octocat/Hello-World/pull/1"}'
 ```
 
-Run every command from this directory. [`AGENTS.md`](AGENTS.md) is the one-page map a coding
-agent reads first (authoring rules, the verify loop, the secrets model).
-"""
-
-# --- AGENTS.md — the agent-facing map, shared by both scaffolds --------------------------------
-# Most first edits to a scaffolded project are made by a coding agent ("build me a loop that…"),
-# and AGENTS.md is the file those agents auto-discover. It compresses the authoring model, the
-# verify loop, and the secrets rules into one page so an agent can work without fetching docs.
-
-_AGENTS_MD = """\
-# AGENTS.md — working in this Loopy project
-
-This directory is a **Loopy project**: agent automations authored as files. Workflows,
-skills, and sensors are Markdown and Python; `registry.yml` declares the shared entities
-(Agents, Sandboxes, Events); `loopy compile` builds the workflow DAG straight from these
-files. This page is the map. `loopy docs` prints the full authoring reference and
-`loopy docs errors` explains every `LOOPY-E` diagnostic code.
-
-## The edit loop
-
-Validate after every change — the compiler is fast, static, and precise:
-
-```bash
-loopy compile --check .   # exit 0 = valid. Errors: `error LOOPY-E### file:line:col: message`
-loopy doctor              # exit 0 = runnable. Names what's missing (keys, git auth, provider creds)
-```
-
-**A green compile is not a runnable project.** Compile proves the files are well-formed;
-`loopy doctor` proves the credentials and repos behind them are real. Run it before the
-first run and after touching any env file.
-
-To exercise one run end-to-end (in-memory, no server needed):
-
-```bash
-loopy trigger . --event <EventName> --fields '{"field": "value"}' --json
-```
-
-`--json` prints the full run record: steps, outputs, emitted events, failures.
-
-## Layout
-
-| Path | What it is |
-|---|---|
-| `registry.yml` | the shared entities: agents, sandboxes, events (a few fields each) |
-| `workflows/<name>/` | one workflow per directory, one step per `.md` file |
-| `skills/<name>/SKILL.md` | reusable skills; agents reference them by name in `registry.yml` |
-| `sensors/` | `@sensor` functions that turn outside signals into registered events |
-| `secrets/base.env` | the sandbox's env (model key, git token) — gitignored |
-| `loopy.env` | control-plane creds (Daytona key, GitHub App); never reaches a sandbox |
-| `manifest.json`, `loopy/` | compile outputs — generated, don't hand-edit |
-
-## Rules the compiler enforces
-
-- A workflow has exactly **one entry step** carrying `on:` — a registered event or
-  `on: cron("0 3 * * *")` (quoted 5-field expression). Every other step carries
-  `after: <step>` (or `after: [a, b]`). A step with neither is an orphan (E103).
-- **Outputs vs. events.** `output:` is a step's typed result, read by later steps in the
-  *same* workflow as `{{ step.field }}`. `emits:` puts a registered event on the bus for
-  *other* workflows to `on:`. Same-workflow handoff = output; cross-workflow seam = event.
-- Every event in `on:`/`emits:` must be registered under `events:` in `registry.yml` (E504).
-  Exception: built-in `Github.*` triggers (`PullRequestOpened`, `PullRequestMerged`,
-  `IssueOpened`, `IssueCommentCreated`, `Push`) need no registration and no sensor.
-- Field types are JSON Schema shorthand: `str`, `int`, `float`, `bool`, `url`,
-  `enum[a, b, c]`. Anything else is E201.
-- Every step's `agent:` must exist in `registry.yml` (E501); every sandbox declares
-  `provider: local | docker | daytona` (E214); every agent resolves to a sandbox (E506).
-- Defined entities are **Capitalized** (`ReviewPosted`, `Claude`) and referenced by exact
-  name. Filenames, step names, and event *fields* stay lowercase.
-- A sensor declares its event statically — `@sensor(poll="10m", emits="EventName")` or
-  `@sensor(webhook="/hooks/x", emits="EventName")`. The compiler reads the decorator and
-  never runs your code (E402). Poll intervals: `"30s"`, `"5m"`, `"1h"`, `"2d"`.
-- Templates flow by reference: `{{ event.field }}` from the trigger, `{{ step.field }}`
-  from a direct `after:` predecessor. Unresolvable refs fail compile (E302/E304/E305).
-
-## A step file
-
-```markdown
----
-on: SomeEvent               # entry step only; other steps use `after: <step>`
-agent: Claude               # must exist in registry.yml
-output: { result: str }     # typed; downstream steps read {{ this_step.result }}
-emits: SomethingHappened    # optional — only if another workflow subscribes
-budget: { wall_clock: 15, spend: { usd: 2 } }   # wall_clock in minutes
----
-The agent's objective, in prose. Reads {{ event.field }} from the trigger.
-```
-
-## Secrets (the #1 first-run trap)
-
-The sandbox inherits **nothing** from the shell. Everything the agent needs lives in the
-file the sandbox's `env_file:` names (`secrets/base.env`): `ANTHROPIC_API_KEY` for
-claude-code, `OPENAI_API_KEY` for codex, `GITHUB_TOKEN` for git (unless a GitHub App is
-configured). `loopy.env` holds engine-side creds and never reaches a sandbox. Both are
-gitignored — never commit them, and never write a secret into `registry.yml` or a step.
-
-## Commands
-
-| Command | What it does |
-|---|---|
-| `loopy compile --check .` | validate only (the CI gate); bare `compile` writes `manifest.json` |
-| `loopy doctor` | runnability check — placeholder keys, git auth, provider creds |
-| `loopy trigger . --event E --fields '{...}' --json` | fire one event; print the run record |
-| `loopy run` | start the engine (compiles first); `--in-process` = no-Docker dev server |
-| `loopy admin` | read-only dashboard over recorded runs (http://127.0.0.1:9000) |
-| `loopy auth github` | GitHub App manifest flow — **opens a browser; not headless-safe** |
-| `loopy webhooks github` | register GitHub repo webhooks (`loopy webhooks list` = delivery URLs) |
-| `loopy docs [topic]` | this reference in full; `loopy docs errors` = the diagnostic catalog |
-
-Headless notes: `loopy init` and `loopy auth github` are interactive — both need a human
-on a terminal (auth also opens a browser), so ask the user to run them. For git auth a
-`GITHUB_TOKEN` (contents:write + pull_requests:write) in `secrets/base.env` works instead.
-
-## This project's starter
-
-__STARTER_BLOCK__
-"""
-
-_CODING_STARTER_BLOCK = """\
-One workflow, `review`: the built-in `Github.PullRequestOpened` event drives the `Claude`
-agent to review the opened PR's diff (in a checkout of the repo(s) in
-`sandboxes.BaseSandbox.repos`) and post review comments on it. Live GitHub deliveries need
-the webhook registered (`loopy webhooks github`); until then, drive it by hand:
-
-```bash
-loopy trigger . --event Github.PullRequestOpened \\
-  --fields '{"number": 1, "repo": "octocat/Hello-World", "title": "Add widget", \\
-             "branch": "feat/widget", "base": "main", \\
-             "url": "https://github.com/octocat/Hello-World/pull/1"}' --json
-```\
-"""
-
-_MINIMAL_STARTER_BLOCK = """\
-The default workflow — a PR is opened → the `Claude` agent reviews the diff and posts comments
-— ships **disabled** as `workflows/review/code-review.md.disabled`. This project was
-initialized **without GitHub access**, and the review loop needs a repo to check out and a
-GitHub token to post with, so nothing runs until you close that gap:
-
-1. Run `loopy auth github` (needs a human and a browser — ask the user to run it, or put a
-   `GITHUB_TOKEN` in `secrets/base.env`).
-2. Add the repo(s) to `sandboxes.BaseSandbox.repos` in `registry.yml`.
-3. Rename `workflows/review/code-review.md.disabled` to `code-review.md` (dropping the
-   `.disabled` suffix), then `loopy compile .`. The compiler picks it up as a live workflow.\
+Run every command from this directory. `loopy docs` prints the full authoring reference
+(and `loopy docs errors` the diagnostic catalog) straight from the CLI.
 """
 
 
@@ -366,7 +222,7 @@ loopy doctor                 # a green compile is not a runnable project — che
 ```
 
 Then `loopy webhooks github` registers the PR webhook and `loopy run` starts the engine.
-[`AGENTS.md`](AGENTS.md) is the one-page map a coding agent reads first.
+`loopy docs` prints the full authoring reference straight from the CLI.
 """
 
 
@@ -385,7 +241,6 @@ def _coding_files(repos: list[str]) -> dict[str, str]:
         "loopy.env": _LOOPY_ENV,
         ".gitignore": _GITIGNORE,
         "README.md": _README_MD,
-        "AGENTS.md": _AGENTS_MD.replace(_STARTER_BLOCK, _CODING_STARTER_BLOCK),
     }
 
 
@@ -402,7 +257,6 @@ def _minimal_files() -> dict[str, str]:
         "loopy.env": _LOOPY_ENV,
         ".gitignore": _GITIGNORE,
         "README.md": _MINIMAL_README_MD,
-        "AGENTS.md": _AGENTS_MD.replace(_STARTER_BLOCK, _MINIMAL_STARTER_BLOCK),
     }
 
 

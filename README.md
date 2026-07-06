@@ -46,8 +46,6 @@ github` does the same any time later), and finishes by running the same checks a
 Most first drafts of a loop are written by a coding agent ("build me a loop that…"), so the
 toolchain is built to be driven headlessly:
 
-- Every scaffolded project ships an **`AGENTS.md`** — the one-page map Claude Code, Codex,
-  and OpenCode auto-discover: authoring rules, the verify loop, the secrets model.
 - **`loopy docs`** prints the full authoring reference as markdown straight from the CLI
   (version-matched to the install, works offline); `loopy docs errors` prints the stable
   `LOOPY-E` diagnostic catalog.
