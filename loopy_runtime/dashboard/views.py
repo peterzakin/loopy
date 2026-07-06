@@ -96,25 +96,34 @@ def build_run_detail(
 # redact here so the dashboard can never surface them.
 
 
-def build_meta(manifest: Manifest | None) -> dict[str, Any]:
-    """Top-level summary: is a manifest loaded, and how big is the system?"""
+def build_meta(manifest: Manifest | None, *, demo: bool = False) -> dict[str, Any]:
+    """Top-level summary: is a manifest loaded, and how big is the system?
+
+    `demo` marks a server backed by synthesized in-memory data (`loopy demo`). It surfaces as a
+    banner in the UI so a demo left running can never be mistaken for a real deployment; the flag
+    is omitted entirely when False, so the real dashboard's response is unchanged.
+    """
     if manifest is None:
-        return {"manifest_present": False}
-    reg = manifest.registry
-    return {
-        "manifest_present": True,
-        "schema_version": manifest.schema_version,
-        "compiled_at": manifest.compiled_at,
-        "loopy_version": manifest.loopy_version,
-        "counts": {
-            "workflows": len(manifest.workflows),
-            "agents": len(reg.agents),
-            "sandboxes": len(reg.sandboxes),
-            "events": len(reg.events),
-            "sensors": len(manifest.sensors),
-            "cron": len(manifest.cron_entries()),
-        },
-    }
+        meta: dict[str, Any] = {"manifest_present": False}
+    else:
+        reg = manifest.registry
+        meta = {
+            "manifest_present": True,
+            "schema_version": manifest.schema_version,
+            "compiled_at": manifest.compiled_at,
+            "loopy_version": manifest.loopy_version,
+            "counts": {
+                "workflows": len(manifest.workflows),
+                "agents": len(reg.agents),
+                "sandboxes": len(reg.sandboxes),
+                "events": len(reg.events),
+                "sensors": len(manifest.sensors),
+                "cron": len(manifest.cron_entries()),
+            },
+        }
+    if demo:
+        meta["demo"] = True
+    return meta
 
 
 def _field_rows(fields: dict[str, dict]) -> list[dict[str, Any]]:

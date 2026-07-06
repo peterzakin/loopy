@@ -40,6 +40,19 @@ code { font-family: var(--mono); font-size: .92em; }
   80.01% { stroke-dashoffset: 1; }
   100%   { stroke-dashoffset: 1; opacity: 0; }
 }
+.demo-tag {
+  font-family: var(--mono); font-size: 10.5px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--warn); background: var(--warn-bg);
+  border: 1px solid rgba(180,83,9,0.30); border-radius: var(--r-sm);
+  padding: 1px 6px; margin-left: 8px;
+}
+.demo-banner {
+  position: sticky; top: 60px; z-index: 19;
+  background: var(--warn-bg); border-bottom: 1px solid rgba(180,83,9,0.30);
+  color: var(--warn); font-size: 13px;
+}
+.demo-banner .lui-wrap { padding: 9px 24px; }
+.demo-banner code { color: var(--warn); background: rgba(180,83,9,0.10); padding: 1px 5px; border-radius: 4px; }
 .spacer { flex: 1; }
 .views { display: flex; align-items: center; gap: 4px; }
 .view-link {

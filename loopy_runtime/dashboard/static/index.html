@@ -24,6 +24,7 @@
           </svg>
           loopy
           <span class="brand-sub">control plane</span>
+          <span class="demo-tag" id="demo-tag" hidden>demo</span>
         </a>
         <span class="spacer"></span>
         <nav class="views" id="views" role="tablist">
@@ -34,6 +35,14 @@
         </nav>
       </div>
     </header>
+
+    <!-- shown only when the API reports demo mode (`loopy demo`) — this data is synthesized -->
+    <div class="demo-banner" id="demo-banner" hidden>
+      <div class="lui-wrap">
+        Demo mode: everything below is fake, in-memory data, not a real deployment. Run
+        <code>loopy admin</code> to view real run state.
+      </div>
+    </div>
 
     <main class="lui-wrap page">
       <!-- ── Runs ──────────────────────────────────────────────────────── -->

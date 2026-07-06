@@ -17,6 +17,7 @@ const state = {
   selected: null, // run_id of the open detail, or null
   step: null, // "workflow/step" key of the open step panel, or null
   manifest: null, // whether a manifest is loaded (from /api/meta)
+  demo: false, // serving synthesized fake data (`loopy demo`), from /api/meta
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -620,9 +621,14 @@ async function loadMeta() {
   try {
     const meta = await getJSON("api/meta");
     state.manifest = !!meta.manifest_present;
+    state.demo = !!meta.demo;
   } catch (e) {
     state.manifest = null;
+    state.demo = false;
   }
+  // Flag a demo server (fake in-memory data) so it can't be mistaken for a real deployment.
+  $("#demo-banner").hidden = !state.demo;
+  $("#demo-tag").hidden = !state.demo;
 }
 
 async function init() {

@@ -2244,7 +2244,12 @@ def admin(
 @app.command()
 def demo(
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address."),
-    port: int = typer.Option(9000, "--port", help="Port to serve the dashboard on."),
+    port: int = typer.Option(
+        9001,
+        "--port",
+        help="Port to serve the dashboard on (default 9001, distinct from `loopy admin`'s 9000 "
+        "so the demo can't squat on the real dashboard's port).",
+    ),
     no_browser: bool = typer.Option(
         False, "--no-browser", help="Don't try to open the dashboard in a browser."
     ),
@@ -2274,7 +2279,9 @@ def demo(
             webbrowser.open(url)
         except Exception:  # noqa: BLE001 — no browser (e.g. headless) is fine; the URL is printed
             pass
-    config = uvicorn.Config(create_app(store, manifest), host=host, port=port, log_level="warning")
+    config = uvicorn.Config(
+        create_app(store, manifest, demo=True), host=host, port=port, log_level="warning"
+    )
     _serve_dashboard(config)  # pragma: no cover - long-lived server
 
 
