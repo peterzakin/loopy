@@ -1,5 +1,5 @@
 {
-  "compiled_at": "2026-06-27T17:38:32.125519+00:00",
+  "compiled_at": "2026-07-06T21:45:18.093154+00:00",
   "lineage": {
     "events": {
       "GoalShipped": {
@@ -113,28 +113,11 @@
       },
       "WorkItem": {
         "fields": {
+          "description": {
+            "type": "string"
+          },
           "link": {
             "format": "uri",
-            "type": "string"
-          },
-          "proposed_goal": {
-            "type": "string"
-          },
-          "repro": {
-            "type": "string"
-          },
-          "root_cause": {
-            "type": "string"
-          },
-          "source": {
-            "enum": [
-              "sentry",
-              "linear",
-              "datadog",
-              "pagerduty",
-              "slack",
-              "cve"
-            ],
             "type": "string"
           }
         }
@@ -142,7 +125,6 @@
     },
     "sandboxes": {
       "default": {
-        "env": [],
         "env_file": [
           "secrets/base.env"
         ],
@@ -154,9 +136,7 @@
           "user": "daytona",
           "workdir": "/home/daytona"
         },
-        "network": [
-          "github.com"
-        ],
+        "network": [],
         "provider": "daytona",
         "repos": [
           {
@@ -176,6 +156,8 @@
       "fn": "metric_watch",
       "module": "sensors.sensors",
       "name": "metric_watch",
+      "provider": null,
+      "source": "module",
       "trigger": {
         "interval": "5m",
         "kind": "poll"
@@ -186,6 +168,8 @@
       "fn": "sentry_issues",
       "module": "sensors.sensors",
       "name": "sentry_issues",
+      "provider": null,
+      "source": "module",
       "trigger": {
         "kind": "webhook",
         "path": "/hooks/sentry"
@@ -224,7 +208,7 @@
         "arbitrate": {
           "after": [],
           "agent": "Investigator",
-          "body": "Decide the goal for \"{{ event.proposed_goal }}\" given the work item at {{ event.link }}.",
+          "body": "Decide the goal for \"{{ event.description }}\" given the work item at {{ event.link }}.",
           "budget": null,
           "emits": [],
           "id": "resolve/arbitrate",
@@ -235,9 +219,9 @@
           },
           "refs": [
             {
-              "field": "proposed_goal",
+              "field": "description",
               "producer": "event",
-              "raw": "{{ event.proposed_goal }}"
+              "raw": "{{ event.description }}"
             },
             {
               "field": "link",
