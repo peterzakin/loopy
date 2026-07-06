@@ -61,6 +61,28 @@ def test_dockerfile_start_command_links_secret_files_and_honors_port(tmp_path):
     assert "/state/state.db" in result.stdout  # a mounted /state disk gets durable history
 
 
+def test_dockerfile_cmd_is_valid_json_and_sh(tmp_path):
+    # The CMD rides Dockerfile line continuations inside an exec-form JSON array — parse it
+    # the way Docker does (join `\`-newline, then JSON) and syntax-check the sh payload, so
+    # a bad escape in the template fails here instead of on the first real platform build.
+    import json
+    import shutil
+    import subprocess
+
+    import pytest
+
+    if shutil.which("sh") is None:  # pragma: no cover - POSIX always has sh
+        pytest.skip("sh unavailable")
+    result = runner.invoke(app, ["dockerfile", str(_project(tmp_path)), "--stdout"])
+    assert result.exit_code == 0
+    joined = result.stdout.replace("\\\n", "")
+    cmd_line = next(line for line in joined.splitlines() if line.startswith("CMD "))
+    argv = json.loads(cmd_line[len("CMD ") :])
+    assert argv[:2] == ["/bin/sh", "-c"]
+    check = subprocess.run(["sh", "-n"], input=argv[2], text=True, capture_output=True)
+    assert check.returncode == 0, check.stderr
+
+
 def test_dockerfile_writes_both_files(tmp_path):
     result = runner.invoke(app, ["dockerfile", str(_project(tmp_path))])
     assert result.exit_code == 0

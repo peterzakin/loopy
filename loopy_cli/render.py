@@ -109,9 +109,10 @@ class RenderClient:
             ) from exc
         if response.status_code >= 400:
             try:
-                message = response.json().get("message") or response.text
+                body = response.json()
             except ValueError:
-                message = response.text
+                body = None
+            message = (body.get("message") if isinstance(body, dict) else None) or response.text
             raise RenderAPIError(response.status_code, message, _hint_for(response.status_code, message))
         return response
 
@@ -686,6 +687,7 @@ def render(
         raise typer.Exit(code=1)
     if warn and not yes:
         if not _interactive() or not typer.confirm("  Proceed past the ! warnings?", default=False):
+            typer.echo("deploy: warnings above — pass --yes to proceed.", err=True)
             raise typer.Exit(code=1)
 
     # ── wizard: key + workspace, then service identity + plan.
@@ -700,10 +702,37 @@ def render(
         service = client.get_service(recorded_id)
     if service is None:
         service = client.find_service(name)
+        if service is not None:
+            # A name match alone isn't ownership: two projects in same-named directories
+            # would otherwise silently replace each other's env vars and secret files.
+            # The recorded service id is trusted (a previous deploy of this project wrote
+            # it); a find-by-name hit is trusted only when it deploys this same repo.
+            service_repo = normalize_repo_url(service.get("repo") or "")
+            if service_repo != info.repo_url:
+                typer.echo(
+                    f"error: a Render service named {name!r} already exists but deploys "
+                    f"{service.get('repo') or 'an unknown repo'}, not {info.repo_url} — "
+                    "refusing to overwrite it. Pass --service-name to use a different name.",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
 
     plan_value = choose_plan(has_cron=has_cron_workflows(manifest_abs), plan_flag=plan) if service is None else (plan or "")
     if service is not None and plan and plan != (service.get("serviceDetails") or {}).get("plan"):
         typer.echo("  note: changing an existing service's plan is a dashboard action; --plan ignored.")
+    if service is not None:
+        # These only take effect at create time; changing them on an existing service is
+        # a dashboard-only action (Render's API has no PATCH surface for them here).
+        for flag_name, flag_value in (
+            ("region", region),
+            ("branch", branch),
+            ("disk-gb", disk_gb),
+        ):
+            if flag_value is not None:
+                typer.echo(
+                    f"  note: changing an existing service's {flag_name} is a dashboard "
+                    f"action; --{flag_name} ignored."
+                )
 
     # ── provision.
     if service is None:
