@@ -6,7 +6,7 @@
     loopy trigger   fire one event at the manifest and run it to completion (for testing)
     loopy dockerfile  generate a version-pinned Dockerfile (+ .dockerignore) for a git-push deploy
     loopy env       print the production env block to paste into a platform's settings
-    loopy admin     serve the read-only dashboard for a deploy target (local|byo|bootstrap)
+    loopy admin     serve the read-only dashboard for a deploy target (local|byo|bootstrap|render)
     loopy demo      serve the dashboard against in-memory fake data (dev-only; safe to delete)
     loopy help      show this overview, or help for one command (`loopy help run`)
     loopy docs      print the authoring reference (or `deployment`/`errors`) as markdown
@@ -27,7 +27,9 @@ from pathlib import Path
 import typer
 
 from loopy_cli.auth import auth_app
-from loopy_cli.bootstrap import deploy_app
+from loopy_cli import bootstrap as _bootstrap_module  # noqa: F401 - registers `loopy deploy bootstrap`
+from loopy_cli import render as _render_module  # noqa: F401 - registers `loopy deploy render`
+from loopy_cli.deploy_cmd import deploy_app
 from loopy_cli.deploy_target import TARGET_BYO
 from loopy_cli.integrations import integrations_command
 from loopy_cli.webhooks import (
@@ -55,9 +57,9 @@ app.add_typer(webhooks_app, name="webhooks")
 app.command(name="integrations")(integrations_command)
 
 # `loopy deploy <target>` — provision hosting for the engine from an operator's cloud
-# keys. One subcommand per deploy target: `loopy deploy bootstrap` is the provisioned
-# starter stack (one CloudFormation stack; see docs/design/aws-deploy.md). boto3 is
-# imported inside the command body, keeping this registration weightless.
+# keys. One subcommand per deploy target: bootstrap (AWS starter stack), render
+# (Render.com). Heavy deps (boto3, httpx) are imported inside each command body,
+# keeping this registration weightless.
 app.add_typer(deploy_app, name="deploy")
 
 
@@ -845,31 +847,38 @@ def _choose_deploy_target(target: Path) -> str:
     - `bootstrap` (the provisioned starter stack): `loopy deploy bootstrap` stands up the
       host and its `*.cloudfront.net` URL from your AWS credentials, then writes
       `LOOPY_PUBLIC_URL` back for you. `init` skips the URL prompt entirely.
+    - `render` (Render.com): `loopy deploy render` creates the web service from your repo
+      via Render's API and writes `LOOPY_PUBLIC_URL` back for you, like bootstrap. `init`
+      skips the URL prompt entirely.
 
     The answer steers only the rest of *this* `init` run (whether to prompt for the URL, how
     to order the next-steps list); it is not persisted, so re-init simply asks again. Anything
-    but an explicit "2" falls back to bring-your-own (the safe default: it just prompts for a
-    URL, and blank is a first-class answer there).
+    but an explicit "2" or "3" falls back to bring-your-own (the safe default: it just prompts
+    for a URL, and blank is a first-class answer there).
     """
-    from loopy_cli.deploy_target import TARGET_BOOTSTRAP
+    from loopy_cli.deploy_target import TARGET_BOOTSTRAP, TARGET_RENDER
 
     typer.echo("  How will you host the engine?")
     typer.echo(
-        "    1) I'll provide the public URL — a domain, a dev tunnel, or a platform like Render"
+        "    1) I'll provide the public URL — a domain, a dev tunnel, or a platform I manage"
     )
     typer.echo(
         "    2) Provision a starter stack for me — `loopy deploy bootstrap` stands up the "
         "host on AWS and mints the URL"
     )
-    choice = typer.prompt("  Choose 1 or 2", default="1").strip()
-    chosen = TARGET_BOOTSTRAP if choice == "2" else TARGET_BYO
+    typer.echo(
+        "    3) Deploy to Render — `loopy deploy render` creates the service from your repo "
+        "and sets LOOPY_PUBLIC_URL at deploy"
+    )
+    choice = typer.prompt("  Choose 1, 2 or 3", default="1").strip()
+    chosen = {"2": TARGET_BOOTSTRAP, "3": TARGET_RENDER}.get(choice, TARGET_BYO)
 
-    if chosen == TARGET_BOOTSTRAP:
+    if chosen != TARGET_BYO:
+        command = "loopy deploy bootstrap" if chosen == TARGET_BOOTSTRAP else "loopy deploy render"
         typer.echo(
             "  "
             + typer.style("✓", fg=typer.colors.GREEN)
-            + " bootstrap target — `loopy deploy bootstrap` sets LOOPY_PUBLIC_URL for you "
-            "at deploy."
+            + f" {chosen} target — `{command}` sets LOOPY_PUBLIC_URL for you at deploy."
         )
     typer.echo()
     return chosen
@@ -989,7 +998,7 @@ def _report_remaining_setup(target: Path, name: str, deploy_target: str) -> None
         )
         typer.echo()
 
-    from loopy_cli.deploy_target import TARGET_BOOTSTRAP
+    from loopy_cli.deploy_target import TARGET_BOOTSTRAP, TARGET_RENDER
 
     typer.echo("  Then:")
     typer.echo(typer.style(f"    cd {name}", fg=typer.colors.BRIGHT_WHITE))
@@ -997,9 +1006,12 @@ def _report_remaining_setup(target: Path, name: str, deploy_target: str) -> None
         typer.style("    loopy doctor", fg=typer.colors.BRIGHT_WHITE)
         + typer.style("          # re-check the above any time", fg=typer.colors.BRIGHT_BLACK)
     )
-    if deploy_target == TARGET_BOOTSTRAP:
+    if deploy_target in (TARGET_BOOTSTRAP, TARGET_RENDER):
+        deploy_command = (
+            "loopy deploy bootstrap" if deploy_target == TARGET_BOOTSTRAP else "loopy deploy render"
+        )
         typer.echo(
-            typer.style("    loopy deploy bootstrap", fg=typer.colors.BRIGHT_WHITE)
+            typer.style(f"    {deploy_command}", fg=typer.colors.BRIGHT_WHITE)
             + typer.style(
                 "  # provision the host; sets LOOPY_PUBLIC_URL for you",
                 fg=typer.colors.BRIGHT_BLACK,
@@ -1038,11 +1050,12 @@ def _explain_github_webhooks(target: Path, deploy_target: str) -> None:
     infer it from the commands list:
 
     - URL already recorded: `loopy webhooks github` works right now — that's the next command.
-    - No URL yet: get one first. The bootstrap target mints it at `loopy deploy bootstrap`;
-      bring-your-own means recording a domain or dev-tunnel URL (`loopy init` re-prompts, or
-      set `LOOPY_PUBLIC_URL` in loopy.env by hand). Then `loopy webhooks github`.
+    - No URL yet: get one first. The bootstrap target mints it at `loopy deploy bootstrap`,
+      the render target at `loopy deploy render`; bring-your-own means recording a domain or
+      dev-tunnel URL (`loopy init` re-prompts, or set `LOOPY_PUBLIC_URL` in loopy.env by
+      hand). Then `loopy webhooks github`.
     """
-    from loopy_cli.deploy_target import TARGET_BOOTSTRAP
+    from loopy_cli.deploy_target import TARGET_BOOTSTRAP, TARGET_RENDER
     from loopy_runtime.secrets import load_control_plane_env
 
     public_url = load_control_plane_env(target).get("LOOPY_PUBLIC_URL")
@@ -1088,9 +1101,14 @@ def _explain_github_webhooks(target: Path, deploy_target: str) -> None:
             + typer.style("⚠", fg=typer.colors.YELLOW)
             + " No LOOPY_PUBLIC_URL yet — set one before registering delivery:"
         )
-        if deploy_target == TARGET_BOOTSTRAP:
+        if deploy_target in (TARGET_BOOTSTRAP, TARGET_RENDER):
+            deploy_command = (
+                "loopy deploy bootstrap"
+                if deploy_target == TARGET_BOOTSTRAP
+                else "loopy deploy render"
+            )
             typer.echo(
-                typer.style("      loopy deploy bootstrap", fg=typer.colors.BRIGHT_WHITE)
+                typer.style(f"      {deploy_command}", fg=typer.colors.BRIGHT_WHITE)
                 + typer.style(
                     "  # provisions the host and writes LOOPY_PUBLIC_URL for you",
                     fg=typer.colors.BRIGHT_BLACK,
@@ -2338,12 +2356,32 @@ COPY . /project
 # Build gate: a project that doesn't compile fails the image build (and writes manifest.json).
 RUN loopy compile .
 
-# One long-lived process: sensor webhooks + scheduler + runtime. No --bus flag — the engine uses
-# Redis when REDIS_URL is set (managed Redis in production) and the in-process bus otherwise. Run
-# history lives at .loopy/state.db; for durability across redeploys, mount a volume and add
-# `--state-path /state/state.db` to the command below.
-ENTRYPOINT ["loopy"]
-CMD ["run", "manifest.json", "--in-process", "--root", ".", "--host", "0.0.0.0", "--port", "8000"]
+# One long-lived process: sensor webhooks + scheduler + runtime. No bus flag is passed — the
+# engine uses Redis when REDIS_URL is set (managed Redis in production) and the in-process bus
+# otherwise. Run history lives at .loopy/state.db; for durability across redeploys, mount a
+# volume and add `--state-path /state/state.db` to the command below.
+#
+# The sh wrapper does two platform-friendly things before exec'ing the engine:
+#   * Render mounts Secret Files flat at /etc/secrets/<name>; loopy's env_file paths are
+#     nested (secrets/base.env). `loopy deploy render` uploads each file with `/` encoded
+#     as `__`, and the loop below links every one back to the path the manifest names.
+#     (Paths containing a literal `__` are rejected at deploy time, so the decode is safe.)
+#     No /etc/secrets (local docker, other platforms) -> the loop is a no-op.
+#   * $PORT is honored when the platform injects one (Render does); 8000 otherwise.
+#   * A mounted /state disk (Render `--disk-gb`, or any platform volume) moves run
+#     history to /state/state.db so it survives redeploys; no disk -> default path.
+ENTRYPOINT []
+CMD ["/bin/sh", "-c", "\\
+if [ -d /etc/secrets ]; then \\
+  for f in /etc/secrets/*; do \\
+    [ -f \\"$f\\" ] || continue; \\
+    rel=$(basename \\"$f\\" | sed 's|__|/|g'); \\
+    mkdir -p \\"$(dirname \\"./$rel\\")\\"; \\
+    ln -sf \\"$f\\" \\"./$rel\\"; \\
+  done; \\
+fi; \\
+if [ -d /state ]; then STATE_ARGS=\\"--state-path /state/state.db\\"; else STATE_ARGS=\\"\\"; fi; \\
+exec loopy run manifest.json --in-process --root . --host 0.0.0.0 --port \\"${{PORT:-8000}}\\" $STATE_ARGS"]
 """
 
 _DOCKERIGNORE_TEMPLATE = """\
@@ -2366,7 +2404,32 @@ __pycache__/
 # Control-plane keys `loopy env` never emits verbatim: LOOPY_PUBLIC_URL is dev-side (webhook
 # registration + `loopy admin` run there, not on the platform); REDIS_URL gets an editable
 # placeholder instead of the local `localhost` value; the rotation slot is transient.
-_ENV_DEPLOY_SKIP = frozenset({"LOOPY_PUBLIC_URL", "REDIS_URL", "LOOPY_ADMIN_TOKEN_NEXT"})
+_ENV_DEPLOY_SKIP = frozenset(
+    {
+        "LOOPY_PUBLIC_URL",
+        "REDIS_URL",
+        "LOOPY_ADMIN_TOKEN_NEXT",
+        # Render-target keys: the API key drives the deploy from the laptop and the
+        # service id is a client-side hint — the engine needs neither.
+        "RENDER_API_KEY",
+        "LOOPY_RENDER_SERVICE_ID",
+    }
+)
+
+
+def deploy_env_block(root: Path) -> dict[str, str]:
+    """The engine env block a hosted deploy sets on the platform, from local loopy.env.
+
+    Everything in the control-plane dotenv minus laptop-side/platform-specific keys
+    (`_ENV_DEPLOY_SKIP`). Values come from the dotenv parser, so quoted values arrive
+    unquoted — platforms store what they're given verbatim, and a stray quote breaks
+    the consumer at run time. Shared by `loopy env` (prints it) and `loopy deploy
+    render` (pushes it via API).
+    """
+    from loopy_runtime.secrets import load_control_plane_env
+
+    control = load_control_plane_env(root)
+    return {key: control[key] for key in sorted(control) if key not in _ENV_DEPLOY_SKIP}
 
 
 @app.command()
@@ -2420,17 +2483,13 @@ def env(
     pushes to the target directly. This prints secrets to stdout on purpose, for a one-shot paste
     into a platform's ".env import" field; it is never logged. Do not commit the output.
     """
-    from loopy_runtime.secrets import load_control_plane_env
-
     # Compile so an uncompilable project errors before we emit anything.
     _compile_or_exit(path)
     root = Path(path)
-    control = load_control_plane_env(root)
+    block = deploy_env_block(root)
 
     lines = ["# --- Control plane (engine) — infra creds; set these on the platform ---"]
-    for key in sorted(control):
-        if key not in _ENV_DEPLOY_SKIP:
-            lines.append(f"{key}={control[key]}")
+    lines.extend(f"{key}={block[key]}" for key in block)
     lines.append(
         "REDIS_URL=redis://…   # managed Redis connection string; "
         "remove this line to use the in-process bus"

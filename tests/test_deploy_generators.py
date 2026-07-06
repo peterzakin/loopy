@@ -46,11 +46,41 @@ def test_dockerfile_stdout_is_version_pinned(tmp_path):
     result = runner.invoke(app, ["dockerfile", str(_project(tmp_path)), "--stdout"])
     assert result.exit_code == 0
     assert f'"loopy-computer[redis]=={__version__}"' in result.stdout
-    assert '"--in-process"' in result.stdout
-    assert '"--bus"' not in result.stdout  # CMD passes no bus flag; auto-selected from REDIS_URL
+    assert "--in-process" in result.stdout
+    assert "--bus" not in result.stdout  # no bus flag; auto-selected from REDIS_URL
     assert "RUN loopy compile ." in result.stdout  # build gate
-    # --stdout writes nothing
     assert not (tmp_path / "Dockerfile").exists()
+
+
+def test_dockerfile_start_command_links_secret_files_and_honors_port(tmp_path):
+    result = runner.invoke(app, ["dockerfile", str(_project(tmp_path)), "--stdout"])
+    assert result.exit_code == 0
+    assert "/etc/secrets" in result.stdout  # Render secret files get linked into place
+    assert "s|__|/|g" in result.stdout  # flat names decode back to nested paths
+    assert "${PORT:-8000}" in result.stdout  # platform-injected port wins
+    assert "/state/state.db" in result.stdout  # a mounted /state disk gets durable history
+
+
+def test_dockerfile_cmd_is_valid_json_and_sh(tmp_path):
+    # The CMD rides Dockerfile line continuations inside an exec-form JSON array — parse it
+    # the way Docker does (join `\`-newline, then JSON) and syntax-check the sh payload, so
+    # a bad escape in the template fails here instead of on the first real platform build.
+    import json
+    import shutil
+    import subprocess
+
+    import pytest
+
+    if shutil.which("sh") is None:  # pragma: no cover - POSIX always has sh
+        pytest.skip("sh unavailable")
+    result = runner.invoke(app, ["dockerfile", str(_project(tmp_path)), "--stdout"])
+    assert result.exit_code == 0
+    joined = result.stdout.replace("\\\n", "")
+    cmd_line = next(line for line in joined.splitlines() if line.startswith("CMD "))
+    argv = json.loads(cmd_line[len("CMD ") :])
+    assert argv[:2] == ["/bin/sh", "-c"]
+    check = subprocess.run(["sh", "-n"], input=argv[2], text=True, capture_output=True)
+    assert check.returncode == 0, check.stderr
 
 
 def test_dockerfile_writes_both_files(tmp_path):
@@ -122,3 +152,32 @@ def test_env_fails_on_uncompilable_project(tmp_path):
     (tmp_path / "registry.yml").write_text("sandboxes:\n  BaseSandbox:\n    image: {}\n")
     result = runner.invoke(app, ["env", str(tmp_path)])
     assert result.exit_code == 1
+
+
+# ── deploy_env_block ────────────────────────────────────────────────────────────
+
+
+def test_deploy_env_block_skips_laptop_and_render_keys(tmp_path):
+    from loopy_cli import deploy_env_block
+
+    project = _project(tmp_path)
+    (project / "loopy.env").write_text(
+        _LOOPY_ENV
+        + "RENDER_API_KEY=rnd_secret\n"
+        + "LOOPY_RENDER_SERVICE_ID=srv-123\n"
+    )
+    block = deploy_env_block(project)
+    assert block["DAYTONA_API_KEY"] == "dt-real"
+    assert block["LOOPY_ADMIN_TOKEN"] == "loopy_sk_admin"
+    for absent in ("LOOPY_PUBLIC_URL", "REDIS_URL", "RENDER_API_KEY", "LOOPY_RENDER_SERVICE_ID"):
+        assert absent not in block
+
+
+def test_deploy_env_block_strips_quotes(tmp_path):
+    # Regression: a quoted dotenv value must reach the platform unquoted — a stray
+    # `"` in e.g. SENTRY_AUTH_TOKEN breaks the consumer at run time, not at set time.
+    from loopy_cli import deploy_env_block
+
+    project = _project(tmp_path)
+    (project / "loopy.env").write_text('DAYTONA_API_KEY="dt-quoted"\n')
+    assert deploy_env_block(project)["DAYTONA_API_KEY"] == "dt-quoted"

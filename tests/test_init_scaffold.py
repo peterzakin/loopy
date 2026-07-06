@@ -7,6 +7,8 @@ of the toolchain rejects.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from typer.testing import CliRunner
 
@@ -705,3 +707,49 @@ def test_explain_github_webhooks_bootstrap_without_url_points_at_deploy(tmp_path
     assert "loopy webhooks github" in out
     # The bootstrap path doesn't send them to hand-edit loopy.env / re-run init.
     assert "set it yourself" not in out
+
+
+def test_explain_github_webhooks_render_without_url_points_at_deploy(tmp_path, capsys):
+    """Render target also mints the URL at deploy (like bootstrap), so the guidance leads
+    with `loopy deploy render` rather than the bring-your-own fork."""
+    loopy_cli._explain_github_webhooks(tmp_path, "render")
+
+    out = capsys.readouterr().out
+    assert "No LOOPY_PUBLIC_URL yet" in out
+    assert "loopy deploy render" in out
+    assert "loopy webhooks github" in out
+    # The render path doesn't send them to hand-edit loopy.env / re-run init, and doesn't
+    # name the AWS-specific bootstrap command.
+    assert "set it yourself" not in out
+    assert "loopy deploy bootstrap" not in out
+
+
+def test_choose_deploy_target_offers_render(monkeypatch):
+    import typer
+
+    monkeypatch.setattr(typer, "prompt", lambda *a, **k: "3")
+    assert loopy_cli._choose_deploy_target(Path(".")) == "render"
+
+
+def test_choose_deploy_target_default_is_byo(monkeypatch):
+    import typer
+
+    monkeypatch.setattr(typer, "prompt", lambda *a, **k: "")
+    assert loopy_cli._choose_deploy_target(Path(".")) == "byo"
+
+
+def test_report_remaining_setup_render_orders_around_deploy_render(tmp_path, capsys):
+    """Render target mints LOOPY_PUBLIC_URL at deploy time, just like bootstrap, so the
+    closing next-steps list should point at `loopy deploy render` (not `loopy run`) and
+    defer webhook registration to after that deploy."""
+    target = tmp_path / "demo"
+    scaffold_project(target, "demo")
+
+    loopy_cli._report_remaining_setup(target, "demo", "render")
+
+    out = capsys.readouterr().out
+    assert "loopy deploy render" in out
+    assert "sets LOOPY_PUBLIC_URL" in out
+    assert "after deploy" in out
+    # Render is not AWS bootstrap — it shouldn't print the bootstrap-specific command.
+    assert "loopy deploy bootstrap" not in out

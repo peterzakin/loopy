@@ -45,3 +45,10 @@ def test_is_cloudfront_url():
     assert not is_cloudfront_url("https://cloudfront.net.evil.com")
     assert not is_cloudfront_url("")
     assert not is_cloudfront_url(None)
+
+
+def test_render_target_constants():
+    from loopy_cli.deploy_target import RENDER_SERVICE_ID_ENV, TARGET_RENDER
+
+    assert TARGET_RENDER == "render"
+    assert RENDER_SERVICE_ID_ENV == "LOOPY_RENDER_SERVICE_ID"
