@@ -14,8 +14,7 @@ Three surfaces, one parser:
     `DAYTONA_API_KEY`/`DAYTONA_API_URL`) in `loopy.env` at the project root
     (`load_control_plane_env`). A local-dev convenience; in production these come from the
     platform's process env. The admin-dashboard bearer token (`LOOPY_ADMIN_TOKEN`, plus
-    `LOOPY_ADMIN_TOKEN_NEXT` during rotation) rides the same channel — see
-    `docs/design/admin-auth.md`.
+    `LOOPY_ADMIN_TOKEN_NEXT` during rotation) rides the same channel.
 """
 
 from __future__ import annotations
@@ -34,8 +33,8 @@ SENSOR_ENV_FILE = "sensors/.env"
 # provider keys only, never agent or sensor secrets.
 CONTROL_PLANE_ENV_FILE = "loopy.env"
 
-# Recognized control-plane env keys for the admin dashboard's bearer auth
-# (`docs/design/admin-auth.md`). On an operator's dev machine these live in `loopy.env`; on a
+# Recognized control-plane env keys for the admin dashboard's bearer auth.
+# On an operator's dev machine these live in `loopy.env`; on a
 # hosted control plane they come from the platform's process env (which always wins — the
 # caller merges the dotenv with `setdefault`). `*_NEXT` is the rotation overlap slot: the
 # server accepts both while the dev machine and the platform env roll to the new value.

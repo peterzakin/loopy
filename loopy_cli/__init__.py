@@ -56,7 +56,7 @@ app.command(name="integrations")(integrations_command)
 
 # `loopy deploy <target>` — provision hosting for the engine from an operator's cloud
 # keys. One subcommand per deploy target: `loopy deploy bootstrap` is the provisioned
-# starter stack (one CloudFormation stack; see docs/design/aws-deploy.md). boto3 is
+# starter stack (one CloudFormation stack). boto3 is
 # imported inside the command body, keeping this registration weightless.
 app.add_typer(deploy_app, name="deploy")
 

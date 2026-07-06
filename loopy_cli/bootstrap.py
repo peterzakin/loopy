@@ -5,7 +5,7 @@ bootstrap` is the loopy-provisioned starter stack — named for what it is (the
 batteries-included bootstrap), not where it runs, so future custom targets can claim
 provider names like `aws` without colliding with it.
 
-The bootstrap target stands up the design in `docs/design/aws-deploy.md`: one
+The bootstrap target stands up one
 CloudFormation stack holding an EC2 instance (the bundled redis+loopy stack via
 user-data), an Elastic IP, an EBS `/state` volume, and a CloudFront distribution
 that terminates TLS with a managed cert on its own `*.cloudfront.net` name — so the

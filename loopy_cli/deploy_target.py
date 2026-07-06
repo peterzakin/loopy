@@ -1,7 +1,6 @@
 """Deploy targets: the named places the engine can run, chosen explicitly per command.
 
-The engine itself is provider-agnostic (the serve/auth contract in
-`docs/design/aws-deploy.md` and `docs/design/admin-auth.md`); a *deploy target* is the
+The engine itself is provider-agnostic (a portable serve/auth contract); a *deploy target* is the
 CLI-side name for one way of hosting it, so a command like `loopy deploy <target>` can be
 explicit about which deployment it stands up. (`loopy admin` no longer names a target: it
 auto-routes from `LOOPY_PUBLIC_URL` — CloudFront → SSM tunnel, any other URL → proxy to

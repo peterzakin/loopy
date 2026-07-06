@@ -1,6 +1,6 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "Loopy engine host: one EC2 instance running the redis+loopy stack behind CloudFront (managed TLS on *.cloudfront.net, no operator domain). Agents run in Daytona, not here. Driven by `loopy deploy bootstrap` (see docs/design/aws-deploy.md); the CLI injects the instance UserData before create/update.",
+  "Description": "Loopy engine host: one EC2 instance running the redis+loopy stack behind CloudFront (managed TLS on *.cloudfront.net, no operator domain). Agents run in Daytona, not here. Driven by `loopy deploy bootstrap`; the CLI injects the instance UserData before create/update.",
   "Parameters": {
     "InstanceType": {
       "Type": "String",

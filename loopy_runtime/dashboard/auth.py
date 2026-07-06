@@ -1,4 +1,4 @@
-"""Edge auth for the dashboard's `/api/*` surface (`docs/design/admin-auth.md`).
+"""Edge auth for the dashboard's `/api/*` surface.
 
 A single symmetric bearer token, checked *before* any handler runs. The five guardrails:
 

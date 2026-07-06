@@ -1,4 +1,4 @@
-"""Backend-for-frontend proxy for `loopy admin --remote` (`docs/design/admin-auth.md`).
+"""Backend-for-frontend proxy for `loopy admin --remote`.
 
 The dashboard's remote mode splits the surface by concern: the front-end (`/` and `/static/*`)
 is served from the local install, while only `/api/*` — the run data — is proxied to the remote

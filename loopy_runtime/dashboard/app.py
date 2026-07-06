@@ -14,7 +14,7 @@ and, when a compiled manifest is supplied, the static system definition too — 
 It takes a `StateStore` (not a DB path) and an optional `Manifest`, so it's testable against the
 in-memory store and the `loopy admin` CLI owns opening the SQLite file and loading the manifest.
 The app never writes — it's a viewer — and never serves secret values. With an `AdminAuth`
-supplied, every `/api/*` route requires `Authorization: Bearer` (`docs/design/admin-auth.md`);
+supplied, every `/api/*` route requires `Authorization: Bearer`;
 run/step outputs are *not* redacted, so a non-loopback bind must pass one. `/`, `/static`, and
 `/healthz` stay open — they carry app code and liveness, never run data.
 """

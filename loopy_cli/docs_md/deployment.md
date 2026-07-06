@@ -2,8 +2,7 @@
 
 How to run the control plane somewhere other than your dev machine, and how to watch it safely.
 For authoring a project, run `loopy docs`; for the diagnostic-code catalog, `loopy docs
-errors`. The full design (including the threat model and the OIDC upgrade path) lives in
-`docs/design/admin-auth.md` in the repo.
+errors`.
 
 ## The provider-agnostic serve contract
 

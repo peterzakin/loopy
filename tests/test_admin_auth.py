@@ -1,4 +1,4 @@
-"""Admin dashboard auth (`docs/design/admin-auth.md`): edge auth on /api/*, the fail-closed
+"""Admin dashboard auth: edge auth on /api/*, the fail-closed
 serve entry, and the `loopy admin --remote` BFF proxy.
 
 Server-side tests go through a real request cycle (TestClient) because the point is the

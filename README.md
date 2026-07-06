@@ -8,7 +8,7 @@ code), so they version, diff, and review like the rest of your codebase. There's
 click together: `loopy compile` builds the workflow's DAG straight from those files.
 
 **Agent-neutral.** Loopy orchestrates the loop; it doesn't bind you to one vendor's agent. Every
-agent in `registry.yml` names its `harness` — the runner that drives it: **Claude Code**,
+agent in `registry.yml` names its `harness`, the runner that drives it: **Claude Code**,
 **OpenAI Codex**, and **OpenCode** ship today, and the harness registry is built to
 take more. Mix them in one manifest: route a triage step to one harness and a fixer to another,
 and swap a step's harness or model without touching its prose.
@@ -51,7 +51,7 @@ toolchain is built to be driven headlessly:
   `LOOPY-E` diagnostic catalog.
 - The verify loop is exit-code-clean: `loopy compile --check` (valid?), `loopy doctor`
   (runnable?), and `loopy trigger --json` (one run end-to-end, full record on stdout).
-- The two commands that need a human are `loopy init` (an interactive setup wizard — it
+- The two commands that need a human are `loopy init` (an interactive setup wizard that
   refuses to run without a terminal) and `loopy auth github` (a browser flow). For git
   auth the headless alternative is a `GITHUB_TOKEN` (`contents:write` +
   `pull_requests:write`) in the sandbox's `env_file`.
@@ -148,7 +148,7 @@ more agents and events.)
 # `model` and `harness` are both required on every agent (here they come from defaults).
 # `harness` picks the agent runner: `claude-code` (Claude Code, claude-* models),
 # `codex` (OpenAI Codex, gpt-*/codex-* models), or `opencode` (OpenCode, which
-# drives either family — write the bare model id; loopy expands it to opencode's
+# drives either family: write the bare model id; loopy expands it to opencode's
 # provider/model naming). The model must be one its harness can drive; nothing is
 # inferred, and `loopy compile` rejects a cross-provider pairing (a gpt-* model on
 # claude-code, or vice versa) as a compile-time error (LOOPY-E508).
@@ -194,7 +194,7 @@ events:
   GoalShipped:     { goal_id: str }                                    # terminal announcement
 ```
 
-> **No built-in agents.** Every agent a step names must be declared in `registry.yml` — the
+> **No built-in agents.** Every agent a step names must be declared in `registry.yml`. The
 > model + harness pairing is always explicit and visible, never injected or inferred.
 > `loopy init` scaffolds one agent per supported harness (`claude-code`, `codex`,
 > `opencode`) so the yaml for each is there to point a step at or edit.
@@ -255,7 +255,7 @@ triggered by a `poll` or a `webhook`.
 > URL, so several sensors can share `/hooks/github`). A sensor's public delivery URL is one base
 > plus its path: set `LOOPY_PUBLIC_URL` in `loopy.env` (prompted for at `loopy init`) to your
 > deployed host or dev tunnel; `loopy webhooks list` prints each full delivery URL
-> (e.g. `<base>/hooks/github`), and **`loopy webhooks github`** registers GitHub's side for you —
+> (e.g. `<base>/hooks/github`), and **`loopy webhooks github`** registers GitHub's side for you:
 > it creates a webhook on each repo in `registry.yml` via the App from `loopy auth github` and
 > lands the signing secret in `loopy.env` (`--check` reports without changing anything; built-in
 > `Github.*` triggers never fire until this or a manual registration exists). When
@@ -360,7 +360,7 @@ A few things worth knowing before the first run:
 The dev server `loopy run --in-process` records every run to a durable on-disk store
 (`.loopy/state.db` by default), and `loopy admin` serves a small read-only dashboard over it: a
 run list with each run's step timeline, emitted events, outputs, and any failure. `loopy admin`
-takes an optional deploy target to administer — it defaults to `local` (this dev loop); pass
+takes an optional deploy target to administer: it defaults to `local` (this dev loop); pass
 `byo` or `bootstrap` for a hosted control plane (below):
 
 ```bash
@@ -380,8 +380,8 @@ volume; the one-shot `loopy trigger` path is in-memory and isn't recorded.) The 
 
 The loopback dashboard needs no auth. The moment it leaves the box it does: run and step outputs
 are not redacted, so remote access is bearer-token-gated end to end. The engine serves the
-dashboard itself, path-routed off the one public URL — webhook deliveries at
-`$LOOPY_PUBLIC_URL/hooks/*`, the dashboard at `$LOOPY_PUBLIC_URL/admin` — so there's no second
+dashboard itself, path-routed off the one public URL (webhook deliveries at
+`$LOOPY_PUBLIC_URL/hooks/*`, the dashboard at `$LOOPY_PUBLIC_URL/admin`), so there's no second
 service to deploy and the admin endpoint is deterministic on every provider:
 
 ```bash
@@ -400,7 +400,7 @@ loopy admin                       # proxies /api to $LOOPY_PUBLIC_URL/admin with
 `$LOOPY_PUBLIC_URL/admin`, a CloudFront URL (`*.cloudfront.net`, where `/admin` is blocked at
 the edge) is reached over an SSM tunnel instead, and no URL at all reads the local run-state
 DB. It runs a small local proxy: the token stays in that process (read from `loopy.env` or
-the environment — never a query param, cookie, or browser variable), every request crosses
+the environment; never a query param, cookie, or browser variable), every request crosses
 as `Authorization: Bearer` over TLS, and the server compares it in constant time. Override
 the routing with `--url https://…` (proxy somewhere explicit), `--tunnel` (force the SSM
 tunnel), or `--local` (force the local DB, e.g. a standalone `loopy admin --local --host
@@ -408,8 +408,8 @@ tunnel), or `--local` (force the local DB, e.g. a standalone `loopy admin --loca
 `LOOPY_ADMIN_TOKEN_NEXT`, so you can roll both sides without a lockout. Plain HTTP to a
 non-loopback remote is refused.
 
-The serve contract is deliberately provider-agnostic — a process env var, `$PORT`, TLS
-terminated at the platform ingress, and durable run state behind the `StateStore` protocol —
+The serve contract is deliberately provider-agnostic (a process env var, `$PORT`, TLS
+terminated at the platform ingress, and durable run state behind the `StateStore` protocol),
 so nothing in loopy branches on the hosting provider:
 
 | Concern | loopy depends on | Render | Fly / Railway | k8s | Bare VM |
@@ -419,10 +419,9 @@ so nothing in loopy branches on the hosting provider:
 | Port | `$PORT` (fallback `--port`) | injected | injected | containerPort | flag/env |
 | Persistence | `StateStore` (SQLite file) | persistent disk | volume | PVC | disk |
 
-`GET /healthz` is open (liveness only, no data) for platform probes. The full design, including
-the guardrails and the OIDC upgrade path, is in
-[`docs/design/admin-auth.md`](docs/design/admin-auth.md); `loopy docs deployment` prints the
-same contract offline.
+`GET /healthz` is open (liveness only, no data) for platform probes. The dashboard's bearer-auth
+contract and its guardrails are documented in the deployment reference, which `loopy docs
+deployment` prints.
 
 ## License
 
