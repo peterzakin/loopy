@@ -847,31 +847,38 @@ def _choose_deploy_target(target: Path) -> str:
     - `bootstrap` (the provisioned starter stack): `loopy deploy bootstrap` stands up the
       host and its `*.cloudfront.net` URL from your AWS credentials, then writes
       `LOOPY_PUBLIC_URL` back for you. `init` skips the URL prompt entirely.
+    - `render` (Render.com): `loopy deploy render` creates the web service from your repo
+      via Render's API and writes `LOOPY_PUBLIC_URL` back for you, like bootstrap. `init`
+      skips the URL prompt entirely.
 
     The answer steers only the rest of *this* `init` run (whether to prompt for the URL, how
     to order the next-steps list); it is not persisted, so re-init simply asks again. Anything
-    but an explicit "2" falls back to bring-your-own (the safe default: it just prompts for a
-    URL, and blank is a first-class answer there).
+    but an explicit "2" or "3" falls back to bring-your-own (the safe default: it just prompts
+    for a URL, and blank is a first-class answer there).
     """
-    from loopy_cli.deploy_target import TARGET_BOOTSTRAP
+    from loopy_cli.deploy_target import TARGET_BOOTSTRAP, TARGET_RENDER
 
     typer.echo("  How will you host the engine?")
     typer.echo(
-        "    1) I'll provide the public URL — a domain, a dev tunnel, or a platform like Render"
+        "    1) I'll provide the public URL — a domain, a dev tunnel, or a platform I manage"
     )
     typer.echo(
         "    2) Provision a starter stack for me — `loopy deploy bootstrap` stands up the "
         "host on AWS and mints the URL"
     )
-    choice = typer.prompt("  Choose 1 or 2", default="1").strip()
-    chosen = TARGET_BOOTSTRAP if choice == "2" else TARGET_BYO
+    typer.echo(
+        "    3) Deploy to Render — `loopy deploy render` creates the service from your repo "
+        "and sets LOOPY_PUBLIC_URL at deploy"
+    )
+    choice = typer.prompt("  Choose 1, 2 or 3", default="1").strip()
+    chosen = {"2": TARGET_BOOTSTRAP, "3": TARGET_RENDER}.get(choice, TARGET_BYO)
 
-    if chosen == TARGET_BOOTSTRAP:
+    if chosen != TARGET_BYO:
+        command = "loopy deploy bootstrap" if chosen == TARGET_BOOTSTRAP else "loopy deploy render"
         typer.echo(
             "  "
             + typer.style("✓", fg=typer.colors.GREEN)
-            + " bootstrap target — `loopy deploy bootstrap` sets LOOPY_PUBLIC_URL for you "
-            "at deploy."
+            + f" {chosen} target — `{command}` sets LOOPY_PUBLIC_URL for you at deploy."
         )
     typer.echo()
     return chosen
@@ -991,7 +998,7 @@ def _report_remaining_setup(target: Path, name: str, deploy_target: str) -> None
         )
         typer.echo()
 
-    from loopy_cli.deploy_target import TARGET_BOOTSTRAP
+    from loopy_cli.deploy_target import TARGET_BOOTSTRAP, TARGET_RENDER
 
     typer.echo("  Then:")
     typer.echo(typer.style(f"    cd {name}", fg=typer.colors.BRIGHT_WHITE))
@@ -999,9 +1006,12 @@ def _report_remaining_setup(target: Path, name: str, deploy_target: str) -> None
         typer.style("    loopy doctor", fg=typer.colors.BRIGHT_WHITE)
         + typer.style("          # re-check the above any time", fg=typer.colors.BRIGHT_BLACK)
     )
-    if deploy_target == TARGET_BOOTSTRAP:
+    if deploy_target in (TARGET_BOOTSTRAP, TARGET_RENDER):
+        deploy_command = (
+            "loopy deploy bootstrap" if deploy_target == TARGET_BOOTSTRAP else "loopy deploy render"
+        )
         typer.echo(
-            typer.style("    loopy deploy bootstrap", fg=typer.colors.BRIGHT_WHITE)
+            typer.style(f"    {deploy_command}", fg=typer.colors.BRIGHT_WHITE)
             + typer.style(
                 "  # provision the host; sets LOOPY_PUBLIC_URL for you",
                 fg=typer.colors.BRIGHT_BLACK,
@@ -1040,11 +1050,12 @@ def _explain_github_webhooks(target: Path, deploy_target: str) -> None:
     infer it from the commands list:
 
     - URL already recorded: `loopy webhooks github` works right now — that's the next command.
-    - No URL yet: get one first. The bootstrap target mints it at `loopy deploy bootstrap`;
-      bring-your-own means recording a domain or dev-tunnel URL (`loopy init` re-prompts, or
-      set `LOOPY_PUBLIC_URL` in loopy.env by hand). Then `loopy webhooks github`.
+    - No URL yet: get one first. The bootstrap target mints it at `loopy deploy bootstrap`,
+      the render target at `loopy deploy render`; bring-your-own means recording a domain or
+      dev-tunnel URL (`loopy init` re-prompts, or set `LOOPY_PUBLIC_URL` in loopy.env by
+      hand). Then `loopy webhooks github`.
     """
-    from loopy_cli.deploy_target import TARGET_BOOTSTRAP
+    from loopy_cli.deploy_target import TARGET_BOOTSTRAP, TARGET_RENDER
     from loopy_runtime.secrets import load_control_plane_env
 
     public_url = load_control_plane_env(target).get("LOOPY_PUBLIC_URL")
@@ -1090,9 +1101,14 @@ def _explain_github_webhooks(target: Path, deploy_target: str) -> None:
             + typer.style("⚠", fg=typer.colors.YELLOW)
             + " No LOOPY_PUBLIC_URL yet — set one before registering delivery:"
         )
-        if deploy_target == TARGET_BOOTSTRAP:
+        if deploy_target in (TARGET_BOOTSTRAP, TARGET_RENDER):
+            deploy_command = (
+                "loopy deploy bootstrap"
+                if deploy_target == TARGET_BOOTSTRAP
+                else "loopy deploy render"
+            )
             typer.echo(
-                typer.style("      loopy deploy bootstrap", fg=typer.colors.BRIGHT_WHITE)
+                typer.style(f"      {deploy_command}", fg=typer.colors.BRIGHT_WHITE)
                 + typer.style(
                     "  # provisions the host and writes LOOPY_PUBLIC_URL for you",
                     fg=typer.colors.BRIGHT_BLACK,
