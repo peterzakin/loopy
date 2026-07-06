@@ -297,3 +297,81 @@ def test_has_cron_workflows(tmp_path):
     plain_root.mkdir()
     plain = _loopy_project(plain_root)
     assert has_cron_workflows(_compiled_manifest(plain)) is False
+
+
+# ── wizard ──────────────────────────────────────────────────────────────────────
+
+
+def _fake_client(owners):
+    class FakeClient:
+        def __init__(self, key):
+            self.key = key
+
+        def owners(self):
+            from loopy_cli.render import RenderAPIError
+
+            if self.key == "rnd_bad":
+                raise RenderAPIError(401, "unauthorized", "mint a new one")
+            return owners
+
+    return FakeClient
+
+
+def test_connect_uses_recorded_key_and_sole_owner(tmp_path, monkeypatch, capsys):
+    from loopy_cli import render as render_mod
+
+    project = _loopy_project(tmp_path)  # loopy.env already has RENDER_API_KEY=rnd_k
+    monkeypatch.setattr(render_mod, "_client_factory", _fake_client([{"id": "own-1", "name": "V"}]))
+    monkeypatch.setattr(render_mod, "_interactive", lambda: False)
+    client, owner = render_mod.connect(project)
+    assert client.key == "rnd_k"
+    assert owner["id"] == "own-1"
+
+
+def test_connect_headless_without_key_exits_naming_the_fix(tmp_path, monkeypatch):
+    import typer
+
+    from loopy_cli import render as render_mod
+
+    project = _loopy_project(tmp_path)
+    (project / "loopy.env").write_text("DAYTONA_API_KEY=dt\n")
+    monkeypatch.delenv("RENDER_API_KEY", raising=False)
+    monkeypatch.setattr(render_mod, "_interactive", lambda: False)
+    with pytest.raises(typer.Exit):
+        render_mod.connect(project)
+
+
+def test_connect_prompts_writes_key_back(tmp_path, monkeypatch):
+    from loopy_cli import render as render_mod
+    from loopy_runtime.secrets import load_control_plane_env
+
+    project = _loopy_project(tmp_path)
+    (project / "loopy.env").write_text("DAYTONA_API_KEY=dt\n")
+    monkeypatch.delenv("RENDER_API_KEY", raising=False)
+    monkeypatch.setattr(render_mod, "_client_factory", _fake_client([{"id": "own-1", "name": "V"}]))
+    monkeypatch.setattr(render_mod, "_interactive", lambda: True)
+    answers = iter(["rnd_new"])
+    monkeypatch.setattr(render_mod.typer, "prompt", lambda *a, **k: next(answers))
+    client, owner = render_mod.connect(project)
+    assert load_control_plane_env(project)["RENDER_API_KEY"] == "rnd_new"
+
+
+def test_choose_plan_flag_wins_and_headless_requires_it(monkeypatch):
+    import typer
+
+    from loopy_cli import render as render_mod
+
+    assert render_mod.choose_plan(has_cron=True, plan_flag="standard") == "standard"
+    monkeypatch.setattr(render_mod, "_interactive", lambda: False)
+    with pytest.raises(typer.Exit):
+        render_mod.choose_plan(has_cron=False, plan_flag=None)
+
+
+def test_choose_plan_prompt_defaults_to_starter(monkeypatch, capsys):
+    from loopy_cli import render as render_mod
+
+    monkeypatch.setattr(render_mod, "_interactive", lambda: True)
+    monkeypatch.setattr(render_mod.typer, "prompt", lambda *a, **k: k.get("default", "2"))
+    assert render_mod.choose_plan(has_cron=True, plan_flag=None) == "starter"
+    out = capsys.readouterr().out
+    assert "WILL miss" in out  # cron-aware annotation

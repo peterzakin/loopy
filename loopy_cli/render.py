@@ -386,3 +386,121 @@ def has_cron_workflows(manifest_abs: Path) -> bool:
     from loopy_runtime.manifest_model import load_manifest
 
     return bool(load_manifest(manifest_abs).cron_entries())
+
+
+def _interactive() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _client_factory(api_key: str) -> "RenderClient":
+    return RenderClient(api_key)
+
+
+def _ok(text: str) -> None:
+    typer.echo("  " + typer.style("✓", fg=typer.colors.GREEN) + f" {text}")
+
+
+def _fail(text: str) -> None:
+    typer.echo("  " + typer.style("✗", fg=typer.colors.RED) + f" {text}")
+
+
+def connect(root: Path) -> tuple["RenderClient", dict]:
+    """Resolve + verify the Render API key and pick the workspace; wizard steps 1–2.
+
+    Key precedence: process env, then loopy.env; a missing key prompts on a TTY (and
+    is written back on first success) or exits 1 headless. Verification is immediate
+    (`GET /owners`) so a bad key fails here, not mid-provision; the same call yields
+    the ownerId every create needs.
+    """
+    from loopy_runtime.secrets import load_control_plane_env, write_control_plane_env
+
+    recorded = (
+        os.environ.get(RENDER_API_KEY_ENV, "").strip()
+        or load_control_plane_env(root).get(RENDER_API_KEY_ENV, "").strip()
+    )
+    key = recorded
+    prompted = False
+    while True:
+        if not key:
+            if not _interactive():
+                typer.echo(
+                    f"error: {RENDER_API_KEY_ENV} not set — mint one at {RENDER_KEYS_URL} "
+                    "and put it in loopy.env (or the environment).",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+            typer.echo("  1. Render API key")
+            typer.echo(f"     Mint one at {RENDER_KEYS_URL} (Account Settings → API Keys)")
+            key = typer.prompt("  API key", hide_input=True).strip()
+            prompted = True
+            if not key:
+                continue
+        client = _client_factory(key)
+        try:
+            owners = client.owners()
+        except RenderAPIError as exc:
+            if exc.status == 401 and _interactive():
+                _fail("that key was rejected (401) — try again")
+                key = ""
+                continue
+            typer.echo(f"error: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        break
+
+    if not owners:
+        typer.echo("error: the key verified but has no workspaces — check the account.", err=True)
+        raise typer.Exit(code=1)
+    if len(owners) == 1:
+        owner = owners[0]
+    elif _interactive():
+        typer.echo("  2. Workspace")
+        for index, candidate in enumerate(owners, start=1):
+            typer.echo(f"     {index}) {candidate.get('name', candidate['id'])}")
+        while True:
+            raw = typer.prompt(f"  Choose 1-{len(owners)}", default="1").strip()
+            if raw.isdigit() and 1 <= int(raw) <= len(owners):
+                owner = owners[int(raw) - 1]
+                break
+    else:
+        owner = owners[0]
+        typer.echo(f"  using workspace {owner.get('name', owner['id'])} (first of {len(owners)})")
+
+    if prompted:
+        write_control_plane_env(root, {RENDER_API_KEY_ENV: key})
+        _ok(
+            f"key verified (workspace: {owner.get('name', owner['id'])}) — "
+            f"wrote {RENDER_API_KEY_ENV} to loopy.env"
+        )
+    else:
+        _ok(f"Render key verified (workspace: {owner.get('name', owner['id'])})")
+    return client, owner
+
+
+def choose_plan(*, has_cron: bool, plan_flag: str | None) -> str:
+    """Wizard step 4. The flag always wins; a TTY gets the trade-off prompt; headless
+    without a flag exits 1 — never silently pick a paid plan or a cron-breaking free one."""
+    if plan_flag:
+        return plan_flag
+    if not _interactive():
+        typer.echo(
+            "error: no TTY to ask about the service plan — pass --plan "
+            "(free|starter|standard|pro).",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if has_cron:
+        cron_line = (
+            "your project has cron workflows and free-tier spin-down WILL miss their ticks"
+        )
+    else:
+        cron_line = "webhooks wake it, with a ~30-60s cold start after idle"
+    typer.echo("  4. Plan")
+    typer.echo(f"     1) free     — $0. Spins down after ~15 min idle: {cron_line}.")
+    typer.echo("                   Run history is lost on restart (no disk on free).")
+    typer.echo("     2) starter  — ~$7/mo. Always on (cron fires), can attach a persistent disk.")
+    while True:
+        raw = typer.prompt("  Choose 1 or 2", default="2").strip()
+        if raw in ("1", "2"):
+            plan = "free" if raw == "1" else "starter"
+            _ok(f"{plan} plan")
+            return plan
