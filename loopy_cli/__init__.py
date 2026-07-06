@@ -359,6 +359,27 @@ def _serve_dashboard(config) -> None:
         raise typer.Exit(code=1) from exc
 
 
+def _open_dashboard(url: str, host: str, *, no_browser: bool) -> None:
+    """Open the served dashboard in a local browser, unless it wouldn't help.
+
+    The dashboard exists to be looked at, and its port is often not the default (see
+    `_resolve_dashboard_port`), so the URL isn't guessable — auto-opening saves a copy-paste.
+    Skipped when the caller opts out (`--no-browser`) or when the bind isn't loopback: a
+    `--host 0.0.0.0` bind serves other machines (e.g. the control plane itself), so popping a
+    browser here would be the wrong thing. A headless box has no browser either; `webbrowser`
+    fails quietly there and the printed URL still stands."""
+    from loopy_runtime.dashboard.auth import is_loopback_host
+
+    if no_browser or not is_loopback_host(host):
+        return
+    import webbrowser
+
+    try:
+        webbrowser.open(url)
+    except Exception:  # noqa: BLE001 — no browser (e.g. headless) is fine; the URL is printed
+        pass
+
+
 def _dim(text: str) -> str:
     return typer.style(text, fg=typer.colors.BRIGHT_BLACK)
 
@@ -2068,6 +2089,9 @@ def admin(
         help="Compiled manifest for the templates/registry/schedules views (default manifest.json; "
         "skipped if absent).",
     ),
+    no_browser: bool = typer.Option(
+        False, "--no-browser", help="Don't try to open the dashboard in a browser."
+    ),
 ) -> None:
     """Serve the read-only control-plane dashboard.
 
@@ -2085,6 +2109,10 @@ def admin(
 
     Override the routing with `--local` (force the local DB), `--tunnel` (force the SSM tunnel),
     or `--url` (proxy somewhere explicit). Those three are mutually exclusive.
+
+    On a loopback bind the resolved URL is opened in a browser (the port is often not the
+    default, so it isn't guessable); pass `--no-browser` to skip it. A non-loopback bind serves
+    other machines, so it never opens one.
 
     Exposed server (`--local --host 0.0.0.0`, e.g. on the control plane itself): requires
     LOOPY_ADMIN_TOKEN in the environment and puts every /api route behind it; refuses to start
@@ -2180,6 +2208,7 @@ def admin(
         config = uvicorn.Config(
             create_proxy_app(url, token), host=host, port=port, log_level="warning"
         )
+        _open_dashboard(f"http://{host}:{port}", host, no_browser=no_browser)
         _serve_dashboard(config)  # pragma: no cover - long-lived server
         return
 
@@ -2238,6 +2267,7 @@ def admin(
     config = uvicorn.Config(
         create_app(store, loaded, auth=auth), host=host, port=port, log_level="warning"
     )
+    _open_dashboard(f"http://{host}:{port}", host, no_browser=no_browser)
     _serve_dashboard(config)  # pragma: no cover - long-lived server
 
 

@@ -453,3 +453,70 @@ def test_proxy_maps_connection_failure_to_actionable_502():
     resp = _proxy_client(handler).get("/api/meta")
     assert resp.status_code == 502
     assert "https://cp.example.com" in resp.json()["detail"]
+
+
+# ── `loopy admin` auto-opens the dashboard in a browser ────────────────────────────────
+def test_open_dashboard_gates_on_loopback_and_opt_out(monkeypatch):
+    import webbrowser
+
+    from loopy_cli import _open_dashboard
+
+    opened = []
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url))
+
+    _open_dashboard("http://127.0.0.1:9000", "127.0.0.1", no_browser=False)
+    assert opened == ["http://127.0.0.1:9000"]  # loopback + not opted out → opens
+
+    opened.clear()
+    _open_dashboard("http://127.0.0.1:9000", "127.0.0.1", no_browser=True)
+    assert opened == []  # --no-browser opts out
+
+    _open_dashboard("http://0.0.0.0:9000", "0.0.0.0", no_browser=False)
+    assert opened == []  # non-loopback bind serves other machines, never opens here
+
+
+def test_open_dashboard_swallows_browser_failure(monkeypatch):
+    # A headless box (no browser) raises from webbrowser.open; that must not crash the command.
+    import webbrowser
+
+    from loopy_cli import _open_dashboard
+
+    def boom(url):
+        raise RuntimeError("no display")
+
+    monkeypatch.setattr(webbrowser, "open", boom)
+    _open_dashboard("http://127.0.0.1:9000", "127.0.0.1", no_browser=False)  # must not raise
+
+
+def test_admin_proxy_mode_opens_browser_at_the_local_url(monkeypatch, tmp_path):
+    # Reaching the serve point in proxy mode opens the *local* proxy URL (not the remote it
+    # forwards to). Stub the long-lived server so the command returns.
+    import webbrowser
+
+    import loopy_cli
+
+    monkeypatch.setenv("LOOPY_ADMIN_TOKEN", TOKEN)
+    opened = []
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr(loopy_cli, "_serve_dashboard", lambda config: None)
+
+    result = _invoke(["admin", "--url", "https://cp.example.com"], monkeypatch, tmp_path)
+    assert result.exit_code == 0
+    assert len(opened) == 1 and opened[0].startswith("http://127.0.0.1:")
+
+
+def test_admin_no_browser_flag_suppresses_open_in_proxy_mode(monkeypatch, tmp_path):
+    import webbrowser
+
+    import loopy_cli
+
+    monkeypatch.setenv("LOOPY_ADMIN_TOKEN", TOKEN)
+    opened = []
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr(loopy_cli, "_serve_dashboard", lambda config: None)
+
+    result = _invoke(
+        ["admin", "--url", "https://cp.example.com", "--no-browser"], monkeypatch, tmp_path
+    )
+    assert result.exit_code == 0
+    assert opened == []
