@@ -78,8 +78,7 @@ def build_demo_manifest() -> Manifest:
                     "WorkItem": {
                         "fields": {
                             "link": {"type": "string", "format": "uri"},
-                            "root_cause": {"type": "string"},
-                            "proposed_goal": {"type": "string"},
+                            "description": {"type": "string"},
                         }
                     },
                     "MetricThreshold": {"fields": {"goal_id": {"type": "string"}}},

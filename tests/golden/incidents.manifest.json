@@ -111,28 +111,11 @@
       },
       "WorkItem": {
         "fields": {
+          "description": {
+            "type": "string"
+          },
           "link": {
             "format": "uri",
-            "type": "string"
-          },
-          "proposed_goal": {
-            "type": "string"
-          },
-          "repro": {
-            "type": "string"
-          },
-          "root_cause": {
-            "type": "string"
-          },
-          "source": {
-            "enum": [
-              "sentry",
-              "linear",
-              "datadog",
-              "pagerduty",
-              "slack",
-              "cve"
-            ],
             "type": "string"
           }
         }
@@ -223,7 +206,7 @@
         "arbitrate": {
           "after": [],
           "agent": "Investigator",
-          "body": "Decide the goal for \"{{ event.proposed_goal }}\" given the work item at {{ event.link }}.",
+          "body": "Decide the goal for \"{{ event.description }}\" given the work item at {{ event.link }}.",
           "budget": null,
           "emits": [],
           "id": "resolve/arbitrate",
@@ -234,9 +217,9 @@
           },
           "refs": [
             {
-              "field": "proposed_goal",
+              "field": "description",
               "producer": "event",
-              "raw": "{{ event.proposed_goal }}"
+              "raw": "{{ event.description }}"
             },
             {
               "field": "link",

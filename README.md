@@ -191,11 +191,8 @@ events:
   MetricThreshold: { goal_id: str }
   # emitted by steps: cross-workflow seams + terminal announcements
   WorkItem:
-    source:        enum[sentry, linear, datadog, pagerduty, slack, cve]   # Incident's 5 sources, carried through; + cve via upkeep's cron
     link:          url
-    root_cause:    str
-    proposed_goal: str
-    repro:         str
+    description:   str
   GoalShipped:     { goal_id: str }                                    # terminal announcement
 ```
 
