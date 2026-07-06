@@ -100,11 +100,11 @@ def test_env_replaces_redis_url_with_placeholder(tmp_path):
     assert "REDIS_URL=redis://…" in result.stdout
 
 
-def test_env_omits_laptop_side_public_url(tmp_path):
+def test_env_omits_developer_side_public_url(tmp_path):
     result = runner.invoke(app, ["env", str(_project(tmp_path))])
     # The value never appears; only a comment explaining where it lives.
     assert "https://tunnel.example.com" not in result.stdout
-    assert "LOOPY_PUBLIC_URL is laptop-side" in result.stdout
+    assert "LOOPY_PUBLIC_URL is developer-side" in result.stdout
 
 
 def test_env_omits_sandbox_secrets(tmp_path):
