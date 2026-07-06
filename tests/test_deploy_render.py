@@ -107,3 +107,89 @@ def test_repo_not_connected_hint():
     with pytest.raises(RenderAPIError) as excinfo:
         _client(handler).create_service({})
     assert "connect" in excinfo.value.hint.lower()
+
+
+import subprocess
+
+# ── git preflight ───────────────────────────────────────────────────────────────
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def _git_project(tmp_path, *, remote: str | None = "https://github.com/acme/demo.git"):
+    _git(tmp_path, "init", "-b", "main")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / "registry.yml").write_text("agents: {}\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-m", "init")
+    if remote:
+        _git(tmp_path, "remote", "add", "origin", remote)
+    return tmp_path
+
+
+def test_normalize_repo_url_matrix():
+    from loopy_cli.render import normalize_repo_url
+
+    for raw in (
+        "git@github.com:acme/demo.git",
+        "https://github.com/acme/demo.git",
+        "https://github.com/acme/demo",
+        "ssh://git@github.com/acme/demo.git",
+    ):
+        assert normalize_repo_url(raw) == "https://github.com/acme/demo"
+    assert normalize_repo_url("git@gitlab.com:acme/demo.git") == "https://gitlab.com/acme/demo"
+    assert normalize_repo_url("https://example.com/acme/demo.git") is None
+
+
+def test_git_checks_not_a_repo(tmp_path):
+    from loopy_cli.render import git_checks
+
+    checks, info = git_checks(tmp_path, None)
+    assert [c.key for c in checks] == ["repo"]
+    assert not checks[0].ok and not checks[0].warn
+    assert "git init" in checks[0].fix
+    assert info.repo_url == ""
+
+
+def test_git_checks_no_usable_remote(tmp_path):
+    from loopy_cli.render import git_checks
+
+    checks, info = git_checks(_git_project(tmp_path, remote=None), None)
+    by_key = {c.key: c for c in checks}
+    assert by_key["repo"].ok
+    assert not by_key["remote"].ok and not by_key["remote"].warn
+    assert "git remote add origin" in by_key["remote"].fix
+
+
+def test_git_checks_never_pushed_is_fatal_and_dirty_is_warn(tmp_path):
+    from loopy_cli.render import git_checks
+
+    project = _git_project(tmp_path)
+    (project / "scratch.txt").write_text("wip")
+    checks, info = git_checks(project, None)
+    by_key = {c.key: c for c in checks}
+    assert info.branch == "main"
+    assert info.repo_url == "https://github.com/acme/demo"
+    assert not by_key["clean"].ok and by_key["clean"].warn
+    assert not by_key["pushed"].ok and not by_key["pushed"].warn
+    assert "git push -u origin main" in by_key["pushed"].fix
+
+
+def test_git_checks_all_green_via_local_bare_remote(tmp_path):
+    from loopy_cli.render import git_checks
+
+    bare = tmp_path / "bare.git"
+    subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    project = _git_project(project_dir, remote=None)
+    _git(project, "remote", "add", "origin", str(bare))
+    _git(project, "push", "-u", "origin", "main")
+    checks, info = git_checks(project, None)
+    by_key = {c.key: c for c in checks}
+    # A local-path remote isn't GitHub/GitLab, so `remote` fails — assert the rest:
+    assert by_key["clean"].ok
+    assert by_key["pushed"].ok

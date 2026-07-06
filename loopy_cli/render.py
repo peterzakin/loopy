@@ -156,3 +156,137 @@ class RenderClient:
 
     def delete_service(self, service_id: str) -> None:
         self._request("DELETE", f"/services/{service_id}")
+
+
+@dataclass(frozen=True)
+class Check:
+    """One preflight verdict. `warn=True` failures are confirmable; others are fatal."""
+
+    key: str
+    label: str
+    ok: bool
+    warn: bool = False
+    fix: str = ""
+
+
+@dataclass(frozen=True)
+class RepoInfo:
+    """What the git preflight learned: the branch to deploy and the https repo URL."""
+
+    branch: str = ""
+    repo_url: str = ""
+
+
+_REMOTE_PATTERNS = (
+    re.compile(r"^git@(github\.com|gitlab\.com):([^/]+/[^/]+?)(?:\.git)?$"),
+    re.compile(r"^(?:ssh://)?git@(github\.com|gitlab\.com)/([^/]+/[^/]+?)(?:\.git)?$"),
+    re.compile(r"^https://(github\.com|gitlab\.com)/([^/]+/[^/]+?)(?:\.git)?/?$"),
+)
+
+
+def normalize_repo_url(remote: str) -> str | None:
+    """`origin`'s URL as the https form Render's API takes, or None if not GitHub/GitLab."""
+    remote = remote.strip()
+    for pattern in _REMOTE_PATTERNS:
+        match = pattern.match(remote)
+        if match:
+            return f"https://{match.group(1)}/{match.group(2)}"
+    return None
+
+
+def _run_git(root: Path, *args: str) -> tuple[int, str]:
+    proc = subprocess.run(
+        ["git", *args], cwd=root, capture_output=True, text=True, check=False
+    )
+    return proc.returncode, (proc.stdout or proc.stderr).strip()
+
+
+def git_checks(root: Path, branch: str | None) -> tuple[list[Check], RepoInfo]:
+    """The deployability of the repo Render will build from — checks 5–8 of the preflight.
+
+    Render builds the *pushed* tree of a connected repo, so each check maps to a way a
+    deploy silently builds the wrong thing (or nothing): not a repo, no forge remote,
+    uncommitted work (warn), never-pushed branch (fatal) / unpushed commits (warn).
+    """
+    code, _ = _run_git(root, "rev-parse", "--is-inside-work-tree")
+    if code != 0:
+        return (
+            [
+                Check(
+                    "repo",
+                    "directory is a git repository",
+                    False,
+                    fix='git init -b main && git add -A && git commit -m "loopy project"',
+                )
+            ],
+            RepoInfo(),
+        )
+    checks = [Check("repo", "directory is a git repository", True)]
+    if not branch:
+        _, branch = _run_git(root, "rev-parse", "--abbrev-ref", "HEAD")
+
+    code, remote = _run_git(root, "remote", "get-url", "origin")
+    if code != 0:
+        checks.append(
+            Check(
+                "remote",
+                "origin points at GitHub or GitLab",
+                False,
+                fix=(
+                    "git remote add origin https://github.com/<you>/<repo>.git\n"
+                    "(no repo yet? `gh repo create --source . --private --push` "
+                    "creates and pushes one)"
+                ),
+            )
+        )
+        return checks, RepoInfo(branch=branch)
+
+    repo_url = normalize_repo_url(remote)
+    checks.append(
+        Check(
+            "remote",
+            f"origin → {repo_url}" if repo_url else "origin points at GitHub or GitLab",
+            repo_url is not None,
+            fix=(
+                "git remote add origin https://github.com/<you>/<repo>.git\n"
+                "(no repo yet? `gh repo create --source . --private --push` "
+                "creates and pushes one)"
+            )
+            if repo_url is None
+            else "",
+        )
+    )
+
+    _, dirty = _run_git(root, "status", "--porcelain")
+    checks.append(
+        Check(
+            "clean",
+            "working tree is committed",
+            not dirty,
+            warn=True,
+            fix="Render builds the *pushed* tree — uncommitted changes will not deploy",
+        )
+    )
+
+    code, ahead = _run_git(root, "rev-list", "--count", f"origin/{branch}..{branch}")
+    if code != 0:
+        checks.append(
+            Check(
+                "pushed",
+                f"branch {branch} is pushed to origin",
+                False,
+                fix=f"git push -u origin {branch}",
+            )
+        )
+    else:
+        unpushed = int(ahead or "0")
+        checks.append(
+            Check(
+                "pushed",
+                f"branch {branch} is pushed and up to date",
+                unpushed == 0,
+                warn=True,
+                fix=f"{unpushed} unpushed commit(s) — `git push` first, or the build is stale",
+            )
+        )
+    return checks, RepoInfo(branch=branch, repo_url=repo_url or "")
