@@ -135,7 +135,9 @@ column of `✓`s and the first run on a fresh project reads as a guided to-do li
    dotenv parser so quoted values arrive unquoted (regression-tested — this exact quoting
    bug bit a real deploy). Updates use `PUT /v1/services/{id}/env-vars` (replace-all →
    idempotent). `RENDER_API_KEY` itself is excluded — the engine never needs it.
-3. **Secret files.** Each `collect_secret_files()` rel-path becomes a Render Secret File.
+3. **Secret files.** Each `collect_secret_files()` rel-path becomes a Render Secret File —
+   except `loopy.env` itself: the env-var push above already carries the control plane,
+   and the file holds `RENDER_API_KEY`, which the deployed service must never receive.
    Confirmed against current Render docs: secret-file names are flat and mounted at
    `/etc/secrets/<filename>`, Docker-runtime services see them **only** there (the
    repo-root copy applies to non-Docker services), and all files together are capped at
