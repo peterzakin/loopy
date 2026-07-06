@@ -290,3 +290,99 @@ def git_checks(root: Path, branch: str | None) -> tuple[list[Check], RepoInfo]:
             )
         )
     return checks, RepoInfo(branch=branch, repo_url=repo_url or "")
+
+
+def project_checks(root: Path, manifest_abs: Path) -> list[Check]:
+    """Checks 2–4 and 9–10 of the preflight: creds, secrets on disk, Dockerfile."""
+    from loopy_core import __version__
+    from loopy_runtime.manifest_model import load_manifest
+    from loopy_runtime.secrets import (
+        ADMIN_TOKEN_ENV,
+        CONTROL_PLANE_ENV_FILE,
+        load_control_plane_env,
+    )
+
+    checks: list[Check] = []
+    control = load_control_plane_env(root)
+    checks.append(
+        Check(
+            "loopy_env",
+            f"{CONTROL_PLANE_ENV_FILE} has control-plane creds",
+            bool(control.get("DAYTONA_API_KEY")),
+            fix="run `loopy init` — the engine needs DAYTONA_API_KEY at minimum (agents run in Daytona)",
+        )
+    )
+    checks.append(
+        Check(
+            "admin_token",
+            "LOOPY_ADMIN_TOKEN present (gates the /admin dashboard)",
+            bool(control.get(ADMIN_TOKEN_ENV)),
+            warn=True,
+            fix="without it the deployed engine serves webhooks but never mounts /admin",
+        )
+    )
+
+    manifest = load_manifest(manifest_abs)
+    missing = [
+        f"{rel} (sandbox {name})"
+        for name, spec in manifest.registry.sandboxes.items()
+        for rel in spec.env_file
+        if not (root / rel).is_file()
+    ]
+    checks.append(
+        Check(
+            "env_files",
+            "every sandbox env_file exists on disk",
+            not missing,
+            fix=("missing: " + ", ".join(missing) + " — the engine refuses to start without them")
+            if missing
+            else "",
+        )
+    )
+
+    dockerfile = root / "Dockerfile"
+    if not dockerfile.is_file():
+        checks.append(
+            Check(
+                "dockerfile",
+                "Dockerfile at the project root",
+                False,
+                fix="generate with `loopy dockerfile`, then commit and push it — Render builds from the remote",
+            )
+        )
+    else:
+        checks.append(
+            Check(
+                "dockerfile",
+                f"Dockerfile pin matches installed loopy ({__version__})",
+                f"loopy-computer[redis]=={__version__}" in dockerfile.read_text(),
+                warn=True,
+                fix=f"regenerate with `loopy dockerfile` (pins {__version__}), commit and push",
+            )
+        )
+    return checks
+
+
+def print_checks(checks: list[Check]) -> tuple[bool, bool]:
+    """Render the checklist in the house style; return (any_fatal, any_warn)."""
+    any_fatal = any_warn = False
+    for check in checks:
+        if check.ok:
+            typer.echo("  " + typer.style("✓", fg=typer.colors.GREEN) + f" {check.label}")
+            continue
+        mark, color = ("!", typer.colors.YELLOW) if check.warn else ("✗", typer.colors.RED)
+        if check.warn:
+            any_warn = True
+        else:
+            any_fatal = True
+        typer.echo("  " + typer.style(mark, fg=color) + f" {check.label}")
+        for line in check.fix.splitlines():
+            typer.echo(f"      {line}")
+    return any_fatal, any_warn
+
+
+def has_cron_workflows(manifest_abs: Path) -> bool:
+    """Whether any workflow is cron-triggered — free-tier spin-down misses cron ticks."""
+    from loopy_runtime.manifest_model import load_manifest
+
+    return bool(load_manifest(manifest_abs).cron_entries())

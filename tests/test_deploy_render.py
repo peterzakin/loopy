@@ -193,3 +193,107 @@ def test_git_checks_all_green_via_local_bare_remote(tmp_path):
     # A local-path remote isn't GitHub/GitLab, so `remote` fails — assert the rest:
     assert by_key["clean"].ok
     assert by_key["pushed"].ok
+
+
+_REGISTRY = (
+    "sandboxes:\n"
+    "  BaseSandbox:\n"
+    "    provider: daytona\n"
+    "    env_file: secrets/base.env\n"
+    "agents:\n"
+    "  Worker: { model: claude-sonnet-4-6, harness: claude-code, sandbox: BaseSandbox }\n"
+)
+
+
+def _loopy_project(tmp_path):
+    (tmp_path / "registry.yml").write_text(_REGISTRY)
+    (tmp_path / "secrets").mkdir()
+    (tmp_path / "secrets" / "base.env").write_text("ANTHROPIC_API_KEY=sk-ant-x\n")
+    (tmp_path / "loopy.env").write_text(
+        "DAYTONA_API_KEY=dt-real\nLOOPY_ADMIN_TOKEN=loopy_sk_admin\nRENDER_API_KEY=rnd_k\n"
+    )
+    return tmp_path
+
+
+def _compiled_manifest(project) -> "Path":
+    from typer.testing import CliRunner
+
+    from loopy_cli import app
+
+    manifest = project / "manifest.json"
+    # `--out` defaults to a CWD-relative "manifest.json", not one relative to the project
+    # directory being compiled — pass it explicitly so the manifest lands next to the project
+    # regardless of the test runner's working directory.
+    result = CliRunner().invoke(app, ["compile", str(project), "--out", str(manifest)])
+    assert result.exit_code == 0, result.output
+    return manifest
+
+
+# ── project preflight ───────────────────────────────────────────────────────────
+
+
+def test_project_checks_green_project_still_needs_dockerfile(tmp_path):
+    from loopy_cli.render import project_checks
+
+    project = _loopy_project(tmp_path)
+    manifest = _compiled_manifest(project)
+    by_key = {c.key: c for c in project_checks(project, manifest)}
+    assert by_key["loopy_env"].ok
+    assert by_key["admin_token"].ok
+    assert by_key["env_files"].ok
+    assert not by_key["dockerfile"].ok and not by_key["dockerfile"].warn
+    assert "loopy dockerfile" in by_key["dockerfile"].fix
+
+
+def test_project_checks_flags_missing_env_file_and_token(tmp_path):
+    from loopy_cli.render import project_checks
+
+    project = _loopy_project(tmp_path)
+    manifest = _compiled_manifest(project)
+    (project / "secrets" / "base.env").unlink()
+    (project / "loopy.env").write_text("DAYTONA_API_KEY=dt-real\n")
+    by_key = {c.key: c for c in project_checks(project, manifest)}
+    assert not by_key["env_files"].ok and not by_key["env_files"].warn
+    assert "secrets/base.env" in by_key["env_files"].fix
+    assert not by_key["admin_token"].ok and by_key["admin_token"].warn
+
+
+def test_project_checks_stale_dockerfile_pin_is_warn(tmp_path):
+    from loopy_cli.render import project_checks
+
+    project = _loopy_project(tmp_path)
+    manifest = _compiled_manifest(project)
+    (project / "Dockerfile").write_text("FROM python:3.12-slim\nRUN pip install loopy-computer==0.0.0\n")
+    by_key = {c.key: c for c in project_checks(project, manifest)}
+    assert not by_key["dockerfile"].ok and by_key["dockerfile"].warn
+
+
+def test_print_checks_reports_fatal_and_warn():
+    from loopy_cli.render import Check, print_checks
+
+    fatal, warn = print_checks(
+        [
+            Check("a", "fine", True),
+            Check("b", "soft", False, warn=True, fix="do the soft thing"),
+            Check("c", "hard", False, fix="do the hard thing"),
+        ]
+    )
+    assert fatal is True and warn is True
+
+
+def test_has_cron_workflows(tmp_path):
+    from loopy_cli.render import has_cron_workflows
+
+    project = _loopy_project(tmp_path)
+    workflow = project / "workflows" / "tick"
+    workflow.mkdir(parents=True)
+    (workflow / "step.md").write_text(
+        "---\non: cron(\"0 * * * *\")\nagent: Worker\n---\nDo the hourly thing.\n"
+    )
+    manifest = _compiled_manifest(project)
+    assert has_cron_workflows(manifest) is True
+
+    plain_root = tmp_path / "plain"
+    plain_root.mkdir()
+    plain = _loopy_project(plain_root)
+    assert has_cron_workflows(_compiled_manifest(plain)) is False
