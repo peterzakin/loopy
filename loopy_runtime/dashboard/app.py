@@ -45,11 +45,16 @@ _STATIC = Path(__file__).parent / "static"
 
 
 def create_app(
-    store: StateStore, manifest: Manifest | None = None, *, auth: AdminAuth | None = None
+    store: StateStore,
+    manifest: Manifest | None = None,
+    *,
+    auth: AdminAuth | None = None,
+    demo: bool = False,
 ) -> FastAPI:
     app = FastAPI(title="Loopy control plane", docs_url=None, redoc_url=None)
     app.state.store = store
     app.state.manifest = manifest
+    app.state.demo = demo
 
     @app.get("/")
     async def index() -> FileResponse:
@@ -81,7 +86,7 @@ def create_app(
 
     @app.get("/api/meta", dependencies=guarded)
     async def meta():
-        return build_meta(manifest)
+        return build_meta(manifest, demo=demo)
 
     @app.get("/api/workflows", dependencies=guarded)
     async def workflows():

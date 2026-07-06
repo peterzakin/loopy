@@ -270,6 +270,24 @@ def test_build_meta_reports_presence_and_counts():
     assert meta["counts"]["cron"] == 1  # the upkeep cron workflow
 
 
+def test_build_meta_flags_demo_without_touching_real_output():
+    # The real dashboard's meta is unchanged (no stray key)...
+    assert build_meta(None) == {"manifest_present": False}
+    assert "demo" not in build_meta(_manifest())
+    # ...while a demo server marks itself so the UI can never pass it off as real data.
+    assert build_meta(None, demo=True)["demo"] is True
+    assert build_meta(_manifest(), demo=True)["demo"] is True
+
+
+def test_meta_endpoint_reports_demo_flag():
+    app = create_app(InMemoryStateStore(), _manifest(), demo=True)
+    meta = asyncio.run(_endpoint(app, "/api/meta")())
+    assert meta["demo"] is True
+    # Default (real) app carries no demo flag.
+    plain = create_app(InMemoryStateStore(), _manifest())
+    assert "demo" not in asyncio.run(_endpoint(plain, "/api/meta")())
+
+
 def test_build_registry_redacts_secrets():
     reg = build_registry(_manifest())
     sb = reg["sandboxes"][0]
