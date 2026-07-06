@@ -6,7 +6,7 @@
     loopy trigger   fire one event at the manifest and run it to completion (for testing)
     loopy dockerfile  generate a version-pinned Dockerfile (+ .dockerignore) for a git-push deploy
     loopy env       print the production env block to paste into a platform's settings
-    loopy admin     serve the read-only dashboard for a deploy target (local|byo|bootstrap)
+    loopy admin     serve the read-only dashboard for a deploy target (local|byo|bootstrap|render)
     loopy demo      serve the dashboard against in-memory fake data (dev-only; safe to delete)
     loopy help      show this overview, or help for one command (`loopy help run`)
     loopy docs      print the authoring reference (or `deployment`/`errors`) as markdown
@@ -57,9 +57,9 @@ app.add_typer(webhooks_app, name="webhooks")
 app.command(name="integrations")(integrations_command)
 
 # `loopy deploy <target>` — provision hosting for the engine from an operator's cloud
-# keys. One subcommand per deploy target: `loopy deploy bootstrap` is the provisioned
-# starter stack (one CloudFormation stack; see docs/design/aws-deploy.md). boto3 is
-# imported inside the command body, keeping this registration weightless.
+# keys. One subcommand per deploy target: bootstrap (AWS starter stack), render
+# (Render.com). Heavy deps (boto3, httpx) are imported inside each command body,
+# keeping this registration weightless.
 app.add_typer(deploy_app, name="deploy")
 
 

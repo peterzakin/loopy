@@ -28,6 +28,26 @@ per-provider configuration, not loopy code.
 | Port | `$PORT` (fallback `--port`) | injected | injected | containerPort | flag/env |
 | Persistence | `StateStore` (SQLite file) | persistent disk | volume | PVC | disk |
 
+## The render target — `loopy deploy render`
+
+The one-command path onto Render: preflights that your repo is deployable (a pushed
+GitHub/GitLab repo with a generated `Dockerfile`), then creates or updates the web
+service via Render's API — engine env vars from `loopy.env` (the `loopy env` block),
+every sandbox `env_file` as a Render Secret File, git-push auto-deploy on — waits for
+`/healthz`, writes `LOOPY_PUBLIC_URL` back to `loopy.env`, and registers GitHub
+webhooks. Re-running updates the same service; `loopy deploy render --destroy` removes it.
+
+- **Auth:** `RENDER_API_KEY` in `loopy.env` or the environment (the command prompts and
+  records it on first run; mint at dashboard → Account Settings → API Keys).
+- **Secret files:** Render mounts them flat at `/etc/secrets/<name>`; the deploy encodes
+  each project-relative path (`secrets/base.env` → `secrets__base.env`) and the generated
+  Dockerfile links them back into place at boot, so `env_file:` paths work unchanged.
+- **Plans:** free spins down after ~15 min idle — webhooks wake it (cold start), but
+  cron workflows MISS ticks while spun down, and run history (`.loopy/state.db`) does not
+  survive restarts. `--plan starter` keeps the engine always on.
+- **Dashboard:** the `*.onrender.com` URL is a normal HTTPS URL, so `loopy admin`
+  proxies to `/admin` with your bearer token — no tunnel.
+
 ## One public URL, path-routed
 
 The engine's webhook server carries the dashboard too: deliveries arrive at
