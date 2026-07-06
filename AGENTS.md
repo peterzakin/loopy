@@ -2,9 +2,8 @@
 
 This is the **framework** repo (the `loopy-computer` PyPI package), not a Loopy project.
 If you're *authoring a Loopy project* (workflows, registry.yml, sensors), run
-`loopy docs` for the authoring reference and see the `AGENTS.md` that `loopy init`
-scaffolds into every project; the top-level [`README.md`](README.md) covers the same
-ground with more prose.
+`loopy docs` for the authoring reference; the top-level [`README.md`](README.md) covers
+the same ground with more prose.
 
 ## Layout
 
@@ -34,10 +33,10 @@ uv run loopy <cmd>               # exercise the CLI from source
   golden-negative suite has one fixture per code. A new code isn't done without both.
 - **The scaffold must compile green.** `loopy init` output is guarded by
   `tests/test_init_scaffold.py`; if you touch `loopy_cli/scaffold.py`, run it.
-- **Scaffolded docs live in `scaffold.py`; shipped docs live in `loopy_cli/docs_md/`.**
+- **The scaffold's docs live in `scaffold.py`; shipped docs live in `loopy_cli/docs_md/`.**
   If you change the authoring model (frontmatter keys, registry shape, event types),
-  update the README, `docs_md/authoring.md`, and the scaffold's `AGENTS.md` template
-  together — they are three renderings of the same contract.
+  update the README and `docs_md/authoring.md` together — they are two renderings of the
+  same contract.
 - Heavy deps are imported lazily inside CLI command bodies so `loopy compile` stays
   runtime-free; keep new imports out of `loopy_cli/__init__.py`'s module top.
 - **Signal slow steps.** Any CLI step that can run longer than a couple of seconds
