@@ -10,13 +10,15 @@ auto-routes from `LOOPY_PUBLIC_URL` — CloudFront → SSM tunnel, any other URL
 - `local` — no deployment: `loopy run` on this machine, read back by `loopy admin --local`
   (or bare `loopy admin` when no public URL is set). Never recorded in `loopy.env` (it
   isn't a hosting choice).
-- `byo` — bring-your-own hosting: a platform (Render, Fly, Railway), a VPS, or a dev
+- `byo` — bring-your-own hosting: a platform (Fly, Railway), a VPS, or a dev
   tunnel. You bring the public URL (`LOOPY_PUBLIC_URL`); `loopy init` prompts for it.
+- `render` — Render.com: `loopy deploy render` creates the web service from your repo
+  via Render's API and writes LOOPY_PUBLIC_URL back at deploy, like bootstrap.
 - `bootstrap` — the loopy-provisioned starter stack: `loopy deploy bootstrap` stands up
   the host from your cloud credentials and mints the URL. It happens to be implemented
   on AWS (EC2 + CloudFront) today, but the target is named for what it is (the
   batteries-included bootstrap) so future custom targets can claim provider names
-  (`aws`, `render`, …) without colliding with it.
+  (`aws`, …; `render` is now real — see above) without colliding with it.
 
 The choice is not persisted: `loopy init` uses it in-memory to order onboarding (a
 provisioned host mints its URL only at deploy time, so bring-your-own is asked for the
@@ -35,12 +37,18 @@ from urllib.parse import urlsplit
 # case). Used in-memory to order onboarding; never written to loopy.env.
 TARGET_BYO = "byo"
 TARGET_BOOTSTRAP = "bootstrap"
+TARGET_RENDER = "render"
 
 # Written by `loopy deploy bootstrap` alongside LOOPY_PUBLIC_URL, so `loopy admin` can print
 # a ready-to-run SSM tunnel command and derive the tunneled dashboard URL. Client-side hints
 # only — the engine never reads them.
 BOOTSTRAP_INSTANCE_ID_ENV = "LOOPY_BOOTSTRAP_INSTANCE_ID"
 BOOTSTRAP_ENGINE_PORT_ENV = "LOOPY_BOOTSTRAP_ENGINE_PORT"
+
+# Written by `loopy deploy render` alongside LOOPY_PUBLIC_URL: the Render service id, a
+# client-side hint (fast idempotent lookup on re-deploy, the --destroy target). The
+# engine never reads it.
+RENDER_SERVICE_ID_ENV = "LOOPY_RENDER_SERVICE_ID"
 
 
 def resolve_bootstrap_config(root: str | Path) -> dict[str, str]:
