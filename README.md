@@ -397,7 +397,7 @@ service to deploy and the admin endpoint is deterministic on every provider:
 # mounts the dashboard at /admin behind it. Without the token, a non-loopback bind serves
 # webhooks but no /admin at all (fail-closed by absence).
 
-# laptop: the token (and LOOPY_PUBLIC_URL) are already in loopy.env, then:
+# dev machine: the token (and LOOPY_PUBLIC_URL) are already in loopy.env, then:
 loopy admin                       # proxies /api to $LOOPY_PUBLIC_URL/admin with the token
 ```
 
