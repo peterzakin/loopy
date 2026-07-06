@@ -1,11 +1,16 @@
 """Backend-for-frontend proxy for `loopy admin --remote` (`docs/design/admin-auth.md`).
 
-The dashboard's remote mode splits the surface: the UI shell (`/`) is served from the local
-install, while `/api/*` and `/static/*` are proxied to the remote control plane with
-`Authorization: Bearer` injected from the local process env. That keeps the token in this
-process — the browser never holds a credential (no XSS exposure), and it never rides a URL
-(no access-log leak). Proxying `/static` (rather than serving local assets) keeps the app
-code version-matched to the API it talks to.
+The dashboard's remote mode splits the surface by concern: the front-end (`/` and `/static/*`)
+is served from the local install, while only `/api/*` — the run data — is proxied to the remote
+control plane with `Authorization: Bearer` injected from the local process env. That keeps the
+token in this process — the browser never holds a credential (no XSS exposure), and it never
+rides a URL (no access-log leak).
+
+Serving the whole front-end locally (rather than proxying `/static` to the engine) means a
+`loopy` refresh delivers the latest dashboard UI with no engine redeploy: the UI ships in the
+CLI, the engine owns only the data, and `/api/*` is the versioned contract app.js is written
+against. The engine still serves its own copy of these assets under `/admin` for any direct
+hit, but the supported path is this client, so the two never need to agree byte-for-byte.
 
 The proxy is read-only by construction: only GET is routed. Upstream failures are translated
 into actionable errors — a remote 401 names `LOOPY_ADMIN_TOKEN`, a connection/TLS failure
@@ -20,6 +25,7 @@ from urllib.parse import urlsplit
 import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from loopy_runtime.dashboard.app import _STATIC
 from loopy_runtime.dashboard.auth import is_loopback_host
@@ -48,7 +54,7 @@ def validate_remote_url(url: str) -> str:
 def create_proxy_app(
     remote_url: str, token: str, *, transport: httpx.AsyncBaseTransport | None = None
 ) -> FastAPI:
-    """The local admin client: serve the UI shell, proxy `/api` + `/static` with the bearer.
+    """The local admin client: serve the front-end locally, proxy only `/api` with the bearer.
 
     `transport` exists for tests (an `httpx.MockTransport` stands in for the network).
     """
@@ -99,8 +105,10 @@ def create_proxy_app(
     async def api(request: Request, path: str) -> Response:
         return await forward(request)
 
-    @app.get("/static/{path:path}")
-    async def static(request: Request, path: str) -> Response:
-        return await forward(request)
+    # The front-end ships in this package, so serve it from disk — the assets are byte-identical
+    # to the engine's own copy and carry no run data, so there's nothing to authenticate and no
+    # reason to round-trip to the engine (a stale deploy can't leave the dashboard unstyled).
+    # Mounted last so it never shadows the `/api` route above.
+    app.mount("/static", StaticFiles(directory=_STATIC), name="static")
 
     return app
