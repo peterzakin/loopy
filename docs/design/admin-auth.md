@@ -8,7 +8,7 @@ Status: proposed · Scope: `loopy_runtime/dashboard`, `loopy_cli`, `loopy_runtim
 run-state DB (`.loopy/state.db`) directly (`loopy_cli/__init__.py`, `admin`). Its only
 protection is that it listens on loopback. We want to run the dashboard **locally** but
 point it at a **live, cloud-hosted control plane** so an operator can watch production runs
-from their laptop. The moment the run-state read path leaves the box it needs
+from their dev machine. The moment the run-state read path leaves the box it needs
 authentication, and the auth must be standard practice with strong guarantees while staying
 **agnostic to the hosting provider** (Render, Fly, Railway, k8s, a bare VM, …).
 
@@ -58,7 +58,7 @@ browser ──▶ localhost:9000  (local `loopy admin byo` process)
 
 | Host | Role | Secret source |
 |---|---|---|
-| Laptop | admin client (proxy + UI) | `loopy.env` → `LOOPY_ADMIN_TOKEN` (local-dev convenience) |
+| Dev machine | admin client (proxy + UI) | `loopy.env` → `LOOPY_ADMIN_TOKEN` (local-dev convenience) |
 | Control plane | server (`/api/*` behind auth) | `LOOPY_ADMIN_TOKEN` in the **platform environment** (production mechanism) |
 
 The two sides never share a file — `loopy.env` is gitignored and is not part of any deploy
@@ -104,7 +104,7 @@ Two rules keep it agnostic:
   token(s), 401 on missing/invalid. Read-only scope is inherent — the app has no write
   routes.
 - **Rotation.** The server accepts two tokens during an overlap window (`LOOPY_ADMIN_TOKEN`
-  + `LOOPY_ADMIN_TOKEN_NEXT`); roll the laptop and the platform env, then drop the old one.
+  + `LOOPY_ADMIN_TOKEN_NEXT`); roll the dev machine and the platform env, then drop the old one.
   No hard cutover, no mid-session lockout.
 
 ### Five guardrails (non-negotiable)

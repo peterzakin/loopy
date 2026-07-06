@@ -123,7 +123,6 @@ def test_minimal_scaffold_writes_trimmed_layout(tmp_path):
         "loopy.env",
         ".gitignore",
         "README.md",
-        "AGENTS.md",
     } == rels
     # The default workflow ships disabled — same content as the coding scaffold's, minus discovery.
     assert (target / "workflows" / "review" / "code-review.md.disabled").is_file()
@@ -137,28 +136,12 @@ def test_minimal_scaffold_writes_trimmed_layout(tmp_path):
     assert "loopy auth github" in (target / "README.md").read_text()
 
 
-def test_scaffold_writes_agents_md_for_both_scaffolds(tmp_path):
-    """Both scaffolds ship an AGENTS.md — the map a coding agent auto-discovers. It must carry
-    the verify loop, the runnability warning, and a starter tail an agent can act on without
-    fetching docs."""
+def test_scaffold_does_not_write_agents_md(tmp_path):
+    """The scaffold no longer ships an AGENTS.md; `loopy docs` is the authoring reference."""
     for label, repos in (("coding", ["me/app"]), ("minimal", None)):
         target = tmp_path / label
         scaffold_project(target, "demo", repos=repos)
-        agents_md = (target / "AGENTS.md").read_text()
-        # The shared reference: verify loop + the compile-is-not-runnable warning.
-        assert "loopy compile --check ." in agents_md
-        assert "loopy doctor" in agents_md
-        assert "green compile is not a runnable project" in agents_md.lower()
-        # And the sentinel was actually replaced.
-        assert "__STARTER_BLOCK__" not in agents_md
-
-    # The coding tail names the default workflow's built-in entry event; the minimal tail says the
-    # workflow ships disabled and steers the agent to wire GitHub access before enabling it.
-    coding_md = (tmp_path / "coding" / "AGENTS.md").read_text()
-    assert "--event Github.PullRequestOpened" in coding_md
-    minimal_md = (tmp_path / "minimal" / "AGENTS.md").read_text()
-    assert "without GitHub access" in minimal_md
-    assert "loopy auth github" in minimal_md
+        assert not (target / "AGENTS.md").exists()
 
 
 def test_scaffolded_loopy_env_does_not_block_auth_github(tmp_path):

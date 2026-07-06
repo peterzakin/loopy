@@ -142,11 +142,8 @@ events:
   Incident:        { source: enum[sentry, linear, datadog, pagerduty, slack], issue_id: str, title: str, link: url }
   MetricThreshold: { goal_id: str }
   WorkItem:
-    source:        enum[sentry, linear, datadog, pagerduty, slack, cve]
     link:          url
-    root_cause:    str
-    proposed_goal: str
-    repro:         str
+    description:   str
   GoalShipped:     { goal_id: str }
 ```
 

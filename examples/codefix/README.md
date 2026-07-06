@@ -10,7 +10,7 @@ CodeTask ─▶ codefix/open-pr  (Coder agent)  ─▶ PROpened
 
 The canonical `incidents` example is multi-workflow and assumes the Daytona + `loopy run`
 happy path. This one fills the other gap: a **single repo-touching step you can drive
-end-to-end on a laptop with `loopy trigger`** — the path where the toolchain, `HOME`, and
+end-to-end on a dev machine with `loopy trigger`** — the path where the toolchain, `HOME`, and
 credentials actually have to be wired up. If you're new to Loopy, read the top-level
 [`README.md`](../../README.md) first for the authoring model; this doc is about *running*.
 

@@ -14,7 +14,7 @@ A single symmetric bearer token, checked *before* any handler runs. The five gua
    configured token; `is_loopback_host` is the shared predicate.
 
 Rotation: the server accepts `LOOPY_ADMIN_TOKEN` and `LOOPY_ADMIN_TOKEN_NEXT` at once, so
-the laptop and the platform env can roll without a mid-session lockout. Token values never
+the dev machine and the platform env can roll without a mid-session lockout. Token values never
 appear in logs or reprs.
 """
 

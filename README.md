@@ -74,8 +74,8 @@ what's left before a first run.
 - **Budgets and limits.** Per-step `budget:` (wall clock, spend), plus registry-level caps for
   a whole workflow or an entire event cascade.
 - **Built to be driven by agents.** `loopy docs` prints the full authoring reference as
-  markdown, every check is exit-code-clean, and scaffolded projects ship an `AGENTS.md` that
-  Claude Code, Codex, and OpenCode auto-discover.
+  markdown straight from the CLI, and every check is exit-code-clean, so a coding agent can
+  drive the whole authoring cycle headlessly.
 - **Observability included.** Runs are recorded to a durable store; `loopy admin` serves a
   dashboard of run timelines, emitted events, outputs, and failures, locally or against a
   hosted control plane, bearer-token-gated end to end.
@@ -117,7 +117,7 @@ agents:
 
 events:
   Incident: { source: enum[sentry, linear, datadog], issue_id: str, title: str, link: url }
-  WorkItem: { link: url, root_cause: str, proposed_goal: str, repro: str }
+  WorkItem: { link: url, description: str }
 ```
 
 A project lays out like this:
@@ -182,9 +182,8 @@ loopy docs deployment   # hosting the control plane: env vars, $PORT, TLS, admin
 loopy docs errors       # the stable LOOPY-E diagnostic catalog
 ```
 
-Every scaffolded project also ships an [`AGENTS.md`](AGENTS.md), the one-page map that coding
-agents auto-discover: authoring rules, the verify loop
-(`loopy compile --check` → `loopy doctor` → `loopy trigger --json`), and the secrets model.
+The verify loop is exit-code-clean (`loopy compile --check` → `loopy doctor` →
+`loopy trigger --json`), so a coding agent can author and validate a project end to end.
 The only two commands that need a human are `loopy init` (interactive wizard) and
 `loopy auth github` (browser flow).
 

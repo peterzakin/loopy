@@ -2149,7 +2149,7 @@ def admin(
 
     root = Path.cwd()
 
-    # The admin token rides the control-plane env channel: `loopy.env` on a laptop, the
+    # The admin token rides the control-plane env channel: `loopy.env` on a dev machine, the
     # platform's process env in production. setdefault — the real environment always wins.
     for key, value in load_control_plane_env(root).items():
         os.environ.setdefault(key, value)
@@ -2401,7 +2401,7 @@ __pycache__/
 .venv/
 """
 
-# Control-plane keys `loopy env` never emits verbatim: LOOPY_PUBLIC_URL is laptop-side (webhook
+# Control-plane keys `loopy env` never emits verbatim: LOOPY_PUBLIC_URL is dev-side (webhook
 # registration + `loopy admin` run there, not on the platform); REDIS_URL gets an editable
 # placeholder instead of the local `localhost` value; the rotation slot is transient.
 _ENV_DEPLOY_SKIP = frozenset(
@@ -2478,7 +2478,7 @@ def env(
     """Print the production environment block to paste into your platform's env settings.
 
     Emits, from your local config, the engine's control-plane creds (from loopy.env) and
-    REDIS_URL as an editable placeholder. LOOPY_PUBLIC_URL is omitted — it is laptop-side.
+    REDIS_URL as an editable placeholder. LOOPY_PUBLIC_URL is omitted — it is dev-side.
     Sandbox secrets are not emitted here: each sandbox reads its own `env_file`, which a deploy
     pushes to the target directly. This prints secrets to stdout on purpose, for a one-shot paste
     into a platform's ".env import" field; it is never logged. Do not commit the output.
@@ -2495,7 +2495,7 @@ def env(
         "remove this line to use the in-process bus"
     )
     lines.append(
-        "# LOOPY_PUBLIC_URL is laptop-side (webhook registration, loopy admin) — "
+        "# LOOPY_PUBLIC_URL is dev-side (webhook registration, loopy admin) — "
         "keep it in your local loopy.env, not here"
     )
 
