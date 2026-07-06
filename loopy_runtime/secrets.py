@@ -35,10 +35,10 @@ SENSOR_ENV_FILE = "sensors/.env"
 CONTROL_PLANE_ENV_FILE = "loopy.env"
 
 # Recognized control-plane env keys for the admin dashboard's bearer auth
-# (`docs/design/admin-auth.md`). On an operator's laptop these live in `loopy.env`; on a
+# (`docs/design/admin-auth.md`). On an operator's dev machine these live in `loopy.env`; on a
 # hosted control plane they come from the platform's process env (which always wins — the
 # caller merges the dotenv with `setdefault`). `*_NEXT` is the rotation overlap slot: the
-# server accepts both while the laptop and the platform env roll to the new value.
+# server accepts both while the dev machine and the platform env roll to the new value.
 ADMIN_TOKEN_ENV = "LOOPY_ADMIN_TOKEN"
 ADMIN_TOKEN_NEXT_ENV = "LOOPY_ADMIN_TOKEN_NEXT"
 

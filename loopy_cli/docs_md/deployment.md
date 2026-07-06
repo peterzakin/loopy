@@ -1,6 +1,6 @@
 # Loopy — the deployment reference
 
-How to run the control plane somewhere other than your laptop, and how to watch it safely.
+How to run the control plane somewhere other than your dev machine, and how to watch it safely.
 For authoring a project, run `loopy docs`; for the diagnostic-code catalog, `loopy docs
 errors`. The full design (including the threat model and the OIDC upgrade path) lives in
 `docs/design/admin-auth.md` in the repo.
@@ -71,10 +71,10 @@ refuses to start without it, open `/healthz`.
 # `loopy init` already minted LOOPY_ADMIN_TOKEN into loopy.env (gitignored) — one value,
 # set it in two places:
 #   control plane: copy that value into LOOPY_ADMIN_TOKEN in the platform env
-#   laptop:        LOOPY_ADMIN_TOKEN (+ LOOPY_PUBLIC_URL) already in loopy.env
+#   dev machine:   LOOPY_ADMIN_TOKEN (+ LOOPY_PUBLIC_URL) already in loopy.env
 
 loopy run …                # control plane: webhooks at /hooks/*, dashboard at /admin
-loopy admin                # laptop: proxies /api to $LOOPY_PUBLIC_URL/admin (or tunnels a CloudFront deploy)
+loopy admin                # dev machine: proxies /api to $LOOPY_PUBLIC_URL/admin (or tunnels a CloudFront deploy)
 ```
 
 ## The auth mechanism and its guardrails
@@ -97,7 +97,7 @@ The non-negotiable guardrails:
    openly.
 
 **Rotation.** The server accepts two tokens during an overlap window: set
-`LOOPY_ADMIN_TOKEN_NEXT` alongside `LOOPY_ADMIN_TOKEN`, roll the laptop and the platform
+`LOOPY_ADMIN_TOKEN_NEXT` alongside `LOOPY_ADMIN_TOKEN`, roll the dev machine and the platform
 env, then drop the old value. No hard cutover, no mid-session lockout.
 
 **Accepted tradeoff.** The token is symmetric (no hash-at-rest): a control-plane
