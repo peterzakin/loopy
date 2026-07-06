@@ -276,18 +276,19 @@ def test_help_rejects_subcommand_of_a_leaf():
     assert "no subcommands" in result.output
 
 
-def test_bare_loopy_prints_help_and_exits_zero():
-    """A bare `loopy` (no subcommand) prints the command overview and exits 0 — a request to
-    see what the tool does, not a usage error (Typer's default would be exit 2)."""
+def test_bare_loopy_outside_project_exits_zero():
+    """A bare `loopy` (no subcommand) exits 0 — a request for orientation, not a usage error
+    (Typer's default would be exit 2)."""
     result = runner.invoke(app, [])
+    assert result.exit_code == 0, result.output
+
+
+def test_help_flag_lists_every_command():
+    """`loopy --help` remains the complete reference: every command, project-scoped or not."""
+    result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0, result.output
     for command in ("init", "compile", "doctor", "run", "trigger", "help", "auth"):
         assert command in result.output
-
-
-def test_bare_loopy_matches_help_flag():
-    """The no-args overview is the same output as `loopy --help`."""
-    assert runner.invoke(app, []).output == runner.invoke(app, ["--help"]).output
 
 
 def _clear_project_env(monkeypatch) -> None:
@@ -329,13 +330,22 @@ def test_bare_loopy_in_configured_project_suggests_webhooks(tmp_path, monkeypatc
     assert "loopy deploy bootstrap" not in result.output
 
 
-def test_bare_loopy_outside_project_still_prints_overview(tmp_path, monkeypatch):
-    """Outside a project (no registry.yml) a bare `loopy` is unchanged: the command overview."""
+def test_bare_loopy_outside_project_points_at_init(tmp_path, monkeypatch):
+    """Outside a project (no registry.yml) a bare `loopy` leads with `loopy init` — the one
+    command that applies with no project yet — and names docs/help, rather than dumping the
+    full command overview whose entries all need a project. The complete list stays on
+    `loopy --help`."""
     _clear_project_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, [])
     assert result.exit_code == 0, result.output
-    assert "Suggested next steps" not in result.output
-    for command in ("init", "compile", "doctor", "run"):
-        assert command in result.output
+    assert "Suggested next steps" not in result.output  # not the in-project ladder
+    assert "loopy init" in result.output
+    assert "loopy docs" in result.output
+    assert "loopy help" in result.output
+    # It's orientation, not the overview: no Typer usage banner, and none of the
+    # project-scoped commands are listed here.
+    assert "Usage: loopy" not in result.output
+    for project_command in ("loopy compile", "loopy run", "loopy doctor", "loopy trigger"):
+        assert project_command not in result.output

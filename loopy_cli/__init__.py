@@ -68,14 +68,54 @@ def main(ctx: typer.Context) -> None:
     # exits 0, never Typer's "Missing command." (exit 2) or Click's `no_args_is_help` (also 2),
     # both of which read as failure to scripts. *What* it orients you toward depends on where
     # you are: inside a project (a `registry.yml` is present) it's "what should I do next here?"
-    # — print the guided next-steps ladder; anywhere else it's "what is this tool?" — print the
-    # command overview, identical to `loopy --help` / `loopy help`.
+    # — print the guided next-steps ladder; anywhere else it's "how do I start?" — point at the
+    # one command that applies with no project yet (`loopy init`), not the full command overview.
+    # The complete list still lives at `loopy --help` / `loopy help`.
     if ctx.invoked_subcommand is None:
         if (Path.cwd() / "registry.yml").is_file():
             _print_next_steps(Path.cwd())
         else:
-            typer.echo(ctx.get_help())
+            _print_getting_started()
         raise typer.Exit()
+
+
+def _print_getting_started() -> None:
+    """Bare `loopy` outside a project: point a newcomer at the one command that applies here.
+
+    Almost every loopy command operates on a project — `compile`, `run`, `doctor`, `trigger`,
+    `deploy`, `webhooks`, `auth`, `env`, `dockerfile` all read a `registry.yml` and do nothing
+    useful (or error) without one. Dumping the full command overview at someone who has no
+    project yet buries the only relevant next step under a dozen that aren't. So lead with
+    `loopy init`, and name `loopy docs` / `loopy help` for anyone who wants the rest. The full
+    list still lives at `loopy --help`; this is orientation, not a replacement for it.
+    """
+    typer.echo()
+    typer.echo(
+        "  "
+        + typer.style("Loopy", bold=True)
+        + _dim(": agent workflows that run when your data changes.")
+    )
+    typer.echo()
+    typer.echo(
+        "  "
+        + typer.style("You're not in a Loopy project yet.", bold=True)
+        + _dim(" To scaffold one:")
+    )
+    typer.echo(
+        typer.style("    loopy init", fg=typer.colors.BRIGHT_WHITE)
+        + _dim("   # create a new project (interactive)")
+    )
+    typer.echo()
+    typer.echo(_dim("  Already have a project? cd into it and run `loopy` for its next steps."))
+    typer.echo(
+        "  "
+        + typer.style("loopy docs", fg=typer.colors.BRIGHT_WHITE)
+        + _dim("  the authoring reference")
+        + _dim("    ")
+        + typer.style("loopy help", fg=typer.colors.BRIGHT_WHITE)
+        + _dim("  every command")
+    )
+    typer.echo()
 
 
 def _print_next_steps(root: Path) -> None:
