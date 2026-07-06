@@ -576,3 +576,74 @@ def test_deploy_render_update_path_uses_recorded_id(tmp_path, monkeypatch):
     # Recorded id → straight to the update path: no find, no create, no plan prompt.
     assert kinds == ["get", "env", "secrets", "deploy"]
     assert "updating in place" in result.output
+
+
+# ── destroy ─────────────────────────────────────────────────────────────────────
+
+
+class _DestroyClient:
+    def __init__(self, key):
+        self.key = key
+        self.deleted = []
+        self.services = {"srv-9": {"id": "srv-9", "name": "loopy-demo", "serviceDetails": {"url": "https://loopy-demo.onrender.com"}}}
+
+    def owners(self):
+        return [{"id": "own-1", "name": "V"}]
+
+    def get_service(self, service_id):
+        return self.services.get(service_id)
+
+    def find_service(self, name):
+        return next((s for s in self.services.values() if s["name"] == name), None)
+
+    def delete_service(self, service_id):
+        self.deleted.append(service_id)
+        self.services.pop(service_id, None)
+
+
+def test_destroy_by_recorded_id_clears_hints(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from loopy_cli import app
+    from loopy_cli import render as render_mod
+    from loopy_runtime.secrets import load_control_plane_env
+
+    project = _loopy_project(tmp_path)
+    (project / "loopy.env").write_text(
+        "DAYTONA_API_KEY=dt\nRENDER_API_KEY=rnd_k\n"
+        "LOOPY_RENDER_SERVICE_ID=srv-9\nLOOPY_PUBLIC_URL=https://loopy-demo.onrender.com\n"
+    )
+    holder = {}
+
+    def factory(key):
+        holder["client"] = _DestroyClient(key)
+        return holder["client"]
+
+    monkeypatch.setattr(render_mod, "_client_factory", factory)
+    monkeypatch.setattr(render_mod, "_interactive", lambda: False)
+    result = CliRunner().invoke(app, ["deploy", "render", "--root", str(project), "--destroy", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert holder["client"].deleted == ["srv-9"]
+    control = load_control_plane_env(project)
+    assert not control.get("LOOPY_RENDER_SERVICE_ID")
+    assert not control.get("LOOPY_PUBLIC_URL")  # pointed at the deleted service → cleared
+
+
+def test_destroy_nothing_recorded_is_a_clean_noop(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from loopy_cli import app
+    from loopy_cli import render as render_mod
+
+    project = _loopy_project(tmp_path)  # no LOOPY_RENDER_SERVICE_ID recorded
+
+    def factory(key):
+        client = _DestroyClient(key)
+        client.services = {}
+        return client
+
+    monkeypatch.setattr(render_mod, "_client_factory", factory)
+    monkeypatch.setattr(render_mod, "_interactive", lambda: False)
+    result = CliRunner().invoke(app, ["deploy", "render", "--root", str(project), "--destroy"])
+    assert result.exit_code == 0, result.output
+    assert "nothing to delete" in result.output

@@ -575,8 +575,38 @@ def _register_webhooks(root: Path, public_url: str) -> list[str]:
         return [f"not registered ({exc}) — run `loopy webhooks github` to retry"]
 
 
-def _destroy(root_abs: Path, service_name: str | None, yes: bool) -> None:  # noqa: ARG001 - Task 11
-    raise typer.Exit(code=1)
+def _destroy(root_abs: Path, service_name: str | None, yes: bool) -> None:
+    """Tear down the Render service: recorded id first, find-by-name fallback, clean no-op."""
+    from loopy_cli.deploy_target import RENDER_SERVICE_ID_ENV
+    from loopy_runtime.secrets import load_control_plane_env, write_control_plane_env
+
+    client, _owner = connect(root_abs)
+    control = load_control_plane_env(root_abs)
+    service = None
+    recorded_id = control.get(RENDER_SERVICE_ID_ENV, "").strip()
+    if recorded_id:
+        service = client.get_service(recorded_id)
+    if service is None:
+        service = client.find_service(service_name or f"loopy-{root_abs.name}")
+    if service is None:
+        typer.echo("deploy: no Render service found — nothing to delete.")
+        return
+
+    label = f"{service.get('name', service['id'])} ({service['id']})"
+    if not yes:
+        if not _interactive() or not typer.confirm(f"  Delete Render service {label}?", default=False):
+            typer.echo("deploy: aborted; nothing deleted.")
+            raise typer.Exit(code=1)
+    client.delete_service(service["id"])
+
+    # Clear the client-side hints. write_control_plane_env merges (it can't delete), so
+    # blank the values — every reader `.strip()`s, and a blank reads as unset.
+    updates = {RENDER_SERVICE_ID_ENV: ""}
+    service_url = (service.get("serviceDetails") or {}).get("url", "")
+    if service_url and control.get("LOOPY_PUBLIC_URL", "").strip() == service_url:
+        updates["LOOPY_PUBLIC_URL"] = ""
+    write_control_plane_env(root_abs, updates)
+    typer.echo(f"deploy: deleted {label}. Cleared its keys from loopy.env.")
 
 
 @deploy_app.command()
