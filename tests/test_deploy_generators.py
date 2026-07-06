@@ -46,11 +46,19 @@ def test_dockerfile_stdout_is_version_pinned(tmp_path):
     result = runner.invoke(app, ["dockerfile", str(_project(tmp_path)), "--stdout"])
     assert result.exit_code == 0
     assert f'"loopy-computer[redis]=={__version__}"' in result.stdout
-    assert '"--in-process"' in result.stdout
-    assert '"--bus"' not in result.stdout  # CMD passes no bus flag; auto-selected from REDIS_URL
+    assert "--in-process" in result.stdout
+    assert "--bus" not in result.stdout  # no bus flag; auto-selected from REDIS_URL
     assert "RUN loopy compile ." in result.stdout  # build gate
-    # --stdout writes nothing
     assert not (tmp_path / "Dockerfile").exists()
+
+
+def test_dockerfile_start_command_links_secret_files_and_honors_port(tmp_path):
+    result = runner.invoke(app, ["dockerfile", str(_project(tmp_path)), "--stdout"])
+    assert result.exit_code == 0
+    assert "/etc/secrets" in result.stdout  # Render secret files get linked into place
+    assert "s|__|/|g" in result.stdout  # flat names decode back to nested paths
+    assert "${PORT:-8000}" in result.stdout  # platform-injected port wins
+    assert "/state/state.db" in result.stdout  # a mounted /state disk gets durable history
 
 
 def test_dockerfile_writes_both_files(tmp_path):

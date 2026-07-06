@@ -2339,12 +2339,32 @@ COPY . /project
 # Build gate: a project that doesn't compile fails the image build (and writes manifest.json).
 RUN loopy compile .
 
-# One long-lived process: sensor webhooks + scheduler + runtime. No --bus flag — the engine uses
-# Redis when REDIS_URL is set (managed Redis in production) and the in-process bus otherwise. Run
-# history lives at .loopy/state.db; for durability across redeploys, mount a volume and add
-# `--state-path /state/state.db` to the command below.
-ENTRYPOINT ["loopy"]
-CMD ["run", "manifest.json", "--in-process", "--root", ".", "--host", "0.0.0.0", "--port", "8000"]
+# One long-lived process: sensor webhooks + scheduler + runtime. No bus flag is passed — the
+# engine uses Redis when REDIS_URL is set (managed Redis in production) and the in-process bus
+# otherwise. Run history lives at .loopy/state.db; for durability across redeploys, mount a
+# volume and add `--state-path /state/state.db` to the command below.
+#
+# The sh wrapper does two platform-friendly things before exec'ing the engine:
+#   * Render mounts Secret Files flat at /etc/secrets/<name>; loopy's env_file paths are
+#     nested (secrets/base.env). `loopy deploy render` uploads each file with `/` encoded
+#     as `__`, and the loop below links every one back to the path the manifest names.
+#     (Paths containing a literal `__` are rejected at deploy time, so the decode is safe.)
+#     No /etc/secrets (local docker, other platforms) -> the loop is a no-op.
+#   * $PORT is honored when the platform injects one (Render does); 8000 otherwise.
+#   * A mounted /state disk (Render `--disk-gb`, or any platform volume) moves run
+#     history to /state/state.db so it survives redeploys; no disk -> default path.
+ENTRYPOINT []
+CMD ["/bin/sh", "-c", "\\
+if [ -d /etc/secrets ]; then \\
+  for f in /etc/secrets/*; do \\
+    [ -f \\"$f\\" ] || continue; \\
+    rel=$(basename \\"$f\\" | sed 's|__|/|g'); \\
+    mkdir -p \\"$(dirname \\"./$rel\\")\\"; \\
+    ln -sf \\"$f\\" \\"./$rel\\"; \\
+  done; \\
+fi; \\
+if [ -d /state ]; then STATE_ARGS=\\"--state-path /state/state.db\\"; else STATE_ARGS=\\"\\"; fi; \\
+exec loopy run manifest.json --in-process --root . --host 0.0.0.0 --port \\"${{PORT:-8000}}\\" $STATE_ARGS"]
 """
 
 _DOCKERIGNORE_TEMPLATE = """\
