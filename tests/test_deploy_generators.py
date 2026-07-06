@@ -122,3 +122,32 @@ def test_env_fails_on_uncompilable_project(tmp_path):
     (tmp_path / "registry.yml").write_text("sandboxes:\n  BaseSandbox:\n    image: {}\n")
     result = runner.invoke(app, ["env", str(tmp_path)])
     assert result.exit_code == 1
+
+
+# ── deploy_env_block ────────────────────────────────────────────────────────────
+
+
+def test_deploy_env_block_skips_laptop_and_render_keys(tmp_path):
+    from loopy_cli import deploy_env_block
+
+    project = _project(tmp_path)
+    (project / "loopy.env").write_text(
+        _LOOPY_ENV
+        + "RENDER_API_KEY=rnd_secret\n"
+        + "LOOPY_RENDER_SERVICE_ID=srv-123\n"
+    )
+    block = deploy_env_block(project)
+    assert block["DAYTONA_API_KEY"] == "dt-real"
+    assert block["LOOPY_ADMIN_TOKEN"] == "loopy_sk_admin"
+    for absent in ("LOOPY_PUBLIC_URL", "REDIS_URL", "RENDER_API_KEY", "LOOPY_RENDER_SERVICE_ID"):
+        assert absent not in block
+
+
+def test_deploy_env_block_strips_quotes(tmp_path):
+    # Regression: a quoted dotenv value must reach the platform unquoted — a stray
+    # `"` in e.g. SENTRY_AUTH_TOKEN breaks the consumer at run time, not at set time.
+    from loopy_cli import deploy_env_block
+
+    project = _project(tmp_path)
+    (project / "loopy.env").write_text('DAYTONA_API_KEY="dt-quoted"\n')
+    assert deploy_env_block(project)["DAYTONA_API_KEY"] == "dt-quoted"

@@ -2367,7 +2367,32 @@ __pycache__/
 # Control-plane keys `loopy env` never emits verbatim: LOOPY_PUBLIC_URL is laptop-side (webhook
 # registration + `loopy admin` run there, not on the platform); REDIS_URL gets an editable
 # placeholder instead of the local `localhost` value; the rotation slot is transient.
-_ENV_DEPLOY_SKIP = frozenset({"LOOPY_PUBLIC_URL", "REDIS_URL", "LOOPY_ADMIN_TOKEN_NEXT"})
+_ENV_DEPLOY_SKIP = frozenset(
+    {
+        "LOOPY_PUBLIC_URL",
+        "REDIS_URL",
+        "LOOPY_ADMIN_TOKEN_NEXT",
+        # Render-target keys: the API key drives the deploy from the laptop and the
+        # service id is a client-side hint — the engine needs neither.
+        "RENDER_API_KEY",
+        "LOOPY_RENDER_SERVICE_ID",
+    }
+)
+
+
+def deploy_env_block(root: Path) -> dict[str, str]:
+    """The engine env block a hosted deploy sets on the platform, from local loopy.env.
+
+    Everything in the control-plane dotenv minus laptop-side/platform-specific keys
+    (`_ENV_DEPLOY_SKIP`). Values come from the dotenv parser, so quoted values arrive
+    unquoted — platforms store what they're given verbatim, and a stray quote breaks
+    the consumer at run time. Shared by `loopy env` (prints it) and `loopy deploy
+    render` (pushes it via API).
+    """
+    from loopy_runtime.secrets import load_control_plane_env
+
+    control = load_control_plane_env(root)
+    return {key: control[key] for key in sorted(control) if key not in _ENV_DEPLOY_SKIP}
 
 
 @app.command()
@@ -2421,17 +2446,13 @@ def env(
     pushes to the target directly. This prints secrets to stdout on purpose, for a one-shot paste
     into a platform's ".env import" field; it is never logged. Do not commit the output.
     """
-    from loopy_runtime.secrets import load_control_plane_env
-
     # Compile so an uncompilable project errors before we emit anything.
     _compile_or_exit(path)
     root = Path(path)
-    control = load_control_plane_env(root)
+    block = deploy_env_block(root)
 
     lines = ["# --- Control plane (engine) — infra creds; set these on the platform ---"]
-    for key in sorted(control):
-        if key not in _ENV_DEPLOY_SKIP:
-            lines.append(f"{key}={control[key]}")
+    lines.extend(f"{key}={block[key]}" for key in block)
     lines.append(
         "REDIS_URL=redis://…   # managed Redis connection string; "
         "remove this line to use the in-process bus"
