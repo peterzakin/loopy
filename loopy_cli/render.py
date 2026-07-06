@@ -23,6 +23,7 @@ from pathlib import Path
 
 import typer
 
+from loopy_cli.bootstrap import _StatusBoard, collect_secret_files, wait_until_serving
 from loopy_cli.deploy_cmd import deploy_app
 
 RENDER_API_URL = "https://api.render.com/v1"
@@ -504,3 +505,266 @@ def choose_plan(*, has_cron: bool, plan_flag: str | None) -> str:
             plan = "free" if raw == "1" else "starter"
             _ok(f"{plan} plan")
             return plan
+
+
+RENDER_REGIONS = ("oregon", "frankfurt", "ohio", "singapore", "virginia")
+_DEPLOY_TERMINAL = {"live", "build_failed", "update_failed", "pre_deploy_failed", "canceled", "deactivated"}
+
+
+def build_create_payload(
+    *, name: str, owner_id: str, info: RepoInfo, plan: str, region: str, disk_gb: int | None = None
+) -> dict:
+    """The POST /services body for the engine web service (docker runtime, git-push CD)."""
+    details: dict = {
+        "runtime": "docker",
+        "plan": plan,
+        "region": region,
+        "envSpecificDetails": {"dockerfilePath": "./Dockerfile"},
+    }
+    if disk_gb:
+        # Mounted at /state — the generated Dockerfile's start command detects the mount
+        # and moves run history to /state/state.db so it survives redeploys.
+        details["disk"] = {"name": "state", "mountPath": "/state", "sizeGB": disk_gb}
+    return {
+        "type": "web_service",
+        "name": name,
+        "ownerId": owner_id,
+        "repo": info.repo_url,
+        "branch": info.branch,
+        "autoDeploy": "yes",
+        "serviceDetails": details,
+    }
+
+
+def _poll_deploy(client, service_id: str, deploy_id: str, *, sleep=time.sleep, attempts: int = 120, delay: int = 5) -> str:
+    """Poll one deploy to a terminal status (~10 min budget); returns the final status."""
+    status = "created"
+    for _ in range(attempts):
+        status = client.get_deploy(service_id, deploy_id).get("status", "")
+        if status in _DEPLOY_TERMINAL:
+            return status
+        sleep(delay)
+    return status
+
+
+def _register_webhooks(root: Path, public_url: str) -> list[str]:
+    """Register GitHub webhooks at the fresh URL; summary lines, never raises.
+
+    Deliberate divergence from bootstrap's nudge-only convention: this command's promise
+    is "full setup end to end", so it runs the `loopy webhooks github` step itself. A
+    failure is non-fatal — the deploy already succeeded — and degrades to the retry command.
+    """
+    from loopy_cli.doctor import _declared_repo_slugs
+    from loopy_cli.webhooks import github_hook_events, sync_github_webhooks
+    from loopy_core.compile.pipeline import compile_project
+
+    try:
+        project = compile_project(root).project
+        if project is None:
+            return ["skipped (project no longer compiles?) — run `loopy webhooks github`"]
+        repos = _declared_repo_slugs(project.registry)
+        events = github_hook_events(project.sensors)
+        if not repos or not events:
+            return []  # no GitHub sensors/repos — nothing to register, say nothing
+        report = sync_github_webhooks(root, repos=repos, events=events, public_url=public_url)
+        lines = [f"{r.repo}: {r.action}" + (f" — {r.detail}" if r.action == "error" else "") for r in report.results]
+        if report.secret_written:
+            lines.append("wrote GITHUB_WEBHOOK_SECRET to loopy.env")
+        return lines
+    except Exception as exc:  # noqa: BLE001 - post-deploy nicety must never fail the deploy
+        return [f"not registered ({exc}) — run `loopy webhooks github` to retry"]
+
+
+def _destroy(root_abs: Path, service_name: str | None, yes: bool) -> None:  # noqa: ARG001 - Task 11
+    raise typer.Exit(code=1)
+
+
+@deploy_app.command()
+def render(
+    manifest: Path = typer.Argument(
+        Path("manifest.json"),
+        help="A manifest.json, or a project directory to compile (default: manifest.json).",
+    ),
+    root: Path = typer.Option(Path("."), "--root", help="Project root (env files + sensors)."),
+    plan: str | None = typer.Option(
+        None, "--plan", help="Service plan (free|starter|standard|pro). Prompted on a TTY."
+    ),
+    service_name: str | None = typer.Option(
+        None, "--service-name", help="Render service name (default: loopy-<project-dir>)."
+    ),
+    region: str | None = typer.Option(
+        None, "--region", help=f"Render region ({'|'.join(RENDER_REGIONS)}; default oregon)."
+    ),
+    branch: str | None = typer.Option(
+        None, "--branch", help="Branch to deploy (default: the repo's current branch)."
+    ),
+    disk_gb: int | None = typer.Option(
+        None,
+        "--disk-gb",
+        help="Attach a persistent disk (GB) at /state for run history (paid plans only).",
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", help="Accept safe fixups (generate Dockerfile, proceed past warnings)."
+    ),
+    destroy: bool = typer.Option(False, "--destroy", help="Delete the Render service."),
+) -> None:
+    """Deploy the engine to Render end to end: preflight, create-or-update, go live.
+
+    The render deploy target — Render builds your repo's generated Dockerfile from a
+    git push, so this command verifies the repo is deployable, creates or updates the
+    web service via Render's API (env vars + secret files included), waits for the
+    deploy to answer /healthz, writes LOOPY_PUBLIC_URL back to loopy.env, and
+    registers GitHub webhooks. Re-running is safe; --destroy tears the service down.
+    """
+    from loopy_cli import _resolve_manifest, deploy_env_block
+    from loopy_cli.deploy_target import RENDER_SERVICE_ID_ENV
+    from loopy_runtime.secrets import load_control_plane_env, write_control_plane_env
+
+    root_abs = Path(root).resolve()
+
+    if destroy:
+        _destroy(root_abs, service_name, yes)  # Task 11
+        return
+
+    # ── preflight: compile, project, git — all before any Render call.
+    manifest_path, root = _resolve_manifest(manifest, Path(root))
+    root_abs = root.resolve()
+    manifest_abs = (manifest_path if manifest_path.is_absolute() else root / manifest_path).resolve()
+
+    typer.echo("preflight:")
+    checks = project_checks(root_abs, manifest_abs)
+    git_results, info = git_checks(root_abs, branch)
+    fatal, warn = print_checks(checks + git_results)
+
+    # Fixable gap: no Dockerfile → offer to generate, then stop for commit+push.
+    # `.get` (not `[...]`) because a stubbed `project_checks` (as in the command tests) may
+    # not report a "dockerfile" check at all — treat that as nothing to fix here.
+    by_key = {c.key: c for c in checks}
+    dockerfile_check = by_key.get("dockerfile")
+    if dockerfile_check is not None and not dockerfile_check.ok and not dockerfile_check.warn:
+        if yes or (_interactive() and typer.confirm("  Generate the Dockerfile now?", default=True)):
+            from loopy_cli import dockerfile as generate_dockerfile
+
+            generate_dockerfile(root_abs, stdout=False)
+            typer.echo(
+                "  → commit and push the new Dockerfile + .dockerignore, then re-run "
+                "`loopy deploy render` (Render builds the pushed tree)."
+            )
+        raise typer.Exit(code=1)
+    if fatal:
+        typer.echo("deploy: fix the ✗ items above and re-run.", err=True)
+        raise typer.Exit(code=1)
+    if warn and not yes:
+        if not _interactive() or not typer.confirm("  Proceed past the ! warnings?", default=False):
+            raise typer.Exit(code=1)
+
+    # ── wizard: key + workspace, then service identity + plan.
+    client, owner = connect(root_abs)
+    control = load_control_plane_env(root_abs)
+    name = service_name or f"loopy-{root_abs.name}"
+    region_value = region or "oregon"
+
+    service = None
+    recorded_id = control.get(RENDER_SERVICE_ID_ENV, "").strip()
+    if recorded_id:
+        service = client.get_service(recorded_id)
+    if service is None:
+        service = client.find_service(name)
+
+    plan_value = choose_plan(has_cron=has_cron_workflows(manifest_abs), plan_flag=plan) if service is None else (plan or "")
+    if service is not None and plan and plan != (service.get("serviceDetails") or {}).get("plan"):
+        typer.echo("  note: changing an existing service's plan is a dashboard action; --plan ignored.")
+
+    # ── provision.
+    if service is None:
+        if _interactive():
+            typer.echo("  3. Service")
+            if service_name is None:
+                name = typer.prompt("  Service name", default=name).strip() or name
+            if region is None:
+                choices = "  ".join(f"{i}) {r}" for i, r in enumerate(RENDER_REGIONS, start=1))
+                typer.echo(f"  Region — {choices}")
+                while True:
+                    raw = typer.prompt(f"  Choose 1-{len(RENDER_REGIONS)}", default="1").strip()
+                    if raw.isdigit() and 1 <= int(raw) <= len(RENDER_REGIONS):
+                        region_value = RENDER_REGIONS[int(raw) - 1]
+                        break
+        service = client.create_service(
+            build_create_payload(
+                name=name,
+                owner_id=owner["id"],
+                info=info,
+                plan=plan_value,
+                region=region_value,
+                disk_gb=disk_gb,
+            )
+        )
+        _ok(f"created web service {service['name']} in {region_value}, deploying branch {info.branch}")
+    else:
+        _ok(f"found existing service {service.get('name', service['id'])} — updating in place")
+
+    service_id = service["id"]
+    client.put_env_vars(service_id, deploy_env_block(root_abs))
+    from loopy_runtime.secrets import CONTROL_PLANE_ENV_FILE
+
+    # loopy.env stays home: the env-var push above already carries the control plane, and
+    # the file holds RENDER_API_KEY itself — the deployed service must never receive that.
+    secret_files = {
+        encode_secret_file_name(rel): (root_abs / rel).read_text()
+        for rel in collect_secret_files(root_abs, manifest_abs)
+        if rel != CONTROL_PLANE_ENV_FILE
+    }
+    client.put_secret_files(service_id, secret_files)
+    _ok(f"pushed {len(secret_files)} secret file(s) and the engine env block")
+
+    deploy = client.trigger_deploy(service_id)
+    board = _StatusBoard(
+        "deploy: render",
+        [
+            ("build", "build & deploy on Render", "~2-6 min"),
+            ("healthz", "engine answering", "~30s"),
+        ],
+    )
+    board.enter("build")
+    final = _poll_deploy(client, service_id, deploy["id"])
+    board.complete("build", ok=final == "live")
+
+    public_url = (service.get("serviceDetails") or {}).get("url") or f"https://{name}.onrender.com"
+    if final != "live":
+        typer.echo(
+            f"deploy: {final}. Build logs: https://dashboard.render.com/web/{service_id}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    board.enter("healthz")
+    serving = wait_until_serving(public_url, echo=lambda line: board.detail("healthz", line))
+    board.complete("healthz", ok=serving)
+
+    write_control_plane_env(
+        root_abs, {"LOOPY_PUBLIC_URL": public_url, RENDER_SERVICE_ID_ENV: service_id}
+    )
+
+    webhook_lines = _register_webhooks(root_abs, public_url)
+
+    # ── summary (bootstrap's format).
+    import shutil
+
+    typer.echo("")
+    typer.echo(f"deploy: done. Engine at {public_url}")
+    typer.echo(f"  status:    {'live (/healthz is answering)' if serving else 'not answering yet — check the dashboard build logs'}")
+    plan_note = (service.get("serviceDetails") or {}).get("plan") or plan_value
+    if plan_note == "free":
+        typer.echo("  plan:      free (spins down after ~15 min idle; webhooks wake it)")
+    else:
+        typer.echo(f"  plan:      {plan_note} (always on)")
+    typer.echo(f"  url:       wrote LOOPY_PUBLIC_URL={public_url} to loopy.env")
+    if webhook_lines:
+        typer.echo(f"  webhooks:  {webhook_lines[0]}")
+        for line in webhook_lines[1:]:
+            typer.echo(f"             {line}")
+    typer.echo("  dashboard: loopy admin  (proxies to /admin with your bearer token)")
+    if shutil.which("render"):
+        typer.echo(f"  logs:      render logs --tail {service_id}")
+    typer.echo(f"  cd:        git push origin {info.branch} redeploys automatically")
+    typer.echo("  teardown:  loopy deploy render --destroy")
