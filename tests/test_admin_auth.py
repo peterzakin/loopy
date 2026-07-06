@@ -416,19 +416,25 @@ def test_proxy_forwards_under_a_base_path():
     assert seen["url"] == "https://loopy.example.com/admin/api/meta"
 
 
-def test_proxy_serves_the_ui_shell_locally_and_proxies_static():
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/static/app.js"
-        return httpx.Response(
-            200, content=b"// remote js", headers={"content-type": "text/javascript"}
-        )
+def test_proxy_serves_the_front_end_locally():
+    # The front-end (shell + CSS + JS) is served from the local install, not proxied: a `loopy`
+    # refresh delivers the latest UI with no engine redeploy, and a stale engine can't leave the
+    # dashboard unstyled. The remote is touched only for /api, so a handler that fires on a
+    # /static or / request is a regression.
+    from loopy_runtime.dashboard.app import _STATIC
+
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover - must not run
+        raise AssertionError(f"front-end asset {request.url.path} should be served locally")
 
     client = _proxy_client(handler)
+
     index = client.get("/")
     assert index.status_code == 200 and b"<html" in index.content.lower()
-    static = client.get("/static/app.js")
-    assert static.content == b"// remote js"
-    assert static.headers["content-type"].startswith("text/javascript")
+
+    for asset in ("app.js", "style.css", "loopy-ui.css"):
+        served = client.get(f"/static/{asset}")
+        assert served.status_code == 200, f"/static/{asset} should be served locally"
+        assert served.content == (_STATIC / asset).read_bytes()
 
 
 def test_proxy_maps_remote_401_to_actionable_message():
