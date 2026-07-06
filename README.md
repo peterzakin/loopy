@@ -169,7 +169,6 @@ its own README, grouped in [`examples/README.md`](examples/README.md):
 | [`incidents/`](examples/incidents/) | The canonical multi-workflow loop: triage → resolve → confirm, plus a nightly cron scan, wired by events at the workflow boundaries. |
 | [`github/`](examples/github/) | The canonical **webhook** loop: one `/hooks/github` URL fans out to sensors for PR review and follow-on work. |
 | [`effective-agents/`](examples/effective-agents/) | Anthropic's *Building Effective Agents* patterns (prompt chaining, routing, parallelization, orchestrator-workers, evaluator-optimizer), each as a Loopy workflow. |
-| [`auto-research/`](examples/auto-research/) | A self-driving research loop: digest → hypothesize → experiment → write up → reflect, bounded by budgets. |
 
 ## Documentation
 
