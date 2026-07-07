@@ -113,10 +113,10 @@ sandboxes:
 agents:
   Investigator: { skills: [triage, repro-authoring] }            # inherits defaults
   Fixer:        { model: claude-opus-4-8, skills: [testing] }
-  Scout:        { model: gpt-5, harness: codex, skills: [triage] }
+  Scout:        { model: gpt-5.5, harness: codex, skills: [triage] }
 
 events:
-  Incident: { source: enum[sentry, linear, datadog], issue_id: str, title: str, link: url }
+  Incident: { source: enum[sentry, pagerduty, datadog], issue_id: str, title: str, link: url }
   WorkItem: { link: url, description: str }
 ```
 

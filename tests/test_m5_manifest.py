@@ -18,7 +18,7 @@ from loopy_core.sensors.loader import load_sensors
 from loopy_core.workflow.loader import load_workflows
 from tests.helpers import assert_code, write_project
 
-EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "incidents"
+EXAMPLE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "incidents"
 GOLDEN = Path(__file__).resolve().parent / "golden" / "incidents.manifest.json"
 SCHEMA = Path(__file__).resolve().parents[1] / "loopy_core" / "manifest.schema.json"
 
