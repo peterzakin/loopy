@@ -88,11 +88,21 @@ consumes its predecessors' outputs. A step is one Markdown file:
 
 ```yaml
 ---
-on:     WorkItem            # what triggers the step (a registered event, or a cron schedule)
-agent:  Investigator        # who runs it, from registry.yml
-output: { goal: str }       # typed result, read by later steps as {{ step.field }}
+on:     CustomerTicket                  # what triggers the step (a registered event, or a cron schedule)
+agent:  SupportEngineer                 # who runs it, from registry.yml
+output: { pr_url: url, verdict: str }   # typed result, read by later steps as {{ step.field }}
 ---
-Decide the goal given the work item at {{ event.link }}.
+A customer opened Zendesk ticket {{ event.ticket_id }}: "{{ event.subject }}".
+
+{{ event.body }}
+
+Decide whether this ticket points at real work in this codebase.
+
+1. Search the code for the behavior the ticket describes.
+2. If it is a bug or a small feature you can address, implement the change on a branch
+   and open a pull request that links back to {{ event.link }}. If it is a question, a
+   duplicate, or not actionable in code, do nothing.
+3. Return the PR URL (empty if you skipped) and a one-line verdict.
 ```
 
 The reusable entities (Agents, Sandboxes, and Events) are defined once in
@@ -105,18 +115,15 @@ defaults:
 sandboxes:
   BaseSandbox:
     provider: daytona
-    image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
+    image: { debian_slim: "3.12", apt: [git, gh], workdir: /home/loopy, user: loopy }
     env_file: secrets/base.env       # gitignored; injected as the sandbox's env
     repos: [octocat/Hello-World]     # cloned into the workspace, git auth injected
 
 agents:
-  Investigator: { skills: [triage, repro-authoring] }            # inherits defaults
-  Fixer:        { model: claude-opus-4-8, skills: [testing] }
-  Scout:        { model: gpt-5.5, harness: codex, skills: [triage] }
+  SupportEngineer: {}                # judges the ticket, opens a PR when it warrants work
 
 events:
-  Incident: { source: enum[sentry, pagerduty, datadog], issue_id: str, title: str, link: url }
-  WorkItem: { link: url, description: str }
+  CustomerTicket: { ticket_id: str, subject: str, body: str, link: url }   # inbound, from the Zendesk sensor
 ```
 
 A project lays out like this:
@@ -143,12 +150,14 @@ a `poll` interval or a `webhook` route, where returning is emitting:
 
 ```python
 from loopy import sensor
-from loopy.events import Incident   # generated from registry.yml
+from loopy.events import CustomerTicket   # generated from registry.yml
 
-@sensor(webhook="/hooks/sentry", emits="Incident")
-def sentry_issues(req) -> Incident:
-    i = req.json["data"]["issue"]
-    return Incident(source="sentry", issue_id=i["id"], title=i["title"], link=i["permalink"])
+# webhook: Zendesk POSTs a new ticket; you shape it into a CustomerTicket
+@sensor(webhook="/hooks/zendesk", emits="CustomerTicket")
+def zendesk_tickets(req) -> CustomerTicket:
+    ticket = req.json["ticket"]
+    return CustomerTicket(ticket_id=ticket["id"], subject=ticket["subject"],
+                          body=ticket["description"], link=ticket["url"])
 ```
 
 Common GitHub and Sentry events are built in: a workflow can trigger on
