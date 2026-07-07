@@ -31,6 +31,7 @@ M2_CODES = {
     codes.E107,
     codes.E110,
     codes.E111,
+    codes.E113,
 }
 
 
@@ -259,3 +260,73 @@ def test_cron_bad_tz_reports_e110(tmp_path):
         },
     )
     assert_code(compile_project(tmp_path), codes.E110)
+
+
+def test_event_trigger_filter_parses(tmp_path):
+    write_project(
+        tmp_path,
+        {
+            "registry.yml": REGISTRY,
+            "workflows/triage/investigate.md": md(
+                'on: Incident(issue_id="42")\nagent: Investigator'
+            ),
+        },
+    )
+    result = compile_project(tmp_path)
+    assert_no_m2_errors(result)
+    step = result.project.workflows["triage"].steps["investigate"]
+    assert step.trigger.kind == "event"
+    assert step.trigger.event == "Incident"
+    assert step.trigger.filters == {"issue_id": "42"}
+
+
+def test_event_trigger_multiple_filters_and_quoted_commas_parse(tmp_path):
+    # Values are quoted, so a comma inside one must not split the arg list.
+    write_project(
+        tmp_path,
+        {
+            "registry.yml": REGISTRY + "  Labeled: { repo: str, title: str }\n",
+            "workflows/triage/investigate.md": md(
+                'on: Labeled(repo="octocat/Hello-World", title="a, b")\nagent: Investigator'
+            ),
+        },
+    )
+    result = compile_project(tmp_path)
+    assert_no_m2_errors(result)
+    step = result.project.workflows["triage"].steps["investigate"]
+    assert step.trigger.filters == {"repo": "octocat/Hello-World", "title": "a, b"}
+
+
+def test_event_trigger_unquoted_filter_reports_e113(tmp_path):
+    write_project(
+        tmp_path,
+        {
+            "registry.yml": REGISTRY,
+            "workflows/triage/investigate.md": md("on: Incident(issue_id=42)\nagent: Investigator"),
+        },
+    )
+    assert_code(compile_project(tmp_path), codes.E113)
+
+
+def test_event_trigger_empty_filter_list_reports_e113(tmp_path):
+    write_project(
+        tmp_path,
+        {
+            "registry.yml": REGISTRY,
+            "workflows/triage/investigate.md": md("on: Incident()\nagent: Investigator"),
+        },
+    )
+    assert_code(compile_project(tmp_path), codes.E113)
+
+
+def test_event_trigger_duplicate_filter_field_reports_e113(tmp_path):
+    write_project(
+        tmp_path,
+        {
+            "registry.yml": REGISTRY,
+            "workflows/triage/investigate.md": md(
+                'on: Incident(issue_id="1", issue_id="2")\nagent: Investigator'
+            ),
+        },
+    )
+    assert_code(compile_project(tmp_path), codes.E113)

@@ -27,6 +27,11 @@ from loopy_core.workflow.model import Budget, Step, Trigger, Workflow
 # cron("<quoted expr>"[, tz=<iana>])
 _CRON_RE = re.compile(r'^cron\(\s*"(?P<expr>[^"]*)"\s*(?:,\s*tz\s*=\s*(?P<tz>[^)]+?)\s*)?\)$')
 
+# <Event>(<args>) — an event trigger with filters, e.g. Github.PullRequestOpened(repo="a/b")
+_FILTERED_EVENT_RE = re.compile(r"^(?P<event>[A-Za-z_][\w.]*)\((?P<args>.*)\)$", re.DOTALL)
+# one filter arg: field="value" (values are always quoted; fields are contract field names)
+_FILTER_ARG_RE = re.compile(r'^(?P<key>[A-Za-z_]\w*)\s*=\s*"(?P<value>[^"]*)"$')
+
 
 def load_workflows(
     inv: Inventory, registry: Registry, diags: DiagnosticCollector
@@ -132,7 +137,67 @@ def _parse_trigger(on: object, span: Span, diags: DiagnosticCollector) -> Trigge
     text = str(on).strip()
     if text.startswith("cron("):
         return _parse_cron(text, span, diags)
+    if "(" in text or ")" in text:
+        return _parse_filtered_event(text, span, diags)
     return Trigger(kind="event", event=text, span=span)
+
+
+def _parse_filtered_event(value: str, span: Span, diags: DiagnosticCollector) -> Trigger | None:
+    """Parse `Event(field="value", ...)` — an event trigger scoped by field filters.
+
+    Every filter must match the published event's field exactly (AND semantics); which
+    fields exist — and that they are strings — is checked against the event's contract in
+    `cross_check` (E114), not here. Malformed syntax is E113. Bare `on: Event` stays the
+    unfiltered form: every published instance triggers.
+    """
+
+    def malformed(reason: str) -> None:
+        diags.error(
+            codes.E113,
+            f"malformed event trigger: {value!r} — {reason}",
+            span=span,
+            hint='filters are field="quoted value" pairs, e.g. '
+            'Github.PullRequestOpened(repo="octocat/Hello-World")',
+        )
+
+    match = _FILTERED_EVENT_RE.match(value)
+    if not match:
+        malformed('expected <Event>(field="value", ...)')
+        return None
+    event, args = match.group("event"), match.group("args").strip()
+    if not args:
+        malformed("empty filter list; drop the parentheses to trigger on every instance")
+        return None
+
+    filters: dict[str, str] = {}
+    for raw in _split_filter_args(args):
+        arg = _FILTER_ARG_RE.match(raw.strip())
+        if not arg:
+            malformed(f"bad filter {raw.strip()!r}")
+            return None
+        key = arg.group("key")
+        if key in filters:
+            malformed(f"duplicate filter field '{key}'")
+            return None
+        filters[key] = arg.group("value")
+    return Trigger(kind="event", event=event, filters=filters, span=span)
+
+
+def _split_filter_args(args: str) -> list[str]:
+    """Split a filter arg list on commas outside quotes (values may contain commas)."""
+    parts: list[str] = []
+    current: list[str] = []
+    in_quotes = False
+    for ch in args:
+        if ch == '"':
+            in_quotes = not in_quotes
+        if ch == "," and not in_quotes:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+    parts.append("".join(current))
+    return parts
 
 
 def _parse_cron(value: str, span: Span, diags: DiagnosticCollector) -> Trigger | None:

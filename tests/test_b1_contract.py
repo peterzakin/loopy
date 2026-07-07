@@ -45,6 +45,30 @@ def test_workflow_for_event_resolves_entry():
     assert m.workflow_for_event("NotARegisteredEvent") is None
 
 
+def test_trigger_spec_filters_default_empty_and_match_exactly():
+    from loopy_runtime.manifest_model import TriggerSpec
+
+    # A pre-filters trigger dict (no `filters` key) loads as unfiltered — matches everything.
+    legacy = TriggerSpec.model_validate({"kind": "event", "event": "Incident"})
+    assert legacy.filters == {}
+    assert legacy.matches({"anything": "at all"})
+
+    # The golden (unfiltered) manifest carries the same semantics explicitly.
+    m = load_manifest(GOLDEN)
+    entry = m.workflows["triage"].steps["investigate"]
+    assert entry.trigger.filters == {}
+
+    spec = TriggerSpec(
+        kind="event",
+        event="PROpened",
+        filters={"repo": "octocat/Hello-World", "base": "main"},
+    )
+    assert spec.matches({"repo": "octocat/Hello-World", "base": "main", "number": 7})
+    assert not spec.matches({"repo": "octocat/Hello-World", "base": "dev"})  # AND, not OR
+    assert not spec.matches({"repo": "someone/else", "base": "main"})
+    assert not spec.matches({})  # a missing field never matches
+
+
 def test_provider_registry_resolves_v1_runtimes():
     assert required_model_key("claude-code") == "ANTHROPIC_API_KEY"
     assert required_model_key("codex") == "OPENAI_API_KEY"  # codex harness is wired now

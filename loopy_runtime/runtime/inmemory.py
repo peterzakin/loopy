@@ -125,7 +125,7 @@ class InMemoryRuntime:
         for wf_name, wf in manifest.workflows.items():
             entry = wf.steps.get(wf.entry) if wf.entry else None
             if entry and entry.trigger and entry.trigger.kind == "event":
-                self.bus.subscribe(entry.trigger.event, self._handler_for(wf_name))
+                self.bus.subscribe(entry.trigger.event, self._handler_for(wf_name, entry.trigger))
 
     # ── Read-only views for tests/CLI over runner- and budget-owned state ────────
     @property
@@ -318,8 +318,19 @@ class InMemoryRuntime:
         return self._runs[run_id]
 
     # ── Internals ──────────────────────────────────────────────────────────────
-    def _handler_for(self, wf_name: str) -> Callable[[Event], Awaitable[None]]:
+    def _handler_for(self, wf_name: str, trigger) -> Callable[[Event], Awaitable[None]]:  # noqa: ANN001 - TriggerSpec
         async def handler(event: Event) -> None:
+            if not trigger.matches(event.fields):
+                # A logged skip, not a silent drop — a filter that never matches is the
+                # kind of gap that's miserable to debug from the outside.
+                logger.info(
+                    "event %s (%s) skipped for workflow %s: trigger filters %r not matched",
+                    event.name,
+                    event.id,
+                    wf_name,
+                    trigger.filters,
+                )
+                return
             self._queue.append((wf_name, event))  # enqueue; the drain loop runs it
             self._work.set()  # wake serve() if it's the one draining
 

@@ -45,6 +45,7 @@ def cross_check(project: Project, inv: Inventory, diags: DiagnosticCollector) ->
                         f"step '{step.id}' triggers on unregistered event '{event}'",
                         span=step.span,
                     )
+                _check_trigger_filters(step, registry, diags)
 
     # X2 — every registered agent names a sandbox, and it (+ its skills) resolve.
     for agent in registry.agents.values():
@@ -109,6 +110,37 @@ def cross_check(project: Project, inv: Inventory, diags: DiagnosticCollector) ->
 
     # X5 — lineage + dead-trigger warnings.
     project.lineage = _build_lineage(project, diags)
+
+
+def _check_trigger_filters(step, registry, diags: DiagnosticCollector) -> None:  # noqa: ANN001
+    """E114 — every `on: Event(field="value")` filter must name a string-typed field of the
+    event's contract. Runs after the built-in pass, so a referenced `Github.*` contract is
+    already in `registry.events`; an unknown event was already reported (E504/E112), so a
+    missing contract is skipped rather than double-reported."""
+    trigger = step.trigger
+    if not trigger.filters:
+        return
+    event = registry.events.get(trigger.event)
+    if event is None:
+        return
+    known = ", ".join(sorted(event.fields))
+    for field, value in trigger.filters.items():
+        schema = event.fields.get(field)
+        if schema is None:
+            diags.error(
+                codes.E114,
+                f"step '{step.id}' filters on '{field}', which is not a field of "
+                f"'{trigger.event}' (fields: {known})",
+                span=trigger.span or step.span,
+            )
+        elif schema.get("type") != "string":
+            diags.error(
+                codes.E114,
+                f"step '{step.id}' filters on '{field}={value}', but "
+                f"'{trigger.event}.{field}' is not a string field — filters compare "
+                f"quoted strings exactly",
+                span=trigger.span or step.span,
+            )
 
 
 def _build_lineage(project: Project, diags: DiagnosticCollector) -> Lineage:

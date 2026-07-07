@@ -14,6 +14,10 @@ class Trigger(BaseModel):
 
     kind: Literal["event", "cron"]
     event: str | None = None  # kind == "event"
+    # kind == "event", optional: field -> required value, from `on: Event(field="value")`.
+    # Every filter must match (AND) for a published event to start this workflow; bare
+    # `on: Event` means every published instance triggers.
+    filters: dict[str, str] = Field(default_factory=dict)
     expr: str | None = None  # kind == "cron"
     tz: str | None = None  # kind == "cron", optional
     span: Span | None = None

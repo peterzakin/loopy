@@ -129,6 +129,57 @@ def test_unregistered_event_reports_e504(tmp_path):
     assert_code(compile_project(tmp_path), codes.E504)
 
 
+_FILTER_REGISTRY = (
+    "defaults: { agent: { sandbox: default, model: claude-sonnet-4-6, harness: claude-code } }\n"
+    "sandboxes: { default: { provider: local } }\n"
+    "agents:\n  Worker: {}\nevents:\n  Incident: { repo: str, count: int }\n"
+)
+
+
+def test_trigger_filter_on_unknown_field_reports_e114(tmp_path):
+    write_project(
+        tmp_path,
+        {
+            "registry.yml": _FILTER_REGISTRY,
+            "workflows/w/a.md": md('on: Incident(rpeo="a/b")\nagent: Worker'),
+        },
+    )
+    result = compile_project(tmp_path)
+    assert_code(result, codes.E114)
+    # The message lists the contract's real fields, mirroring the E112 catalog style.
+    assert any("repo" in d.message for d in result.diagnostics.items if d.code == codes.E114)
+
+
+def test_trigger_filter_on_non_string_field_reports_e114(tmp_path):
+    # Filters compare quoted strings exactly, so only string-typed fields are filterable.
+    write_project(
+        tmp_path,
+        {
+            "registry.yml": _FILTER_REGISTRY,
+            "workflows/w/a.md": md('on: Incident(count="3")\nagent: Worker'),
+        },
+    )
+    assert_code(compile_project(tmp_path), codes.E114)
+
+
+def test_trigger_filter_lands_in_manifest(tmp_path):
+    write_project(
+        tmp_path,
+        {
+            "registry.yml": _FILTER_REGISTRY,
+            "workflows/w/a.md": md('on: Incident(repo="octocat/Hello-World")\nagent: Worker'),
+        },
+    )
+    result = compile_project(tmp_path)
+    assert not result.diagnostics.has_errors(), [d.render() for d in result.diagnostics.items]
+    trigger = to_manifest(result.project)["workflows"]["w"]["steps"]["a"]["trigger"]
+    assert trigger == {
+        "kind": "event",
+        "event": "Incident",
+        "filters": {"repo": "octocat/Hello-World"},
+    }
+
+
 def test_dead_trigger_reports_w501(tmp_path):
     registry = "agents:\n  Worker: {}\nevents:\n  Lonely:\n    x: str\n"
     write_project(

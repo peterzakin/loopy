@@ -35,10 +35,10 @@ class RecordingHarness:
         return StepResult(output=StepOutput({}), emits=emits)
 
 
-def _step(step_id: str, event: str) -> dict:
+def _step(step_id: str, event: str, filters: dict | None = None) -> dict:
     return {
         "id": step_id,
-        "trigger": {"kind": "event", "event": event},
+        "trigger": {"kind": "event", "event": event, "filters": filters or {}},
         "after": [],
         "agent": None,
         "output": {},
@@ -80,6 +80,43 @@ def test_event_fans_out_to_all_subscribed_workflows():
     rt = _runtime(manifest)
     asyncio.run(rt.trigger(_ping()))
     assert set(rt.execution_log) == {"a/x", "b/y"}
+
+
+def test_trigger_filters_scope_dispatch_per_workflow():
+    """Two workflows on one event: the filtered one runs only when its filter matches,
+    the bare one runs for every instance."""
+    manifest = Manifest.model_validate(
+        {
+            "schema_version": "2",
+            "registry": {
+                "sandboxes": {},
+                "agents": {},
+                "events": {"PROpened": {"fields": {"repo": {"type": "string"}}}},
+            },
+            "workflows": {
+                "scoped": {
+                    "entry": "x",
+                    "steps": {"x": _step("scoped/x", "PROpened", {"repo": "octocat/Hello-World"})},
+                },
+                "bare": {"entry": "y", "steps": {"y": _step("bare/y", "PROpened")}},
+            },
+            "sensors": [],
+            "lineage": {"events": {}},
+        }
+    )
+
+    def pr_opened(repo: str, event_id: str) -> Event:
+        return Event(
+            name="PROpened", fields={"repo": repo}, id=event_id, emitted_at=datetime.now(UTC)
+        )
+
+    rt = _runtime(manifest)
+    asyncio.run(rt.trigger(pr_opened("octocat/Hello-World", "match")))
+    assert set(rt.execution_log) == {"scoped/x", "bare/y"}
+
+    rt = _runtime(manifest)
+    asyncio.run(rt.trigger(pr_opened("someone/else", "miss")))
+    assert set(rt.execution_log) == {"bare/y"}  # the filtered workflow was skipped
 
 
 def test_run_history_is_recorded():

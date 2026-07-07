@@ -1992,7 +1992,24 @@ def trigger(
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     if run_id is None:
-        typer.echo(f"no workflow subscribes to event '{event}'", err=True)
+        # Distinguish "nobody subscribes" from "subscribers exist but every trigger filter
+        # rejected these fields" — the latter needs different --fields, not a new workflow.
+        filtered = []
+        for wf_name, wf in m.workflows.items():
+            entry = wf.steps.get(wf.entry) if wf.entry else None
+            trig = entry.trigger if entry else None
+            if trig and trig.kind == "event" and trig.event == event:
+                args = ", ".join(f'{k}="{v}"' for k, v in trig.filters.items())
+                filtered.append(f"{wf_name} (on: {event}({args}))")
+        if filtered:
+            typer.echo(
+                f"no run started: workflow(s) subscribe to '{event}' but their trigger "
+                f"filters rejected the given fields — {'; '.join(filtered)}. "
+                "Pass matching --fields.",
+                err=True,
+            )
+        else:
+            typer.echo(f"no workflow subscribes to event '{event}'", err=True)
         raise typer.Exit(code=1)
 
     record = _run_record(run_id, runtime, outputs)

@@ -24,6 +24,8 @@ E107 = "LOOPY-E107"
 E110 = "LOOPY-E110"
 E111 = "LOOPY-E111"
 E112 = "LOOPY-E112"
+E113 = "LOOPY-E113"
+E114 = "LOOPY-E114"
 
 # E2xx — registry / types
 E201 = "LOOPY-E201"
@@ -74,6 +76,8 @@ DESCRIPTIONS: dict[str, str] = {
     E110: 'malformed cron("<expr>"[, tz=...])',
     E111: "on: lists multiple events (unions unsupported)",
     E112: "on: names an unknown built-in event (reserved namespace, not in catalog)",
+    E113: 'malformed event trigger filter — expects Event(field="value", ...)',
+    E114: "an on: filter names a field not in the event's contract, or a non-string field",
     # E2xx — registry / types
     E201: "unknown type shorthand in an event field or step output:",
     E210: "entity name not Capitalized / reserved `default` misused (X1)",

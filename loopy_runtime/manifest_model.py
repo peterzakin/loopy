@@ -84,8 +84,17 @@ class RegistrySpec(_Model):
 class TriggerSpec(_Model):
     kind: str  # "event" | "cron"
     event: str | None = None
+    # kind == "event": field -> required value (from `on: Event(field="value")`). All must
+    # match (AND) for a published event to start the workflow; empty means unfiltered.
+    filters: dict[str, str] = Field(default_factory=dict)
     expr: str | None = None
     tz: str | None = None
+
+    def matches(self, fields: dict) -> bool:
+        """Whether an event's validated fields satisfy every filter. Filters are only ever
+        compiled against string-typed contract fields (E114), so exact string comparison is
+        the whole semantic."""
+        return all(fields.get(key) == want for key, want in self.filters.items())
 
 
 class BudgetSpec(_Model):
