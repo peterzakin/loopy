@@ -86,14 +86,13 @@ A **workflow** is a directory of steps. Exactly one entry step carries `on:` (a 
 event, or a built-in `cron("<expr>")` trigger); every other step carries `after: <step>` and
 consumes its predecessors' outputs. A step is one Markdown file:
 
-```markdown
+```yaml
 ---
-after:  fix                 # or `on: <RegisteredEvent>` for the one entry step
-agent:  Reviewer            # from registry.yml
-output: { verdict: enum[pass, fail], notes: str }   # structured outputs, typed
-budget: { wall_clock: 20, spend: { usd: 4 } }
+on:     WorkItem            # what triggers the step (a registered event, or a cron schedule)
+agent:  Investigator        # who runs it, from registry.yml
+output: { goal: str }       # typed result, read by later steps as {{ step.field }}
 ---
-The agent's objective, in prose; reads {{ event.* }} and {{ fix.diff }} (an output of `fix`).
+Decide the goal given the work item at {{ event.link }}.
 ```
 
 The reusable entities (Agents, Sandboxes, and Events) are defined once in
