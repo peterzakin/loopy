@@ -128,6 +128,15 @@ sandboxes:
     env_file: secrets/base.env        # gitignored; injected as the sandbox's env
     repos: [octocat/Hello-World]      # cloned into the workspace at acquire time
 
+  isloRemote:
+    provider: islo
+    image:
+      image: docker.io/library/ubuntu:26.04
+      apt: [git]
+      workdir: /workspace/loopy
+      user: root
+    env_file: secrets/base.env
+
 # Agents: capability comes from the sandbox (image + egress), skills, injected creds, and
 # budget; numeric caps live in budget, not in a tool name.
 agents:
@@ -255,10 +264,10 @@ sensor sees the payload. Without registration (or the manual equivalent), built-
   (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) and `GITHUB_TOKEN` if no GitHub App is
   configured. Gitignored.
 - `loopy.env` at the project root holds control-plane creds the *engine* needs
-  (`DAYTONA_API_KEY`, the GitHub App entries `loopy auth github` writes). Never injected
-  into sandboxes. Gitignored.
+  (`DAYTONA_API_KEY`, `ISLO_API_KEY`, and the GitHub App entries `loopy auth github`
+  writes). Never injected into sandboxes. Gitignored.
 - **Where an agent runs is authored in `registry.yml`, not on the command line.** Every
-  sandbox must declare its `provider:` (`local | docker | daytona`); there is no
+  sandbox must declare its `provider:` (`local | docker | daytona | islo`); there is no
   `--sandbox` flag.
 
 ## Running

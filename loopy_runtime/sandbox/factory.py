@@ -52,9 +52,13 @@ def make_sandbox_provider(name: str = "local"):
         from loopy_runtime.sandbox.daytona import DaytonaSandboxProvider
 
         provider = DaytonaSandboxProvider()
+    elif name == "islo":
+        from loopy_runtime.sandbox.islo import IsloSandboxProvider
+
+        provider = IsloSandboxProvider()
     else:
         raise ValueError(
-            f"unknown sandbox provider {name!r}; choose 'local', 'docker', or 'daytona'"
+            f"unknown sandbox provider {name!r}; choose 'local', 'docker', 'daytona', or 'islo'"
         )
     return _RepoCloningProvider(provider)
 

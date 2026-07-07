@@ -871,6 +871,20 @@ wheels = [
 ]
 
 [[package]]
+name = "islo"
+version = "0.3.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c5/ee/1fa948386e45772343664eee0a6f955787c2bfb9b4df1ca02d6d6edf8590/islo-0.3.8.tar.gz", hash = "sha256:50b5e0d8069a2c30e353d48afdf562baf5e567119bf150dd47e277a479a4135c", size = 89513, upload-time = "2026-06-24T13:06:30.488Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/96/2d/b0194c60181f3dc2662ce7937759fafafbf2ff73e712f0df1ef9d200262c/islo-0.3.8-py3-none-any.whl", hash = "sha256:35965bb5bf715d1df1cc36f5553ee81eab3f87a8fcca4334a653defff1785460", size = 190684, upload-time = "2026-06-24T13:06:28.878Z" },
+]
+
+[[package]]
 name = "isort"
 version = "8.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -929,7 +943,7 @@ wheels = [
 
 [[package]]
 name = "loopy-computer"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "boto3", extra = ["crt"] },
@@ -938,6 +952,7 @@ dependencies = [
     { name = "daytona" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "islo" },
     { name = "jsonschema" },
     { name = "networkx" },
     { name = "pydantic" },
@@ -968,6 +983,7 @@ requires-dist = [
     { name = "daytona", specifier = ">=0.180" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "islo", specifier = ">=0.3.8" },
     { name = "jsonschema", specifier = ">=4.21" },
     { name = "networkx", specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.6" },
