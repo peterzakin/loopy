@@ -190,11 +190,6 @@ it matters. The event on the bus drives a workflow that has no idea where it cam
 | [Uptime](https://loopy.computer/example-uptime.html) | A poll sensor checks a health endpoint and emits an `Incident` only when it is down. A second workflow reacts by opening a GitHub issue. |
 | [Customer feedback product loop](https://loopy.computer/example-customer-feedback-loop.html) | A webhook sensor turns each new Zendesk ticket into a `CustomerTicket`. A workflow decides whether it warrants work and opens a pull request when it does. |
 
-[`examples/`](examples/) in this repo is the runnable cookbook: each subdirectory is a
-self-contained project with its own README, grouped in
-[`examples/README.md`](examples/README.md). Start with [`codefix/`](examples/codefix/), the
-smallest runnable loop and the "run locally" quickstart.
-
 ## Documentation
 
 The full reference ships inside the CLI, version-matched to your install and readable
