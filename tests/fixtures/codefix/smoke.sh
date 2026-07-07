@@ -4,7 +4,7 @@
 # (which needs no creds); this one drives a *real* agent against a *real* repo.
 #
 # Usage:
-#   TARGET_REPO=you/sandbox-repo ./examples/codefix/smoke.sh
+#   TARGET_REPO=you/sandbox-repo ./tests/fixtures/codefix/smoke.sh
 #
 # Requires:
 #   - loopy on PATH (or run via `uv run`)

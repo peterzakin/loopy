@@ -1,7 +1,7 @@
 # Sentry (built-in integration)
 
 **Loop it serves:** error → triage → fix (the canonical `Incident` loop). Sentry is already
-the hand-written example sensor in `examples/incidents/sensors/sensors.py`; this promotes it
+the hand-written example sensor in `tests/fixtures/incidents/sensors/sensors.py`; this promotes it
 into the built-in catalog so a project triggers on `on: Sentry.IssueCreated` with no
 `sensors/` code and no `registry.yml` event.
 
@@ -273,7 +273,7 @@ API call, a future `loopy auth sentry` could script it end-to-end. See
   section: the two events, a sample payload, the Custom Integration setup (UI + the API-token
   path), and `SENTRY_WEBHOOK_SECRET`. Add Sentry to the integrations catalog and the landing
   hero service list.
-- Update `examples/incidents`: either point the hand-written Sentry sensor at the built-in, or
+- Update `tests/fixtures/incidents`: either point the hand-written Sentry sensor at the built-in, or
   keep it annotated as "here's what the built-in replaces" teaching code.
 - Follow the loopy-landing `STYLE_GUIDE.md` for any copy (no emdashes, no traffic-light window
   chrome, no marketing-speak).

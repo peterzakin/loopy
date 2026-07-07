@@ -28,7 +28,7 @@ codefix/
 ## Run it locally
 
 > Running from a checkout of this repo, `loopy` isn't on your PATH — prefix each command
-> below with `uv run` (e.g. `uv run loopy compile examples/codefix`).
+> below with `uv run` (e.g. `uv run loopy compile tests/fixtures/codefix`).
 
 ### 0. Pick the target repo
 
@@ -40,7 +40,7 @@ and the *task* rides the event.
 ### 1. Compile
 
 ```bash
-loopy compile examples/codefix    # writes manifest.json
+loopy compile tests/fixtures/codefix    # writes manifest.json
 ```
 
 A green compile is the gate: every `on:`/`emits:` names a registered event and every `{{ }}`
@@ -56,8 +56,8 @@ auto-injected unless you configure a GitHub App (below), and the bare `local` sa
 Copy the template to the gitignored path the registry references:
 
 ```bash
-mkdir -p examples/codefix/secrets
-cp examples/codefix/base.env.example examples/codefix/secrets/base.env
+mkdir -p tests/fixtures/codefix/secrets
+cp tests/fixtures/codefix/base.env.example tests/fixtures/codefix/secrets/base.env
 # then edit secrets/base.env
 ```
 
@@ -103,7 +103,7 @@ fully offline test.
 loopy trigger manifest.json \
   --event CodeTask \
   --fields '{"task": "add a CONTRIBUTING.md with a one-line build command", "branch": "codefix/contributing"}' \
-  --root examples/codefix
+  --root tests/fixtures/codefix
 ```
 
 The sandbox runs on whatever `registry.yml`'s `provider:` names (here, `daytona`).
@@ -124,7 +124,7 @@ assert a PR/branch appears). It's the live counterpart to the offline CI test an
 creds:
 
 ```bash
-TARGET_REPO=you/sandbox-repo ./examples/codefix/smoke.sh
+TARGET_REPO=you/sandbox-repo ./tests/fixtures/codefix/smoke.sh
 ```
 
 The **always-on, no-creds** smoke test is `tests/conformance/test_codefix.py`: it compiles

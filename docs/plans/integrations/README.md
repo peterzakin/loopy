@@ -6,7 +6,7 @@ the event contract and a producing sensor with zero `registry.yml` and zero `sen
 
 Sentry is the natural next integration: it drives the canonical `Incident` loop (error →
 triage → fix) and is already the hand-written example sensor in
-`examples/incidents/sensors/sensors.py`, so this promotes existing example code into the
+`tests/fixtures/incidents/sensors/sensors.py`, so this promotes existing example code into the
 platform.
 
 **The plan:** [sentry.md](sentry.md). It is self-contained — it includes the minimal

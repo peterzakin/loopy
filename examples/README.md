@@ -10,12 +10,6 @@ The examples are grouped by what you're trying to learn. The loops showcased at
 those pages is a step-by-step walkthrough of its matching directory (`dep-upkeep/`,
 `github/`, `issue-triage/`, `changelog/`, `uptime/`, `customer-feedback-loop/`).
 
-## Start here — run something
-
-| Example | What it shows |
-|---|---|
-| [`codefix/`](codefix/) | The smallest *runnable* loop: one `CodeTask` event → an agent edits a checkout and opens a PR. Its README is the canonical **"run locally"** quickstart (sandbox providers, git auth, the dashboard). Start here to actually run something. |
-
 ## Scheduled loops — time-driven, zero sensor code
 
 | Example | What it shows |
@@ -34,15 +28,8 @@ those pages is a step-by-step walkthrough of its matching directory (`dep-upkeep
 
 | Example | What it shows |
 |---|---|
-| [`incidents/`](incidents/) | The **multi-workflow** loop from the top-level README: triage → resolve → confirm, plus a nightly `upkeep` cron scan — four workflows wired by events only at the real seams. |
 | [`uptime/`](uptime/) | The smallest look at the **sensor layer**: a poll sensor checks a health endpoint and emits an `Incident` only when it is down (returning `None` emits nothing); a second workflow reacts by opening a GitHub issue. |
 | [`customer-feedback-loop/`](customer-feedback-loop/) | The **webhook sensor** loop: each new Zendesk ticket becomes a typed `CustomerTicket`, and one agent decides whether it points at real work — opening a PR that links back to the ticket when it does, and doing nothing when it doesn't. |
-
-## Patterns from the Anthropic cookbook
-
-| Example | What it shows |
-|---|---|
-| [`effective-agents/`](effective-agents/) | Anthropic's [**Building Effective Agents**](https://github.com/anthropics/anthropic-cookbook/tree/main/patterns/agents) patterns — prompt chaining, routing, parallelization, orchestrator-workers, evaluator-optimizer — each re-authored as a Loopy workflow. A good map of how the cookbook's Python control flow (`if`/`while`/`for`) becomes static DAG edges, typed outputs, and loop-back events. |
 
 ## Conventions every example follows
 
@@ -56,4 +43,4 @@ those pages is a step-by-step walkthrough of its matching directory (`dep-upkeep
   fails if any `on:`/`emits:` names an unregistered event or any `{{ }}` ref doesn't resolve.
 
 New to Loopy? Read the top-level [`README.md`](../README.md) for the authoring model first,
-then `codefix/` to run one end-to-end.
+then compile [`dep-upkeep/`](dep-upkeep/) and follow the DAG it prints.

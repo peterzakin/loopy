@@ -12,9 +12,9 @@ the same ground with more prose.
 | `loopy_core/` | the compiler: project loading, DAG build, diagnostics (`compile/codes.py` is the stable error catalog), `manifest.schema.json` |
 | `loopy_runtime/` | the engine: bus, sensors, sandbox providers (local/docker/daytona), harnesses (claude-code/codex/opencode), run state |
 | `loopy_cli/` | the `loopy` binary (Typer). `scaffold.py` = `loopy init` templates; `docs_md/` = `loopy docs` content; `deploy/` = the docker stack |
-| `examples/` | the cookbook — each subdirectory is a self-contained project; `examples/codefix/` is the canonical run-locally quickstart |
-| `tests/` | pytest; `tests/conformance/` compiles + runs examples on the offline stub harness (no creds, no network) |
-| `manifest.json` (root) | a **committed compiled artifact** of `examples/incidents/` — build output kept as a sample, not source; don't hand-edit it |
+| `examples/` | the cookbook — each subdirectory is a self-contained project, one per loop showcased at [loopy.computer/examples](https://loopy.computer/examples.html) |
+| `tests/` | pytest; `tests/conformance/` compiles + runs projects on the offline stub harness (no creds, no network); `tests/fixtures/` holds the projects those tests compile (`codefix`, `incidents`) |
+| `manifest.json` (root) | a **committed compiled artifact** of `tests/fixtures/incidents/` — build output kept as a sample, not source; don't hand-edit it |
 
 ## Dev loop
 

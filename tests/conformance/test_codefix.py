@@ -5,7 +5,7 @@ This is the always-on, no-creds half of #14's "one-command CI smoke test" — it
 same `compile` + `trigger` path a real local run uses (catching the #5–#8 class of breakage
 mechanically), but on the offline StubAgentHarness so it needs no model key, no GitHub token,
 and no network. The live one-command variant (a real edit against a throwaway repo) is
-`examples/codefix/smoke.sh`, documented in the example README.
+`tests/fixtures/codefix/smoke.sh`, documented in the fixture README.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from loopy_runtime.sandbox.local import LocalSandboxProvider
 from loopy_runtime.secrets import StaticSecretsResolver
 from tests.stub_harness import StubAgentHarness
 
-EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "codefix"
+EXAMPLE = Path(__file__).resolve().parents[1] / "fixtures" / "codefix"
 
 
 def _manifest(tmp_path: Path):
