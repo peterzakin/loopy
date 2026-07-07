@@ -44,12 +44,6 @@ those pages is a step-by-step walkthrough of its matching directory (`dep-upkeep
 |---|---|
 | [`effective-agents/`](effective-agents/) | Anthropic's [**Building Effective Agents**](https://github.com/anthropics/anthropic-cookbook/tree/main/patterns/agents) patterns — prompt chaining, routing, parallelization, orchestrator-workers, evaluator-optimizer — each re-authored as a Loopy workflow. A good map of how the cookbook's Python control flow (`if`/`while`/`for`) becomes static DAG edges, typed outputs, and loop-back events. |
 
-## Research loops
-
-| Example | What it shows |
-|---|---|
-| [`auto-research/`](auto-research/) | A self-driving research loop in the spirit of Karpathy's "automated research": poll papers → digest → hypothesize → run a small experiment → write up → reflect and loop. Shows a bounded self-perpetuating loop (depth guard + budgets) built only from existing primitives. |
-
 ## Conventions every example follows
 
 - **One directory, one project.** A subdirectory is everything `loopy compile <dir>` needs.
