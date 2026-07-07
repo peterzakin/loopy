@@ -130,14 +130,12 @@ A project lays out like this:
 
 ```
 my-project/
-  registry.yml        # reused, Capitalized entities: Agents · Sandboxes · Events
-  workflows/          # each subdirectory is one single-entry workflow
-    triage/    investigate.md                          # on: Incident → WorkItem
-    resolve/   arbitrate.md · fix.md · review.md · ship.md
-  skills/             # reusable agent skills, referenced by name from registry.yml
-    triage/    SKILL.md
-  sensors/            # the event-publish layer: code that emits registered events
-    sensors.py
+  registry.yml              # reused, Capitalized entities: Agents · Sandboxes · Events
+  workflows/                # each subdirectory is one single-entry workflow
+    customer-feedback/  entry.md        # on: CustomerTicket, opens a PR when warranted
+    review/             code-review.md  # on: Github.PullRequestOpened
+  sensors/                  # the event-publish layer: code that emits registered events
+    sensors.py              # the Zendesk webhook that shapes tickets into CustomerTicket
 ```
 
 **Outputs vs. events.** Within a workflow, data flows by reference along `after:` chains
