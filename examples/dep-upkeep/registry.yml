@@ -1,0 +1,33 @@
+# dep-upkeep — a scheduled maintenance loop in the spirit of Dependabot. Every night at
+# 3am the built-in cron trigger fires `workflows/dep-upkeep/bump.md`, and one agent finds
+# outdated or vulnerable dependencies and opens a single PR that bumps them.
+#
+# There is no sensor to write: `on: cron("0 3 * * *")` is built in, and each tick carries
+# `scheduled_at` / `last_run`, so the step can act only on what changed since the last run
+# (and name a unique branch per run).
+
+# Defaults — every agent inherits these; override a field only when needed.
+defaults:
+  agent:
+    sandbox: BaseSandbox
+    model: claude-sonnet-4-6
+    harness: claude-code
+
+# Sandbox — compute + egress. `gh` is on PATH so the agent can open the bump PR with the
+# injected GitHub token.
+sandboxes:
+  BaseSandbox:
+    provider: daytona
+    image: { debian_slim: "3.12", apt: [git, gh], workdir: /home/loopy, user: loopy }
+    env_file: secrets/base.env          # gitignored; resolved by the backend at run time
+    repos: [octocat/Hello-World]       # cloned into the workspace at acquire time (auth injected)
+
+# Agents — capability comes from the sandbox + the injected GitHub token + budget.
+agents:
+  Upkeeper: {}   # finds outdated deps and opens the bump PR
+
+# Events — outbound only; the `cron(...)` trigger is built in, so nothing inbound to declare.
+events:
+  DepsBumped:
+    pr_url: url
+    packages: int

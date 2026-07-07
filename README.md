@@ -101,10 +101,10 @@ The reusable entities (Agents, Sandboxes, and Events) are defined once in
 
 ```yaml
 defaults:
-  agent: { sandbox: default, model: claude-sonnet-4-6, harness: claude-code }
+  agent: { sandbox: BaseSandbox, model: claude-sonnet-4-6, harness: claude-code }
 
 sandboxes:
-  default:
+  BaseSandbox:
     provider: daytona
     image: { debian_slim: "3.12", apt: [git], workdir: /home/loopy, user: loopy }
     env_file: secrets/base.env       # gitignored; injected as the sandbox's env
@@ -160,15 +160,40 @@ sees the payload.
 
 ## Examples
 
-[`examples/`](examples/) is the cookbook. Each subdirectory is a self-contained project with
-its own README, grouped in [`examples/README.md`](examples/README.md):
+Real workflows, wired together by events, authored as files in a repo, not clicked together
+on a canvas. Each one has a step-by-step walkthrough at
+[loopy.computer/examples](https://loopy.computer/examples.html):
+
+**Scheduled loops.** Time-driven workflows. The entry step names a built-in `cron(...)`
+schedule, so there is no sensor to write. Each tick carries `last_run`, so the agent acts
+only on what changed since then.
 
 | Example | What it shows |
 |---|---|
-| [`codefix/`](examples/codefix/) | The smallest runnable loop: one event, one agent that edits a checkout and opens a PR. Its README is the "run locally" quickstart. Start here. |
-| [`incidents/`](examples/incidents/) | The canonical multi-workflow loop: triage → resolve → confirm, plus a nightly cron scan, wired by events at the workflow boundaries. |
-| [`github/`](examples/github/) | The canonical **webhook** loop: one `/hooks/github` URL fans out to sensors for PR review and follow-on work. |
-| [`effective-agents/`](examples/effective-agents/) | Anthropic's *Building Effective Agents* patterns (prompt chaining, routing, parallelization, orchestrator-workers, evaluator-optimizer), each as a Loopy workflow. |
+| [Dependency upkeep](https://loopy.computer/example-dep-upkeep.html) | Every night, an agent finds outdated or vulnerable dependencies and opens a single pull request that bumps them. |
+
+**GitHub built-ins.** Workflows that trigger on built-in `Github.*` events. No sensor code
+and no event declaration: the step names the event in `on:`, and the compiler wires the
+webhook.
+
+| Example | What it shows |
+|---|---|
+| [Code review](https://loopy.computer/example-github-review.html) | A pull request opens. `Github.PullRequestOpened` fires, and an agent reviews the diff and posts inline comments on the PR. |
+| [Issue triage](https://loopy.computer/example-issue-triage.html) | An issue opens. `Github.IssueOpened` fires, and an agent classifies it into a typed area and severity, then posts a triage comment. |
+| [Changelog](https://loopy.computer/example-changelog.html) | A pull request merges. `Github.PullRequestMerged` fires, and an agent drafts the changelog entry it implies and opens a PR adding it. |
+
+**Event-driven loops.** A sensor turns an outside signal into a typed event, and only when
+it matters. The event on the bus drives a workflow that has no idea where it came from.
+
+| Example | What it shows |
+|---|---|
+| [Uptime](https://loopy.computer/example-uptime.html) | A poll sensor checks a health endpoint and emits an `Incident` only when it is down. A second workflow reacts by opening a GitHub issue. |
+| [Customer feedback product loop](https://loopy.computer/example-customer-feedback-loop.html) | A webhook sensor turns each new Zendesk ticket into a `CustomerTicket`. A workflow decides whether it warrants work and opens a pull request when it does. |
+
+[`examples/`](examples/) in this repo is the runnable cookbook: each subdirectory is a
+self-contained project with its own README, grouped in
+[`examples/README.md`](examples/README.md). Start with [`codefix/`](examples/codefix/), the
+smallest runnable loop and the "run locally" quickstart.
 
 ## Documentation
 

@@ -1,0 +1,39 @@
+# customer-feedback-loop — from a Zendesk ticket to a pull request. A webhook sensor
+# shapes each new ticket into a typed `CustomerTicket`, and one agent decides whether the
+# ticket points at real work in the codebase. When it does, the agent opens a pull
+# request that links back to the ticket; when it is a question or nothing actionable, it
+# does nothing. Most tickets are not code changes, so the workflow's first job is to tell
+# the two apart.
+#
+# `CustomerTicket` is emitted by the sensor (sensors/sensors.py) and consumed by the
+# workflow (workflows/customer-feedback/), so it is declared here because it crosses the
+# bus. The workflow is terminal: it opens a PR and returns its result, so it emits nothing.
+
+# Defaults — every agent inherits these; override a field only when needed.
+defaults:
+  agent:
+    sandbox: BaseSandbox
+    model: claude-sonnet-4-6
+    harness: claude-code
+
+# Sandbox — compute + egress. `gh` is on PATH so the agent can open the PR with the
+# injected GitHub token.
+sandboxes:
+  BaseSandbox:
+    provider: daytona
+    image: { debian_slim: "3.12", apt: [git, gh], workdir: /home/loopy, user: loopy }
+    env_file: secrets/base.env          # gitignored; resolved by the backend at run time
+    repos: [octocat/Hello-World]       # cloned into the workspace at acquire time (auth injected)
+
+# Agents — capability comes from the sandbox + the injected GitHub token + budget.
+agents:
+  SupportEngineer: {}   # judges the ticket, opens a PR when it warrants work
+
+# Events — the bus contract. A step's `on:` may only name an event registered here.
+events:
+  # inbound, from the Zendesk webhook sensor
+  CustomerTicket:
+    ticket_id: str
+    subject: str
+    body: str
+    link: url

@@ -1,0 +1,34 @@
+# changelog — keep a CHANGELOG in sync with what ships. When a pull request is merged,
+# one agent drafts the changelog entry it implies and opens a small PR that adds it, so
+# the changelog never falls behind the code.
+#
+# The trigger is the BUILT-IN `Github.PullRequestMerged` event: the step names it in
+# `on:` (see workflows/), and the compiler registers the contract and synthesizes the
+# `/hooks/github` sensor — no `events:` entry and no `sensors/` module for the inbound
+# side. See ../github/README.md for the shared GitHub App and webhook setup.
+
+# Defaults — every agent inherits these; override a field only when needed.
+defaults:
+  agent:
+    sandbox: BaseSandbox
+    model: claude-sonnet-4-6
+    harness: claude-code
+
+# Sandbox — compute + egress. `gh` is on PATH so the agent can open the changelog PR
+# with the injected GitHub token.
+sandboxes:
+  BaseSandbox:
+    provider: daytona
+    image: { debian_slim: "3.12", apt: [git, gh], workdir: /home/loopy, user: loopy }
+    env_file: secrets/base.env          # gitignored; resolved by the backend at run time
+    repos: [octocat/Hello-World]       # cloned into the workspace at acquire time (auth injected)
+
+# Agents — capability comes from the sandbox + the injected GitHub token + budget.
+agents:
+  Scribe: {}   # drafts the changelog entry and opens the PR
+
+# Events — outbound only; Github.PullRequestMerged is built in.
+events:
+  ChangelogUpdated:
+    pr_url: url
+    entry: str

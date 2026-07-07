@@ -22,6 +22,11 @@ SECRET_PATHS = [
     "loopy.env",
     "examples/codefix/secrets/base.env",
     "examples/incidents/secrets/base.env",
+    "examples/changelog/secrets/base.env",
+    "examples/customer-feedback-loop/secrets/base.env",
+    "examples/dep-upkeep/secrets/base.env",
+    "examples/issue-triage/secrets/base.env",
+    "examples/uptime/secrets/base.env",
     "sensors/.env",
     ".loopy/key.pem",
 ]
