@@ -211,24 +211,6 @@ The verify loop is exit-code-clean (`loopy compile --check` → `loopy doctor` �
 The only two commands that need a human are `loopy init` (interactive wizard) and
 `loopy auth github` (browser flow).
 
-## Deployment
-
-The serve contract is deliberately provider-agnostic (a process env var, `$PORT`, TLS at the
-platform ingress, and durable run state behind the `StateStore` protocol), so nothing in Loopy
-branches on the hosting provider. One public URL is path-routed: webhook deliveries at
-`$LOOPY_PUBLIC_URL/hooks/*`, the bearer-token-gated dashboard at `$LOOPY_PUBLIC_URL/admin`,
-and an open `GET /healthz` for platform probes.
-
-| Concern | Loopy depends on | Render | Fly / Railway | k8s | Bare VM |
-|---|---|---|---|---|---|
-| Secret | `LOOPY_ADMIN_TOKEN` from env | dashboard env var | `fly secrets` / env | Secret → env | env / `loopy.env` |
-| TLS | terminated by the ingress | auto | auto | Ingress + cert-manager | nginx/caddy |
-| Port | `$PORT` (fallback `--port`) | injected | injected | containerPort | flag/env |
-| Persistence | `StateStore` (SQLite file) | persistent disk | volume | PVC | disk |
-
-`loopy docs deployment` prints the full contract; the design, guardrails, and OIDC upgrade
-path live in [`docs/design/admin-auth.md`](docs/design/admin-auth.md).
-
 ## License
 
 Loopy is open source under the [Apache License 2.0](LICENSE). You're free to use, modify, and
