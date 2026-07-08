@@ -195,6 +195,7 @@
           ],
           "trigger": {
             "event": "MetricThreshold",
+            "filters": {},
             "kind": "event"
           }
         }
@@ -229,6 +230,7 @@
           ],
           "trigger": {
             "event": "WorkItem",
+            "filters": {},
             "kind": "event"
           }
         },
@@ -346,6 +348,7 @@
           ],
           "trigger": {
             "event": "Incident",
+            "filters": {},
             "kind": "event"
           }
         }

@@ -160,7 +160,9 @@ def zendesk_tickets(req) -> CustomerTicket:
 
 Common GitHub and Sentry events are built in: a workflow can trigger on
 `on: Github.PullRequestOpened` or `on: Sentry.IssueCreated` with no registry entry and no
-sensor at all, and `loopy webhooks github` registers GitHub's side for you. Webhook signatures
+sensor at all, and `loopy webhooks github` registers GitHub's side for you. A bare trigger
+fires for every registered repo; scope it with a filter —
+`on: Github.PullRequestOpened(repo="octocat/Hello-World")`. Webhook signatures
 (`X-Hub-Signature-256`, `Sentry-Hook-Signature`) are verified at the edge before any sensor
 sees the payload.
 

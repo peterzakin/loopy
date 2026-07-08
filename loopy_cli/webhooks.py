@@ -89,6 +89,30 @@ def resolve_public_url(root: Path) -> str | None:
     return url.rstrip("/") or None
 
 
+def github_registration_repos(project) -> list[str]:  # noqa: ANN001 - loopy_core Project
+    """Every repo this project's GitHub webhooks should be registered on.
+
+    The sandbox-declared repos (what the project clones) plus any repo a `Github.*`
+    trigger filter names (`on: Github.PullRequestOpened(repo="owner/name")`) — a filtered
+    trigger designates the repo it wants deliveries from, so registration must cover it
+    even when no sandbox clones it, or the event could never fire. Deduped lowercase
+    `owner/name`, declared repos first. Filter values that aren't `owner/name` slugs are
+    skipped (they can't be registered; exact matching means they'd never fire anyway).
+    """
+    slugs = _declared_repo_slugs(project.registry)
+    for workflow in project.workflows.values():
+        for step in workflow.steps.values():
+            trig = step.trigger
+            if trig is None or trig.kind != "event":
+                continue
+            if not (trig.event or "").startswith("Github."):
+                continue
+            repo = (trig.filters.get("repo") or "").strip().lower()
+            if repo.count("/") == 1 and all(repo.partition("/")) and repo not in slugs:
+                slugs.append(repo)
+    return slugs
+
+
 def github_hook_events(sensors) -> list[str]:  # noqa: ANN001 - list[loopy_core Sensor]
     """The GitHub webhook event names this project's `/hooks/github` sensors need.
 
@@ -321,11 +345,12 @@ def github(
     from loopy_runtime.scm.github_app import MissingCredentials
 
     project = _compile_or_exit(root)
-    repos = _declared_repo_slugs(project.registry)
+    repos = github_registration_repos(project)
     if not repos:
         typer.echo(
-            "error: no repos declared in registry.yml (sandboxes.*.repos) — GitHub webhooks "
-            "are registered per repo, so there's nothing to register on.",
+            "error: no repos declared in registry.yml (sandboxes.*.repos) and no "
+            "`on: Github.*(repo=...)` trigger filters — GitHub webhooks are registered "
+            "per repo, so there's nothing to register on.",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -456,7 +481,7 @@ def registration_findings(project, root: Path, *, control_env) -> list[Finding]:
             )
         ]
 
-    repos = _declared_repo_slugs(project.registry)
+    repos = github_registration_repos(project)
     if not repos:
         return []
     try:
@@ -541,7 +566,7 @@ def deploy_webhook_lines(root: Path, public_url: str) -> list[str] | None:
         "Until then GitHub-triggered workflows stay idle; cron and poll sensors run.",
     ]
 
-    repos = _declared_repo_slugs(project.registry)
+    repos = github_registration_repos(project)
     if not repos:
         return nudge
     try:

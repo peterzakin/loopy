@@ -95,6 +95,54 @@ def test_builtin_field_ref_is_validated(tmp_path):
     assert_code(compile_project(tmp_path), codes.E302)
 
 
+def test_builtin_trigger_repo_filter_compiles_and_validates(tmp_path):
+    """`on: Github.PullRequestOpened(repo="...")` scopes the workflow to one repo; the
+    filter field is validated against the injected built-in contract like any other."""
+    write_project(
+        tmp_path,
+        {
+            "registry.yml": REGISTRY,
+            "workflows/review/r.md": md(
+                'on: Github.PullRequestOpened(repo="octocat/Hello-World")\nagent: Reviewer'
+            ),
+        },
+    )
+    result = compile_project(tmp_path)
+    assert not result.diagnostics.has_errors(), result_codes(result)
+    step = result.project.workflows["review"].steps["r"]
+    assert step.trigger.event == "Github.PullRequestOpened"
+    assert step.trigger.filters == {"repo": "octocat/Hello-World"}
+    # The contract + sensor injection keys off the bare event name, filters or not.
+    assert "Github.PullRequestOpened" in result.project.registry.events
+    assert any(s.emits == "Github.PullRequestOpened" for s in result.project.sensors)
+
+
+def test_builtin_trigger_filter_on_unknown_field_reports_e114(tmp_path):
+    write_project(
+        tmp_path,
+        {
+            "registry.yml": REGISTRY,
+            "workflows/review/r.md": md(
+                'on: Github.PullRequestOpened(repository="octocat/Hello-World")\nagent: Reviewer'
+            ),
+        },
+    )
+    assert_code(compile_project(tmp_path), codes.E114)
+
+
+def test_builtin_trigger_filter_on_int_field_reports_e114(tmp_path):
+    write_project(
+        tmp_path,
+        {
+            "registry.yml": REGISTRY,
+            "workflows/review/r.md": md(
+                'on: Github.PullRequestOpened(number="7")\nagent: Reviewer'
+            ),
+        },
+    )
+    assert_code(compile_project(tmp_path), codes.E114)
+
+
 def test_unknown_builtin_reports_e112(tmp_path):
     write_project(
         tmp_path,

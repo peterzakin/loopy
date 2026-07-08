@@ -95,7 +95,7 @@ def _trigger(trigger: Trigger | None) -> dict | None:
         return None
     if trigger.kind == "cron":
         return {"kind": "cron", "expr": trigger.expr, "tz": trigger.tz}
-    return {"kind": "event", "event": trigger.event}
+    return {"kind": "event", "event": trigger.event, "filters": dict(trigger.filters)}
 
 
 def _budget(budget: Budget | None) -> dict | None:

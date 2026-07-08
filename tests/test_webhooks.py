@@ -256,6 +256,29 @@ def _github_project(tmp_path, *, repos=("me/app",)):
     return target, result.project
 
 
+def test_registration_repos_include_trigger_filter_repos(tmp_path):
+    """A `Github.*(repo=...)` trigger filter designates the repo it wants deliveries from,
+    so registration covers it even when no sandbox clones it. Non-slug values are skipped,
+    and slugs dedupe (lowercase) against the sandbox-declared repos."""
+    target, _ = _github_project(tmp_path)
+    step = target / "workflows" / "scoped" / "on-pr.md"
+    step.parent.mkdir(parents=True)
+    step.write_text(
+        '---\non: Github.PullRequestOpened(repo="Octocat/Hello-World")\nagent: Claude\n---\n'
+        "Review PR #{{ event.number }}.\n"
+    )
+    dupe = target / "workflows" / "dupe" / "on-push.md"
+    dupe.parent.mkdir(parents=True)
+    dupe.write_text(
+        '---\non: Github.Push(ref="refs/heads/main", repo="me/app")\nagent: Claude\n---\nHi.\n'
+    )
+    result = compile_project(target)
+    assert result.diagnostics.items == [], [d.render() for d in result.diagnostics.items]
+
+    repos = webhooks.github_registration_repos(result.project)
+    assert repos == ["me/app", "octocat/hello-world"]
+
+
 def test_cli_github_registers(tmp_path, monkeypatch):
     target, _ = _github_project(tmp_path)
     _write_app_creds(target)

@@ -49,6 +49,16 @@ quotes keep commas in the expression (`cron("1,15 * * * *")`) from colliding wit
 its event, with `{{ event.scheduled_at }}` and `{{ event.last_run }}` so it can scan only
 what changed since it last ran.
 
+**Trigger filters.** An event trigger may scope itself to specific field values:
+`on: Github.PullRequestOpened(repo="octocat/Hello-World")`. Each filter is a
+`field="quoted value"` pair; several are comma-separated and **all** must match
+(`on: Github.Push(repo="octocat/Hello-World", ref="refs/heads/main")`). Values compare
+**exactly** against the published event's field, and every filter field must be a
+string-typed field of the event's contract (`LOOPY-E114`; malformed syntax is
+`LOOPY-E113`). Filters work on any registered event, built-in or your own. A bare
+`on: Event` stays unfiltered: every published instance triggers — for `Github.*` that
+means every delivery from every repo whose webhook points at this project.
+
 ## Layout
 
 ```
@@ -196,6 +206,10 @@ trigger on a platform-shipped event directly (`on: Github.PullRequestOpened`) wi
 `registry.yml` entry and no `sensors/` file; the compiler injects the contract and a
 `/hooks/github` sensor for you. Catalog: `Github.PullRequestOpened`, `PullRequestMerged`,
 `IssueOpened`, `IssueCommentCreated`, `Push`. The `Github.` namespace is reserved.
+A bare `Github.*` trigger fires for **every registered repo's** deliveries; to scope a
+workflow to one repo, filter the trigger:
+`on: Github.PullRequestOpened(repo="octocat/Hello-World")` (`repo` compares against the
+event's `owner/name` field).
 
 A sensor **returns a registered event**, and returning *is* emitting: the event goes on
 the bus and routes to whichever workflow subscribes with `on:`. Return `None` to emit
@@ -240,6 +254,9 @@ webhooks for you — it creates (or converges, idempotently) a webhook on each r
 `registry.yml` pointing at `<LOOPY_PUBLIC_URL>/hooks/github`, subscribed to the events
 your sensors need, authenticated as the App from `loopy auth github` (auth offers this
 step itself when the URL is already set; `--check` reports without changing anything).
+Registration covers the sandbox-declared repos plus any repo named by a
+`Github.*(repo="owner/name")` trigger filter, so a filtered trigger's repo gets a
+webhook even when no sandbox clones it.
 It also generates and lands `GITHUB_WEBHOOK_SECRET` in `loopy.env`, and when that secret
 is set, `loopy run` verifies GitHub's `X-Hub-Signature-256` HMAC at the edge before any
 sensor sees the payload. Without registration (or the manual equivalent), built-in

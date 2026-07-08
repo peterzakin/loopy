@@ -323,7 +323,13 @@ def test_build_workflows_dag_layers_edges_and_lineage():
     wfs = asyncio.run(build_workflows(_manifest(), InMemoryStateStore()))
     resolve = next(w for w in wfs["workflows"] if w["name"] == "resolve")
     assert resolve["entry"] == "arbitrate"
-    assert resolve["trigger"] == {"kind": "event", "event": "WorkItem", "expr": None, "tz": None}
+    assert resolve["trigger"] == {
+        "kind": "event",
+        "event": "WorkItem",
+        "filters": {},
+        "expr": None,
+        "tz": None,
+    }
     # arbitrate has no deps (layer 0); fix depends on it (layer 1)
     assert resolve["generations"] == [["arbitrate"], ["fix"]]
     assert resolve["edges"] == [["arbitrate", "fix"]]
