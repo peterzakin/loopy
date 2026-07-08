@@ -1,0 +1,50 @@
+# resolve — the multi-step `after:` chain the other examples don't show.
+#
+# Every other example in this cookbook is a single step. This one is a workflow with FOUR
+# steps wired in a row. The entry step triggers `on:` an event; each later step names an
+# `after:` predecessor and reads that step's typed outputs by reference. Data flows DOWN the
+# chain as outputs ({{ arbitrate.goal }}) — it never touches the event bus.
+#
+#   WorkItem ─▶ arbitrate ─▶ fix ─▶ review ─┐
+#                             └──────────────┴─▶ ship
+#               (goal)      (pr_url,   (verdict)   (outcome)
+#                            summary)
+#
+# `ship` names two predecessors — `after: [fix, review]` — because it needs the PR from `fix`
+# and the verdict from `review`. That's the list form of `after:`; every other step uses the
+# single form.
+#
+# WorkItem is a plain registered event with no sensor in this project, so you fire it by hand
+# with `loopy trigger` (see README). In a real system a triage workflow or a sensor would
+# `emits: WorkItem` and this chain would run on its own.
+
+# Defaults — every agent inherits these; override a field only when needed.
+defaults:
+  agent:
+    sandbox: BaseSandbox
+    model: claude-sonnet-4-6
+    harness: claude-code
+
+# Sandbox — compute + egress. `gh` is on PATH so the fixer can open a PR and the shipper can
+# merge it with the injected GitHub token. Egress is open by default.
+sandboxes:
+  BaseSandbox:
+    provider: daytona
+    image: { debian_slim: "3.12", apt: [git, gh], workdir: /home/loopy, user: loopy }
+    env_file: secrets/base.env          # gitignored; resolved by the backend at run time
+    repos: [octocat/Hello-World]       # cloned into the workspace at acquire time (auth injected)
+
+# Agents — one role per step, each inheriting the defaults above. The point of the example is
+# that a step names its agent and its `after:` link, so the roles stay thin.
+agents:
+  Arbiter: {}    # turns a work item into one concrete goal
+  Fixer: {}      # implements the goal and opens a PR
+  Reviewer: {}   # reads the PR and returns a pass/fail verdict
+  Shipper: {}    # merges on pass, holds on fail
+
+# Events — the one INBOUND trigger. Nothing here is emitted back onto the bus: the entire
+# handoff between steps is outputs down the `after:` chain, which is the whole point.
+events:
+  WorkItem:
+    link: url
+    description: str

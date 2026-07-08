@@ -10,6 +10,12 @@ The examples are grouped by what you're trying to learn. The loops showcased at
 those pages is a step-by-step walkthrough of its matching directory (`dep-upkeep/`,
 `github/`, `issue-triage/`, `changelog/`, `uptime/`, `customer-feedback-loop/`).
 
+## Multi-step workflows — passing outputs down an `after:` chain
+
+| Example | What it shows |
+|---|---|
+| [`resolve/`](resolve/) | The **multi-step `after:` chain** — every other example here is a single step. One `WorkItem` runs through four: arbitrate → fix → review → ship, each naming its `after:` predecessor and reading its typed outputs by reference (`{{ fix.pr_url }}`). Shows both forms of `after:` (a single step, and the `after: [fix, review]` list form for fan-in) and the rule that a step reads only its **direct** predecessors' outputs. |
+
 ## Scheduled loops — time-driven, zero sensor code
 
 | Example | What it shows |
