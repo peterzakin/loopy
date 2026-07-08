@@ -133,15 +133,16 @@ my-project/
   registry.yml              # reused, Capitalized entities: Agents · Sandboxes · Events
   workflows/                # each subdirectory is one single-entry workflow
     customer-feedback/  entry.md        # on: CustomerTicket, opens a PR when warranted
-    review/             code-review.md  # on: Github.PullRequestOpened
   sensors/                  # the event-publish layer: code that emits registered events
     sensors.py              # the Zendesk webhook that shapes tickets into CustomerTicket
 ```
 
-**Outputs vs. events.** Within a workflow, data flows by reference along `after:` chains
-(`{{ fix.diff }}`); those are **outputs** and never touch the bus. Handoffs between workflows
-go through **events**: a step `emits:` a registered event, and another workflow subscribes with
-`on:`. The test: *does another workflow need this value?*
+**Outputs vs. events.** Within a workflow, data flows by reference along `after:` chains: a
+later step reads an earlier step's typed result as `{{ step.field }}`. Those are **outputs**,
+and they never touch the bus. **Events** are for crossing it: the Zendesk sensor puts a
+`CustomerTicket` on the bus and the workflow picks it up with `on:`, and a step can put one
+there too with `emits:`, for another workflow to consume. The test: *does another workflow
+need this value?*
 
 **Sensors** turn the outside world into registered events: a decorated function triggered by
 a `poll` interval or a `webhook` route, where returning is emitting:
@@ -161,7 +162,7 @@ def zendesk_tickets(req) -> CustomerTicket:
 Common GitHub and Sentry events are built in: a workflow can trigger on
 `on: Github.PullRequestOpened` or `on: Sentry.IssueCreated` with no registry entry and no
 sensor at all, and `loopy webhooks github` registers GitHub's side for you. A bare trigger
-fires for every registered repo; scope it with a filter —
+fires for every registered repo; scope it with a filter:
 `on: Github.PullRequestOpened(repo="octocat/Hello-World")`. Webhook signatures
 (`X-Hub-Signature-256`, `Sentry-Hook-Signature`) are verified at the edge before any sensor
 sees the payload.
@@ -197,6 +198,72 @@ it matters. The event on the bus drives a workflow that has no idea where it cam
 |---|---|
 | [Uptime](https://loopy.computer/example-uptime.html) | A poll sensor checks a health endpoint and emits an `Incident` only when it is down. A second workflow reacts by opening a GitHub issue. |
 | [Customer feedback product loop](https://loopy.computer/example-customer-feedback-loop.html) | A webhook sensor turns each new Zendesk ticket into a `CustomerTicket`. A workflow decides whether it warrants work and opens a pull request when it does. |
+
+## Deployment
+
+Run the engine yourself with Docker, deploy it from a git push to Render or Railway, or
+provision a starter stack on AWS. The agents run in Daytona either way, so you deploy only the
+small **engine**: `loopy run` is one long-lived process that loads the manifest, hosts your
+sensor webhooks, and drives runs as events arrive. Each step's agent runs in a Daytona sandbox
+you reach with an API key, so that compute is never yours to host. Full walkthroughs, with the
+env split for every credential, are in `loopy docs deployment`.
+
+**Run the stack yourself with Docker.** `loopy compile` turns the project into one
+`manifest.json`, and a green compile is the deploy gate, so run it in CI. Put the engine's infra
+credentials in `loopy.env` at the project root (`DAYTONA_API_KEY`, `LOOPY_PUBLIC_URL`, and the
+`GITHUB_WEBHOOK_SECRET` that `loopy webhooks github` writes), then `loopy run` brings up the
+stack: a `redis` container (the event bus) and the `loopy` container (sensor webhooks plus the
+runtime), with run history on a named volume so both survive a restart.
+
+```bash
+cd my-project
+loopy compile .          # writes manifest.json; a red compile is meant to fail the deploy
+loopy run --detach       # brings up redis + loopy; webhooks on :8000
+```
+
+**Deploy from a git push (Render, Railway, Fly).** Any platform that builds a container from a
+git push runs the engine the same way. `loopy dockerfile` writes a version-pinned `Dockerfile`
+and `.dockerignore` that run `loopy compile` during the build (so a red compile fails the
+deploy), and `loopy env` prints the control-plane environment to paste into the platform's
+settings. Add the platform's managed Redis and point `REDIS_URL` at it so the queue survives a
+restart, give the engine a persistent disk at your `--state-path` so run history survives a
+redeploy, and keep it at one instance (SQLite is a single writer). The sandbox model key never
+enters the image: it rides the sandbox `env_file`, which `.dockerignore` keeps out of the build,
+so provide it as the platform's secret file at the same project-relative path `registry.yml`
+names.
+
+**Provision a starter stack on AWS.** `loopy deploy bootstrap` stands up one CloudFormation
+stack in your account: a single EC2 instance running the same `redis` + `loopy` pair, behind a
+CloudFront distribution that terminates TLS on its own `*.cloudfront.net` name. GitHub and
+Sentry deliver webhooks over HTTPS with no domain to bring and no DNS to touch, and an EBS
+volume keeps run history across a reboot. loopy provisions the host for you, so there is no load
+balancer, managed Redis, or certificate to manage.
+
+```bash
+loopy deploy bootstrap --region us-east-1            # prints the https://<id>.cloudfront.net URL when it is live
+loopy deploy bootstrap --destroy --region us-east-1  # tears it down; snapshot the volume first to keep run history
+```
+
+Whichever path you pick, point your sources at the public URL last: `loopy webhooks github`
+registers the GitHub webhooks against `LOOPY_PUBLIC_URL` for you, and `loopy webhooks list`
+prints every other sensor's full delivery URL to paste into that service's settings.
+
+### Watch runs from your dev machine
+
+The dashboard is read-only, but run and step outputs carry diffs, links, and root-cause text,
+so a hosted control plane serves them only behind auth. The engine's one public URL is
+path-routed: webhooks arrive at `$LOOPY_PUBLIC_URL/hooks/*` and the dashboard mounts at
+`$LOOPY_PUBLIC_URL/admin`, so there is no second service to deploy. Copy the `LOOPY_ADMIN_TOKEN`
+that `loopy init` minted in `loopy.env` into the platform's environment, then run `loopy admin`
+locally: it serves the UI at `127.0.0.1:9000` and proxies data from `$LOOPY_PUBLIC_URL/admin`
+over HTTPS with the bearer token attached, so your browser never holds it.
+
+```bash
+loopy admin   # UI at 127.0.0.1:9000, data from $LOOPY_PUBLIC_URL/admin over HTTPS
+```
+
+On the bootstrap stack, CloudFront reaches the instance over plain HTTP, so `/admin` is refused
+at the edge; `loopy admin` reaches it over an SSM tunnel it prints for you instead.
 
 ## Documentation
 
