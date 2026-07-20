@@ -17,7 +17,8 @@ actually lands.
 > Scope note: earlier drafts of this branch also planned Slack, Linear, and Datadog. Those are
 > removed so this PR does one thing well. They can return as their own PRs later; the Sentry
 > work deliberately leaves seams (see [sentry.md](sentry.md) "Minimal generalization") that a
-> third provider would generalize further.
+> third provider would generalize further. A feasibility spike for Slack as the third provider
+> lives in [slack.md](slack.md).
 
 ## How a built-in works today (GitHub), for reference
 
