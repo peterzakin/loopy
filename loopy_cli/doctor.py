@@ -330,6 +330,23 @@ def diagnose(
             )
         )
 
+    # 4b. Tenki provider key — same story as Daytona: `provider: tenki` reads TENKI_API_KEY
+    #     from the process env (loopy.env), not the sandbox env_file, so a missing key would
+    #     otherwise slip through to the first acquire mid-run.
+    tenki_sandboxes = sorted(
+        name for name, sandbox in registry.sandboxes.items() if sandbox.provider == "tenki"
+    )
+    if tenki_sandboxes and not control_plane_env.get("TENKI_API_KEY"):
+        is_one = len(tenki_sandboxes) == 1
+        findings.append(
+            Finding(
+                "error",
+                f"sandbox '{', '.join(tenki_sandboxes)}' "
+                f"{'uses' if is_one else 'use'} provider: tenki but TENKI_API_KEY is not set",
+                "add TENKI_API_KEY to loopy.env (control-plane creds), or export it",
+            )
+        )
+
     # 5. Built-in webhook secret — a workflow triggering on a built-in provider's event
     #    (e.g. `on: Sentry.IssueCreated`) needs that provider's signing secret set, or `loopy
     #    run` accepts its deliveries unverified. Only fires for providers actually referenced

@@ -153,6 +153,24 @@ def test_non_daytona_provider_needs_no_daytona_key(tmp_path):
     assert not any("DAYTONA_API_KEY" in f.message for f in findings)
 
 
+def test_missing_tenki_key_flags_error_and_present_clears_it(tmp_path):
+    # A sandbox on tenki needs TENKI_API_KEY at the control plane, same as daytona.
+    root = tmp_path / "demo"
+    scaffold_project(root, "demo")
+    _fix_key(root)
+    reg = root / "registry.yml"
+    reg.write_text(reg.read_text().replace("provider: daytona", "provider: tenki"))
+
+    findings = _diagnose(root)  # no TENKI_API_KEY anywhere
+    tenki = [f for f in findings if "TENKI_API_KEY" in f.message]
+    assert len(tenki) == 1
+    assert tenki[0].level == "error"
+    assert "provider: tenki" in tenki[0].message
+
+    cleared = _diagnose(root, control_plane_env={"TENKI_API_KEY": "tk-real"})
+    assert not any("TENKI_API_KEY" in f.message for f in cleared)
+
+
 @pytest.mark.parametrize(
     "url",
     [
