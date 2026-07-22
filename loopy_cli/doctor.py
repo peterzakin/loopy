@@ -330,20 +330,23 @@ def diagnose(
             )
         )
 
-    # 4b. Tenki provider key — same story as Daytona: `provider: tenki` reads TENKI_API_KEY
-    #     from the process env (loopy.env), not the sandbox env_file, so a missing key would
-    #     otherwise slip through to the first acquire mid-run.
+    # 4b. Tenki provider key — same story as Daytona: `provider: tenki` reads its auth token
+    #     from the process env (loopy.env), not the sandbox env_file, so a missing token would
+    #     otherwise slip through to the first acquire mid-run. The provider accepts TENKI_API_KEY
+    #     *or* TENKI_AUTH_TOKEN (matching _ensure_client), so check for either.
     tenki_sandboxes = sorted(
         name for name, sandbox in registry.sandboxes.items() if sandbox.provider == "tenki"
     )
-    if tenki_sandboxes and not control_plane_env.get("TENKI_API_KEY"):
+    tenki_auth = control_plane_env.get("TENKI_API_KEY") or control_plane_env.get("TENKI_AUTH_TOKEN")
+    if tenki_sandboxes and not tenki_auth:
         is_one = len(tenki_sandboxes) == 1
         findings.append(
             Finding(
                 "error",
                 f"sandbox '{', '.join(tenki_sandboxes)}' "
-                f"{'uses' if is_one else 'use'} provider: tenki but TENKI_API_KEY is not set",
-                "add TENKI_API_KEY to loopy.env (control-plane creds), or export it",
+                f"{'uses' if is_one else 'use'} provider: tenki but neither TENKI_API_KEY "
+                f"nor TENKI_AUTH_TOKEN is set",
+                "add TENKI_API_KEY (or TENKI_AUTH_TOKEN) to loopy.env (control-plane creds), or export it",
             )
         )
 
