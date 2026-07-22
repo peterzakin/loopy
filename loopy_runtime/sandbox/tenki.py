@@ -56,7 +56,7 @@ def _max_duration_s() -> int:
 # as exec setup. Anything else in a sandbox's `image:` is rejected rather than silently
 # ignored, since tenki uses its managed default image and runs from the sandbox home.
 
-# Hre we have an "allow list", so a future loopy image field is rejected until explicitly
+# Here we have an "allow list", so a future loopy image field is rejected until explicitly
 # supported, instead of quietly dropped.
 _TENKI_HONORED_IMAGE_FIELDS = frozenset({"env", "apt", "pip", "pip_requirements", "run"})
 
@@ -70,7 +70,7 @@ def _needs_root(command: str) -> bool:
 
 def _stderr_with_diagnostics(result) -> str:
     """`CommandResult` carries `reason`/`signal`/`errno` alongside `stderr`. We collect all that
-    and show two sections: the stderr (skipped if blank) and the diganostics, with the extra
+    and show two sections: the stderr (skipped if blank) and the diagnostics, with the extra
     details."""
     stderr = result.stderr_text or ""
     details = [
