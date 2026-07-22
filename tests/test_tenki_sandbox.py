@@ -77,22 +77,34 @@ class FakeAsyncClient:
 
 
 def test_acquire_uses_default_image_and_injects_secrets():
-    # tenki's registry can't resolve a public docker ref, so we create from the default
-    # image (no image= kwarg) and replay layers; secrets are baked into the sandbox env.
+    # tenki always creates from its managed default image (no image= kwarg); the injected
+    # secrets are baked into the sandbox env.
     fake = FakeAsyncClient()
     provider = TenkiSandboxProvider(client=fake)
-    spec = SandboxSpec(provider="tenki", image={"base": "python:3.12-slim"})
+    spec = SandboxSpec(provider="tenki", image={})
     asyncio.run(provider.acquire(spec, {"OPENAI_API_KEY": "sk-test"}))
     kwargs = fake.create_kwargs[0]
-    assert "image" not in kwargs  # default image for now (base mapping is Option B)
+    assert "image" not in kwargs
     assert kwargs["env"] == {"OPENAI_API_KEY": "sk-test"}
+
+
+def test_acquire_rejects_unsupported_image_fields():
+    # tenki honors only env/apt/pip/pip_requirements/run; anything else (base selectors,
+    # workdir, user, ...) is rejected explicitly rather than silently ignored.
+    fake = FakeAsyncClient()
+    provider = TenkiSandboxProvider(client=fake)
+    with pytest.raises(RuntimeError, match="debian_slim"):
+        asyncio.run(provider.acquire(SandboxSpec(provider="tenki", image={"debian_slim": "3.12"}), {}))
+    with pytest.raises(RuntimeError, match="workdir"):
+        asyncio.run(provider.acquire(SandboxSpec(provider="tenki", image={"workdir": "/home/loopy"}), {}))
+    assert fake.create_kwargs == []  # nothing created when the image is rejected
 
 
 def test_acquire_resolves_project_from_account(monkeypatch):
     monkeypatch.delenv("TENKI_PROJECT_ID", raising=False)
     fake = FakeAsyncClient()
     provider = TenkiSandboxProvider(client=fake)
-    spec = SandboxSpec(provider="tenki", image={"base": "x"})
+    spec = SandboxSpec(provider="tenki", image={})
     asyncio.run(provider.acquire(spec, {}))
     kwargs = fake.create_kwargs[0]
     assert kwargs["project_id"] == "proj-1" and kwargs["workspace_id"] == "ws-1"
@@ -115,7 +127,7 @@ def test_acquire_replays_layers_sudo_only_for_system_packages():
     fake = FakeAsyncClient()
     spec = SandboxSpec(
         provider="tenki",
-        image={"base": "x", "apt": ["git", "curl"], "run": ["npm install -g opencode-ai"]},
+        image={"apt": ["git", "curl"], "run": ["npm install -g opencode-ai"]},
     )
     asyncio.run(TenkiSandboxProvider(client=fake).acquire(spec, {}))
     ran = [argv for argv, _cwd in fake.sandbox.execs]
@@ -130,7 +142,7 @@ def test_acquire_replays_layers_sudo_only_for_system_packages():
 
 def test_acquire_releases_and_raises_when_setup_fails():
     fake = FakeAsyncClient(fail_on="apt-get")
-    spec = SandboxSpec(provider="tenki", image={"base": "x", "apt": ["git"]})
+    spec = SandboxSpec(provider="tenki", image={"apt": ["git"]})
     with pytest.raises(RuntimeError, match="image setup failed"):
         asyncio.run(TenkiSandboxProvider(client=fake).acquire(spec, {}))
     assert fake.sandbox.terminated is True  # half-provisioned sandbox is torn down
@@ -170,7 +182,7 @@ def test_setup_failure_message_includes_diagnostics():
             return self.sandbox
 
     sb = DiagSandbox()
-    spec = SandboxSpec(provider="tenki", image={"base": "x", "apt": ["git"]})
+    spec = SandboxSpec(provider="tenki", image={"apt": ["git"]})
     with pytest.raises(RuntimeError, match="reason=ENOENT"):
         asyncio.run(TenkiSandboxProvider(client=Client(sb)).acquire(spec, {}))
     assert sb.terminated is True
@@ -215,7 +227,7 @@ def test_acquire_terminates_vm_on_cancellation_during_setup():
             return self.sandbox
 
     sb = CancelSandbox()
-    spec = SandboxSpec(provider="tenki", image={"base": "x", "apt": ["git"]})
+    spec = SandboxSpec(provider="tenki", image={"apt": ["git"]})
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(TenkiSandboxProvider(client=Client(sb)).acquire(spec, {}))
     assert sb.terminated is True

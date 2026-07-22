@@ -52,6 +52,15 @@ def _max_duration_s() -> int:
     return _DEFAULT_MAX_DURATION_S
 
 
+# Image fields the tenki provider honors: `env` is baked into create, the rest are replayed
+# as exec setup. Anything else in a sandbox's `image:` is rejected rather than silently
+# ignored, since tenki uses its managed default image and runs from the sandbox home.
+
+# Hre we have an "allow list", so a future loopy image field is rejected until explicitly
+# supported, instead of quietly dropped.
+_TENKI_HONORED_IMAGE_FIELDS = frozenset({"env", "apt", "pip", "pip_requirements", "run"})
+
+
 def _needs_root(command: str) -> bool:
     """A replayed setup command that installs system packages needs root. On Tenki's non-root
     default image those run via its passwordless sudo; user-space steps (`npm -g`, `pip`) must
@@ -171,20 +180,21 @@ class TenkiSandboxProvider:
 
     async def acquire(self, spec: SandboxSpec, secrets: Mapping[str, str]) -> TenkiSandbox:
         client = self._ensure_client()
-        project_id, workspace_id = await self._resolve_target(client)
-        # Reuse the docker provider's validated base+setup plan (shared `plan_image`
-        # validation underneath): a base image ref, a workdir, non-secret image env, and
-        # the apt/pip/run layers to replay after start.
+        # Validate the image before touching the network. plan_docker_image applies the shared
+        # validation (unknown keys, secrets in env); then reject any known field tenki can't
+        # honor, since it uses its managed default image and runs from the sandbox home
         plan = plan_docker_image(spec.image)
+        unsupported = sorted(set(spec.image) - _TENKI_HONORED_IMAGE_FIELDS)
+        if unsupported:
+            raise RuntimeError(
+                f"tenki: the sandbox image declares fields this provider does not support: "
+                f"{unsupported}. Tenki runs its managed default image from the sandbox home; "
+                f"only {sorted(_TENKI_HONORED_IMAGE_FIELDS)} are applied. Remove those fields "
+                f"for `provider: tenki`."
+            )
 
-        # Tenki resolves `image=` against the workspace registry, so a public docker ref
-        # (what plan.base is) fails with "registry image not found". Here, we create
-        # from tenki's DEFAULT image and replay the build layers below.
-        logger.info(
-            "tenki: creating sandbox (default image; loopy base %r not yet mapped, project %s)…",
-            plan.base,
-            project_id,
-        )
+        project_id, workspace_id = await self._resolve_target(client)
+        logger.info("tenki: creating sandbox (default image, project %s)…", project_id)
         # Image env first, then injected secrets, so creds win on conflict (matches the
         # runtime's secrets-merge order). `create` waits for the sandbox to be ready.
         sandbox = await client.create(
