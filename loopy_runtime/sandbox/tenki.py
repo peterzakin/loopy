@@ -35,6 +35,26 @@ def _needs_root(command: str) -> bool:
     return any(tok in command for tok in ("apt-get", "apt ", "dpkg", "apt-key"))
 
 
+def _stderr_with_diagnostics(result) -> str:
+    """`CommandResult` carries `reason`/`signal`/`errno` alongside `stderr`. We collect all that
+    and show two sections: the stderr (skipped if blank) and the diganostics, with the extra
+    details."""
+    stderr = result.stderr_text or ""
+    details = [
+        f"{name}={value}"
+        for name, value in (
+            ("reason", getattr(result, "reason", None)),
+            ("signal", getattr(result, "signal", None)),
+            ("errno", getattr(result, "errno", None)),
+        )
+        if value
+    ]
+    if not details:
+        return stderr
+    diagnostics = "tenki exec: " + ", ".join(details)
+    return f"{stderr}\n{diagnostics}" if stderr.strip() else diagnostics
+
+
 class TenkiSandbox:
     def __init__(self, client, sandbox, workdir: str | None = None):
         self._client = client
@@ -50,7 +70,7 @@ class TenkiSandbox:
         return ExecResult(
             exit_code=result.exit_code,
             stdout=result.stdout_text,
-            stderr=result.stderr_text,
+            stderr=_stderr_with_diagnostics(result),
         )
 
     async def release(self) -> None:

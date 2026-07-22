@@ -142,6 +142,49 @@ def test_exec_passes_argv_with_cwd_and_maps_result():
     assert (result.exit_code, result.stdout, result.stderr) == (0, "output", "")
 
 
+def test_exec_folds_diagnostics_when_failure_has_no_stderr():
+    @dataclass
+    class DiagResult:
+        exit_code: int = 137
+        stdout_text: str = ""
+        stderr_text: str = ""
+        reason: str = "OOMKilled"
+        signal: int = 9
+        errno: int = 0  # falsy is omitted
+
+    class DiagSandbox:
+        id = "diag"
+
+        async def exec(self, *a, **k):
+            return DiagResult()
+
+    res = asyncio.run(TenkiSandbox(None, DiagSandbox()).exec(["boom"]))
+    assert res.exit_code == 137
+    assert "reason=OOMKilled" in res.stderr and "signal=9" in res.stderr
+    assert "errno" not in res.stderr  # zero errno dropped
+
+
+def test_exec_keeps_both_stderr_and_diagnostics():
+    @dataclass
+    class DiagResult:
+        exit_code: int = 1
+        stdout_text: str = ""
+        stderr_text: str = "real error output"
+        reason: str = "Killed"
+        signal: int = 0
+        errno: int = 0
+
+    class DiagSandbox:
+        id = "diag"
+
+        async def exec(self, *a, **k):
+            return DiagResult()
+
+    res = asyncio.run(TenkiSandbox(None, DiagSandbox()).exec(["boom"]))
+    assert "real error output" in res.stderr  # original stderr kept
+    assert "reason=Killed" in res.stderr  # diagnostics appended, not replacing it
+
+
 def test_release_terminates_sandbox():
     fake = FakeAsyncClient()
     sandbox = TenkiSandbox(fake, fake.sandbox, "/workspace")
