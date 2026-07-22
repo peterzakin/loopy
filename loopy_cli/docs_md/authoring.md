@@ -275,8 +275,37 @@ sensor sees the payload. Without registration (or the manual equivalent), built-
   (`DAYTONA_API_KEY`, the GitHub App entries `loopy auth github` writes). Never injected
   into sandboxes. Gitignored.
 - **Where an agent runs is authored in `registry.yml`, not on the command line.** Every
-  sandbox must declare its `provider:` (`local | docker | daytona`); there is no
-  `--sandbox` flag.
+  sandbox must declare its `provider:` (`local | docker | daytona | tenki`); there is no
+  `--sandbox` flag. See **Sandbox providers** below for `tenki`.
+
+## Sandbox providers
+
+Each sandbox names a `provider:`:
+
+- **`local`** — a subprocess on the host (dev/demo only; isolation is only as strong as the host).
+- **`docker`** — a local container built from the `image:`.
+- **`daytona`** — the default cloud sandbox; needs `DAYTONA_API_KEY` in `loopy.env`.
+- **`tenki`** — a [Tenki](https://tenki.cloud) cloud sandbox (details below).
+
+### Tenki (`provider: tenki`)
+
+- **Install the extra.** The Tenki SDK is an optional dependency: `pip install loopy-computer[tenki]`.
+  (The deployed engine images already bundle it.)
+- **Auth is a control-plane cred.** Put `TENKI_API_KEY` (or `TENKI_AUTH_TOKEN`) in `loopy.env`.
+  Like `DAYTONA_API_KEY`, it's read from the engine's env and never injected into the sandbox.
+  `loopy doctor` flags a `provider: tenki` sandbox with neither set.
+- **Project / workspace.** Resolved automatically from your account (its first workspace +
+  project), but you can pin them with `TENKI_PROJECT_ID` / `TENKI_WORKSPACE_ID` in `loopy.env`
+  if your account has more than one.
+- **Reduced image handling.** Tenki runs its own managed default image, so a sandbox's `image:`
+  only applies `env` (baked in) and `apt`/`pip`/`run` (replayed inside the sandbox after start);
+  a base selector (`base`/`debian_slim`/`snapshot`) or `workdir`/`user`/`entrypoint`/`cmd` is
+  **rejected** rather than silently ignored, and the agent runs from the sandbox's home directory.
+- **Lifetime backstop.** `TENKI_MAX_DURATION_S` (default `3600`) caps the sandbox's lifetime so a
+  leaked VM can't run forever. It's a hard cap, but you can raise it for a step that legitimately
+  runs longer than an hour; your per-step `budget:` remains the real run limit.
+- **Cold start.** Creating the VM and installing the harness toolchain (e.g. OpenCode) adds
+  startup latency, so expect a couple of minutes for a full agent run.
 
 ## Running
 

@@ -68,9 +68,10 @@ what's left before a first run.
 - **Typed contracts.** Events and step outputs are typed field maps (JSON Schema under the
   hood, validated at runtime by pydantic and code-generated into `loopy.events` for your
   typechecker).
-- **Sandboxed execution.** Every agent runs in a declared sandbox (`local`, `docker`, or
-  `daytona`) with an explicit image, environment, and cloned repos. The sandbox inherits
-  *nothing* from your shell.
+- **Sandboxed execution.** Every agent runs in a declared sandbox (`local`, `docker`,
+  `daytona`, or `tenki`) with an explicit image, environment, and cloned repos. The sandbox
+  inherits *nothing* from your shell. (`tenki` is an optional extra —
+  `pip install loopy-computer[tenki]`, `TENKI_API_KEY` in `loopy.env`; see `loopy docs`.)
 - **Budgets and limits.** Per-step `budget:` (wall clock, spend), plus registry-level caps for
   a whole workflow or an entire event cascade.
 - **Built to be driven by agents.** `loopy docs` prints the full authoring reference as
