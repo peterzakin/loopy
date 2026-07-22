@@ -10,7 +10,11 @@ import pytest
 from loopy_runtime.manifest_model import SandboxSpec
 from loopy_runtime.sandbox.factory import make_sandbox_provider
 from loopy_runtime.sandbox.local import LocalSandboxProvider
-from loopy_runtime.sandbox.tenki import TenkiSandbox, TenkiSandboxProvider
+from loopy_runtime.sandbox.tenki import (
+    _DEFAULT_MAX_DURATION_S,
+    TenkiSandbox,
+    TenkiSandboxProvider,
+)
 
 
 @dataclass
@@ -130,6 +134,91 @@ def test_acquire_releases_and_raises_when_setup_fails():
     with pytest.raises(RuntimeError, match="image setup failed"):
         asyncio.run(TenkiSandboxProvider(client=fake).acquire(spec, {}))
     assert fake.sandbox.terminated is True  # half-provisioned sandbox is torn down
+
+
+def test_setup_failure_message_includes_diagnostics():
+    # A setup command failing with empty stderr must still surface reason/signal/errno.
+    @dataclass
+    class DiagResult:
+        exit_code: int = 1
+        stdout_text: str = ""
+        stderr_text: str = ""
+        reason: str = "ENOENT"
+        signal: int = 0
+        errno: int = 2
+
+    class DiagSandbox:
+        id = "diag"
+
+        def __init__(self):
+            self.terminated = False
+
+        async def exec(self, *a, **k):
+            return DiagResult()
+
+        async def terminate(self):
+            self.terminated = True
+
+    class Client:
+        def __init__(self, sb):
+            self.sandbox = sb
+
+        async def who_am_i(self):
+            return FakeIdentity()
+
+        async def create(self, **k):
+            return self.sandbox
+
+    sb = DiagSandbox()
+    spec = SandboxSpec(provider="tenki", image={"base": "x", "apt": ["git"]})
+    with pytest.raises(RuntimeError, match="reason=ENOENT"):
+        asyncio.run(TenkiSandboxProvider(client=Client(sb)).acquire(spec, {}))
+    assert sb.terminated is True
+
+
+def test_acquire_sets_finite_max_duration_backstop(monkeypatch):
+    monkeypatch.delenv("TENKI_MAX_DURATION_S", raising=False)
+    fake = FakeAsyncClient()
+    asyncio.run(TenkiSandboxProvider(client=fake).acquire(SandboxSpec(provider="tenki"), {}))
+    assert fake.create_kwargs[0]["max_duration"] == _DEFAULT_MAX_DURATION_S
+
+
+def test_max_duration_env_override(monkeypatch):
+    monkeypatch.setenv("TENKI_MAX_DURATION_S", "7200")  # e.g. a legitimate 2h run
+    fake = FakeAsyncClient()
+    asyncio.run(TenkiSandboxProvider(client=fake).acquire(SandboxSpec(provider="tenki"), {}))
+    assert fake.create_kwargs[0]["max_duration"] == 7200
+
+
+def test_acquire_terminates_vm_on_cancellation_during_setup():
+    # Cancellation (a BaseException) mid-provisioning must still tear the VM down, not leak it.
+    class CancelSandbox:
+        id = "cancel"
+
+        def __init__(self):
+            self.terminated = False
+
+        async def exec(self, *a, **k):
+            raise asyncio.CancelledError()
+
+        async def terminate(self):
+            self.terminated = True
+
+    class Client:
+        def __init__(self, sb):
+            self.sandbox = sb
+
+        async def who_am_i(self):
+            return FakeIdentity()
+
+        async def create(self, **k):
+            return self.sandbox
+
+    sb = CancelSandbox()
+    spec = SandboxSpec(provider="tenki", image={"base": "x", "apt": ["git"]})
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(TenkiSandboxProvider(client=Client(sb)).acquire(spec, {}))
+    assert sb.terminated is True
 
 
 def test_exec_passes_argv_with_cwd_and_maps_result():

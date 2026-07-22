@@ -17,6 +17,7 @@ the sandbox's own writable home rather than a forced `/workspace`.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import Mapping
@@ -26,6 +27,29 @@ from loopy_runtime.manifest_model import SandboxSpec
 from loopy_runtime.sandbox.docker import plan_docker_image
 
 logger = logging.getLogger(__name__)
+
+# Orphan-VM backstop (seconds): if the engine dies without calling release(), the sandbox
+# self-terminates after this long. It bounds a leaked VM — loopy's per-step budget is the real
+# run limit — but it is a HARD cap, so it must exceed your longest expected run. Override with
+# TENKI_MAX_DURATION_S when a step can run longer than the default hour.
+_DEFAULT_MAX_DURATION_S = 3600  # 1 hour
+
+
+def _max_duration_s() -> int:
+    raw = os.environ.get("TENKI_MAX_DURATION_S")
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            value = 0
+        if value > 0:
+            return value
+        logger.warning(
+            "tenki: ignoring invalid TENKI_MAX_DURATION_S=%r; using %ds",
+            raw,
+            _DEFAULT_MAX_DURATION_S,
+        )
+    return _DEFAULT_MAX_DURATION_S
 
 
 def _needs_root(command: str) -> bool:
@@ -167,21 +191,34 @@ class TenkiSandboxProvider:
             env={**plan.env, **dict(secrets)},
             project_id=project_id,
             workspace_id=workspace_id,
+            max_duration=_max_duration_s(),
         )
         box = TenkiSandbox(client, sandbox)  # cwd = the sandbox's own writable home
         logger.info("tenki: sandbox %s started; provisioning toolchain…", box.id)
 
-        # Replay the composed build layers in the running sandbox. `apt` steps are sudo'd
-        # (non-root default image); user-space steps (`npm`/`pip`) run as the user. Commands
-        # run in the sandbox home (no forced /workspace). See _needs_root / the module docstring.
-        for command in plan.setup:
-            argv = ["sudo", "sh", "-c", command] if _needs_root(command) else ["sh", "-c", command]
-            result = await sandbox.exec(*argv)
-            if result.exit_code != 0:
-                await box.release()
-                raise RuntimeError(
-                    f"tenki: image setup failed ({command!r}): {result.stderr_text.strip()}"
-                )
+        # Provisioning must be failure-atomic: once create() returns, ANY failure below — a
+        # setup command exiting non-zero, an exec that raises, or cancellation (CancelledError
+        # is a BaseException) — has to terminate the VM, or it leaks (billed until max_duration).
+        # Replay the composed build layers: `apt` steps are sudo'd (non-root default image),
+        # user-space steps (`npm`/`pip`) run as the user, all in the sandbox home (no /workspace).
+        try:
+            for command in plan.setup:
+                argv = ["sudo", "sh", "-c", command] if _needs_root(command) else ["sh", "-c", command]
+                # Go through box.exec so a setup failure carries the same reason/signal/errno
+                # diagnostics as any other exec (its .stderr is already enriched).
+                result = await box.exec(argv)
+                if result.exit_code != 0:
+                    raise RuntimeError(
+                        f"tenki: image setup failed ({command!r}): {result.stderr.strip()}"
+                    )
+        except BaseException:
+            # Shield so the terminate completes even if we're being cancelled; swallow any
+            # cleanup error so the original failure is what propagates.
+            try:
+                await asyncio.shield(box.release())
+            except BaseException:
+                logger.warning("tenki: cleanup after provisioning failure also failed", exc_info=True)
+            raise
         logger.info("tenki: sandbox %s ready", box.id)
         return box
 
