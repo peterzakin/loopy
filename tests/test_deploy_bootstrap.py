@@ -77,7 +77,7 @@ def test_render_deploy_script_fills_every_token():
     script = _render()
     assert "__LOOPY_" not in script
     assert 'PARAM_PATH="/loopy/loopy-engine"' in script
-    assert "loopy-computer[redis]==$LOOPY_VERSION" in script
+    assert "loopy-computer[redis,tenki]==$LOOPY_VERSION" in script
     assert 'LOOPY_VERSION="0.1.0"' in script
     # One fetch line per secret file, back to its project-relative path.
     assert 'fetch_secret_file "loopy.env"' in script
@@ -107,7 +107,7 @@ def test_render_deploy_script_defaults_to_pypi_install():
     script = _render(engine_image_tag="0.1.0", engine_wheel_s3="")
     assert 'ENGINE_WHEEL_S3=""' in script
     assert 'ENGINE_IMAGE_TAG="0.1.0"' in script
-    assert "loopy-computer[redis]==$LOOPY_VERSION" in script
+    assert "loopy-computer[redis,tenki]==$LOOPY_VERSION" in script
 
 
 def test_image_reuse_is_gated_on_a_source_build_so_pypi_always_rebuilds():
@@ -137,9 +137,9 @@ def test_render_deploy_script_installs_shipped_wheel_when_source_built():
     assert "__LOOPY_" not in script
     assert f'ENGINE_WHEEL_S3="{wheel_uri}"' in script
     assert 'ENGINE_IMAGE_TAG="0.1.0-abc123def456"' in script
-    # Wheel copied into a dir (keeps its PEP 427 name), then installed with the [redis] extra.
+    # Wheel copied into a dir (keeps its PEP 427 name), then installed with the [redis,tenki] extras.
     assert 'aws s3 cp "$ENGINE_WHEEL_S3" /opt/loopy/image/wheels/' in script
-    assert 'pip install --no-cache-dir "$(ls /tmp/wheels/*.whl)[redis]"' in script
+    assert 'pip install --no-cache-dir "$(ls /tmp/wheels/*.whl)[redis,tenki]"' in script
 
 
 def test_build_engine_wheel_rejects_a_non_checkout(tmp_path):
