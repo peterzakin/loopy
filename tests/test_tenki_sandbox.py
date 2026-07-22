@@ -312,5 +312,5 @@ def test_missing_api_key_fails_fast(monkeypatch):
     monkeypatch.delenv("TENKI_API_KEY", raising=False)
     monkeypatch.delenv("TENKI_AUTH_TOKEN", raising=False)
     provider = TenkiSandboxProvider()  # no injected client → must build one
-    with pytest.raises(RuntimeError, match="TENKI_API_KEY is not set"):
+    with pytest.raises(RuntimeError, match="neither TENKI_API_KEY nor TENKI_AUTH_TOKEN is set"):
         asyncio.run(provider.acquire(SandboxSpec(provider="tenki", image={"base": "x"}), {}))

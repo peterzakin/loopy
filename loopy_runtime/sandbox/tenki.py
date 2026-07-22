@@ -125,9 +125,9 @@ class TenkiSandboxProvider:
             # round-trip. Account-state issues still surface live at `acquire`.
             if not (os.environ.get("TENKI_API_KEY") or os.environ.get("TENKI_AUTH_TOKEN")):
                 raise RuntimeError(
-                    "TENKI_API_KEY is not set; the Tenki provider needs it to authenticate. "
-                    "Put it in loopy.env or export it before running a sandbox with "
-                    "`provider: tenki`."
+                    "neither TENKI_API_KEY nor TENKI_AUTH_TOKEN is set; the Tenki provider "
+                    "needs one of them to authenticate. Put it in loopy.env or export it "
+                    "before running a sandbox with `provider: tenki`."
                 )
             try:
                 from tenki_sandbox import AsyncClient
