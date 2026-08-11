@@ -2365,7 +2365,7 @@ FROM python:3.12-slim
 
 # Pinned to the loopy release this file was generated from, so the image never drifts from the
 # CLI you compile with.
-RUN pip install --no-cache-dir "loopy-computer[redis]=={version}"
+RUN pip install --no-cache-dir "loopy-computer[redis,tenki]=={version}"
 
 WORKDIR /project
 COPY . /project

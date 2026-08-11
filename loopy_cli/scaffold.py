@@ -65,8 +65,10 @@ defaults:
 
 sandboxes:
   BaseSandbox:
-    provider: daytona                          # or `docker` for a local run
+    provider: daytona                          # or `docker`/`local` for a local run
     image: { debian_slim: "3.12", apt: [git, gh], workdir: /home/loopy, user: loopy }
+    # tenki (cloud): set provider: tenki and trim `image:` to apt/pip/env/run since tenki uses a
+    # managed base image and rejects base/debian_slim/workdir/user. See `loopy docs`.
     env_file: secrets/base.env             # injected as the sandbox's env (e.g. ANTHROPIC_API_KEY)
     __REPOS_LINE__
 
@@ -186,8 +188,10 @@ defaults:
 
 sandboxes:
   BaseSandbox:
-    provider: daytona                          # or `docker` for a local run
+    provider: daytona                          # or `docker`/`local` for a local run
     image: { debian_slim: "3.12", apt: [git, gh], workdir: /home/loopy, user: loopy }
+    # tenki (cloud): set provider: tenki and trim `image:` to apt/pip/env/run — tenki uses a
+    # managed base image and rejects base/debian_slim/workdir/user. See `loopy docs`.
     env_file: secrets/base.env                   # supplies these keys in local dev
     env: [ANTHROPIC_API_KEY]                     # forwarded from the platform env in production
     # repos: [owner/repo]

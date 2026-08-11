@@ -45,7 +45,7 @@ def _project(tmp_path):
 def test_dockerfile_stdout_is_version_pinned(tmp_path):
     result = runner.invoke(app, ["dockerfile", str(_project(tmp_path)), "--stdout"])
     assert result.exit_code == 0
-    assert f'"loopy-computer[redis]=={__version__}"' in result.stdout
+    assert f'"loopy-computer[redis,tenki]=={__version__}"' in result.stdout
     assert "--in-process" in result.stdout
     assert "--bus" not in result.stdout  # no bus flag; auto-selected from REDIS_URL
     assert "RUN loopy compile ." in result.stdout  # build gate

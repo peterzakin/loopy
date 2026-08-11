@@ -22,8 +22,9 @@ COPY loopy_core ./loopy_core
 COPY loopy_runtime ./loopy_runtime
 COPY loopy_cli ./loopy_cli
 
-# [redis] for `--bus redis`; Daytona (the default sandbox) ships in the core deps.
-RUN uv pip install --system --no-cache ".[redis]"
+# [redis] for `--bus redis`, [tenki] for `provider: tenki` sandboxes; Daytona (the default
+# sandbox) ships in the core deps.
+RUN uv pip install --system --no-cache ".[redis,tenki]"
 
 # Commands run against the bind-mounted project (manifest + sensors + env files).
 WORKDIR /project

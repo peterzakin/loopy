@@ -69,14 +69,14 @@ build_engine_image() {
   if [ -n "$ENGINE_WHEEL_S3" ]; then
     # Keep the wheel's real filename: pip rejects any name that isn't a valid PEP 427 wheel
     # (`<dist>-<ver>-<pytag>-<abi>-<plat>.whl`). Copying into a dir preserves the basename; the
-    # RUN globs the sole wheel and appends the [redis] extra at build time (quoted heredoc, so
+    # RUN globs the sole wheel and appends the [redis,tenki] extras at build time (quoted heredoc, so
     # $(...) survives to the image build rather than expanding here).
     mkdir -p /opt/loopy/image/wheels
     aws s3 cp "$ENGINE_WHEEL_S3" /opt/loopy/image/wheels/ --region "$REGION"
     cat > /opt/loopy/image/Dockerfile <<'DOCKERFILE'
 FROM python:3.12-slim
 COPY wheels/ /tmp/wheels/
-RUN pip install --no-cache-dir "$(ls /tmp/wheels/*.whl)[redis]"
+RUN pip install --no-cache-dir "$(ls /tmp/wheels/*.whl)[redis,tenki]"
 WORKDIR /project
 ENTRYPOINT ["loopy"]
 DOCKERFILE
@@ -84,7 +84,7 @@ DOCKERFILE
   else
     cat > /opt/loopy/image/Dockerfile <<EOF
 FROM python:3.12-slim
-RUN pip install --no-cache-dir "loopy-computer[redis]==$LOOPY_VERSION"
+RUN pip install --no-cache-dir "loopy-computer[redis,tenki]==$LOOPY_VERSION"
 WORKDIR /project
 ENTRYPOINT ["loopy"]
 EOF

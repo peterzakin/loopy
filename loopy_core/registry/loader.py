@@ -201,7 +201,7 @@ def _load_sandboxes(sb_map: Mapping, file: str, diags: DiagnosticCollector) -> d
         if not isinstance(provider, str) or not provider.strip():
             diags.error(
                 codes.E214,
-                f"sandbox '{name}' must declare a provider: (local | docker | daytona)",
+                f"sandbox '{name}' must declare a provider: (local | docker | daytona | tenki)",
                 span=span_at(file, _line_of(sb_map, name)),
             )
         out[name] = Sandbox(

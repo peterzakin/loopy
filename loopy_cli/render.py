@@ -357,7 +357,7 @@ def project_checks(root: Path, manifest_abs: Path) -> list[Check]:
             Check(
                 "dockerfile",
                 f"Dockerfile pin matches installed loopy ({__version__})",
-                f"loopy-computer[redis]=={__version__}" in dockerfile.read_text(),
+                f"loopy-computer[redis,tenki]=={__version__}" in dockerfile.read_text(),
                 warn=True,
                 fix=f"regenerate with `loopy dockerfile` (pins {__version__}), commit and push",
             )

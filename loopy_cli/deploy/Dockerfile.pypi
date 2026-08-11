@@ -13,8 +13,9 @@ FROM python:3.12-slim
 ARG LOOPY_VERSION
 RUN test -n "$LOOPY_VERSION" || (echo "LOOPY_VERSION build arg is required" >&2; exit 1)
 
-# [redis] for `--bus redis`; Daytona (the default sandbox) ships in the core deps.
-RUN pip install --no-cache-dir "loopy-computer[redis]==${LOOPY_VERSION}"
+# [redis] for `--bus redis`, [tenki] for `provider: tenki` sandboxes; Daytona (the default
+# sandbox) ships in the core deps.
+RUN pip install --no-cache-dir "loopy-computer[redis,tenki]==${LOOPY_VERSION}"
 
 # Commands run against the bind-mounted project (manifest + sensors + env files).
 WORKDIR /project
