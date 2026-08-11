@@ -294,9 +294,8 @@ Each sandbox names a `provider:`:
 - **Auth is a control-plane cred.** Put `TENKI_API_KEY` (or `TENKI_AUTH_TOKEN`) in `loopy.env`.
   Like `DAYTONA_API_KEY`, it's read from the engine's env and never injected into the sandbox.
   `loopy doctor` flags a `provider: tenki` sandbox with neither set.
-- **Project / workspace.** Resolved automatically from your account (its first workspace +
-  project), but you can pin them with `TENKI_PROJECT_ID` / `TENKI_WORKSPACE_ID` in `loopy.env`
-  if your account has more than one.
+- **Workspace.** Resolved automatically from your account (its first workspace), but you can
+  pin it with `TENKI_WORKSPACE_ID` in `loopy.env` if your account has more than one.
 - **Reduced image handling.** Tenki runs its own managed default image, so a sandbox's `image:`
   only applies `env` (baked in) and `apt`/`pip`/`run` (replayed inside the sandbox after start);
   a base selector (`base`/`debian_slim`/`snapshot`) or `workdir`/`user`/`entrypoint`/`cmd` is

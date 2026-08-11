@@ -25,14 +25,8 @@ class FakeCommandResult:
 
 
 @dataclass
-class FakeProject:
-    id: str = "proj-1"
-
-
-@dataclass
 class FakeWorkspace:
     id: str = "ws-1"
-    projects: tuple = (FakeProject(),)
 
 
 @dataclass
@@ -100,26 +94,26 @@ def test_acquire_rejects_unsupported_image_fields():
     assert fake.create_kwargs == []  # nothing created when the image is rejected
 
 
-def test_acquire_resolves_project_from_account(monkeypatch):
-    monkeypatch.delenv("TENKI_PROJECT_ID", raising=False)
+def test_acquire_resolves_workspace_from_account(monkeypatch):
+    monkeypatch.delenv("TENKI_WORKSPACE_ID", raising=False)
     fake = FakeAsyncClient()
     provider = TenkiSandboxProvider(client=fake)
     spec = SandboxSpec(provider="tenki", image={})
     asyncio.run(provider.acquire(spec, {}))
     kwargs = fake.create_kwargs[0]
-    assert kwargs["project_id"] == "proj-1" and kwargs["workspace_id"] == "ws-1"
+    assert kwargs["workspace_id"] == "ws-1"
+    assert "project_id" not in kwargs
     # A second acquire reuses the cached target: no repeat who_am_i round-trip.
     asyncio.run(provider.acquire(spec, {}))
     assert fake.who_am_i_calls == 1
 
 
 def test_env_override_wins_and_skips_who_am_i(monkeypatch):
-    monkeypatch.setenv("TENKI_PROJECT_ID", "proj-env")
     monkeypatch.setenv("TENKI_WORKSPACE_ID", "ws-env")
     fake = FakeAsyncClient()
     asyncio.run(TenkiSandboxProvider(client=fake).acquire(SandboxSpec(provider="tenki"), {}))
     kwargs = fake.create_kwargs[0]
-    assert (kwargs["project_id"], kwargs["workspace_id"]) == ("proj-env", "ws-env")
+    assert kwargs["workspace_id"] == "ws-env"
     assert fake.who_am_i_calls == 0  # explicit override means no account lookup
 
 

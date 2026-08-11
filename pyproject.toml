@@ -47,7 +47,7 @@ redis = [
 # The Tenki sandbox provider's SDK.
 # Optional, only a project using `provider: tenki` needs it.
 tenki = [
-    "tenki-sandbox>=0.4",
+    "tenki>=0.5.4",
 ]
 
 [dependency-groups]

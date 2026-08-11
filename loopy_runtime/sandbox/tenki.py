@@ -1,7 +1,7 @@
 """Tenki sandbox provider: run agents in Tenki cloud sandboxes behind the
 `SandboxProvider`/`Sandbox` Protocols.
 
-Mirrors the Daytona provider: the `tenki-sandbox` SDK is imported lazily (so the rest of
+Mirrors the Daytona provider: the `tenki` SDK is imported lazily (so the rest of
 the runtime loads without it) and its async client can be injected, so tests never hit the
 real service. Secrets inject as the sandbox's env at create, `exec` maps an argv list to
 a `CommandResult` and returns an `ExecResult`, and `release` terminates the sandbox.
@@ -114,9 +114,8 @@ class TenkiSandboxProvider:
     def __init__(self, client=None):
         # `client` is an AsyncClient instance; injectable for tests.
         self._client = client
-        # Resolved once and cached: Tenki's create requires a project and its workspace,
-        # which aren't env vars — they come from the account (`who_am_i`) or explicit override.
-        self._project_id: str | None = None
+        # Resolved once and cached: Tenki's create requires a workspace, which isn't an env
+        # var — it comes from the account (`who_am_i`) or explicit override.
         self._workspace_id: str | None = None
 
     def _ensure_client(self):
@@ -130,53 +129,44 @@ class TenkiSandboxProvider:
                     "before running a sandbox with `provider: tenki`."
                 )
             try:
-                from tenki_sandbox import AsyncClient
+                from tenki import AsyncClient
             except ImportError as exc:
                 raise RuntimeError(
-                    "the tenki-sandbox SDK is not installed; it's an optional dependency of "
+                    "the tenki SDK is not installed; it's an optional dependency of "
                     "loopy-computer. Install it with `pip install loopy-computer[tenki]`."
                 ) from exc
             self._client = AsyncClient()  # reads TENKI_API_KEY / TENKI_AUTH_TOKEN from env
         return self._client
 
-    async def _resolve_target(self, client) -> tuple[str, str | None]:
-        """The (project_id, workspace_id) Tenki's `create` needs, resolved once and cached.
+    async def _resolve_target(self, client) -> str | None:
+        """The workspace_id Tenki's `create` needs, resolved once and cached.
 
-        Precedence: explicit `TENKI_PROJECT_ID` / `TENKI_WORKSPACE_ID` (from loopy.env) win;
-        otherwise the account's first workspace + first project (`who_am_i`), which is the
-        zero-config path for a single-project account. A multi-project account is logged so
-        the user knows to pin it with the env overrides."""
-        if self._project_id is not None:
-            return self._project_id, self._workspace_id
-        env_project = os.environ.get("TENKI_PROJECT_ID")
-        if env_project:
-            self._project_id = env_project
-            self._workspace_id = os.environ.get("TENKI_WORKSPACE_ID")
-            return self._project_id, self._workspace_id
+        Precedence: explicit `TENKI_WORKSPACE_ID` (from loopy.env) wins; otherwise the
+        account's first workspace (`who_am_i`), which is the zero-config path for a
+        single-workspace account. A multi-workspace account is logged so the user knows to
+        pin it with the env override."""
+        if self._workspace_id is not None:
+            return self._workspace_id
+        env_workspace = os.environ.get("TENKI_WORKSPACE_ID")
+        if env_workspace:
+            self._workspace_id = env_workspace
+            return self._workspace_id
 
         identity = await client.who_am_i()
         workspaces = list(getattr(identity, "workspaces", None) or [])
         if not workspaces:
             raise RuntimeError(
-                "tenki: your account has no workspace; set TENKI_PROJECT_ID in loopy.env"
+                "tenki: your account has no workspace; set TENKI_WORKSPACE_ID in loopy.env"
             )
         workspace = workspaces[0]
-        projects = list(getattr(workspace, "projects", None) or [])
-        if not projects:
-            raise RuntimeError(
-                f"tenki: workspace {getattr(workspace, 'id', '?')!r} has no project; "
-                "set TENKI_PROJECT_ID in loopy.env"
-            )
-        if len(workspaces) > 1 or len(projects) > 1:
+        if len(workspaces) > 1:
             logger.info(
-                "tenki: account has multiple workspaces/projects; using workspace %s / "
-                "project %s (pin with TENKI_WORKSPACE_ID / TENKI_PROJECT_ID in loopy.env)",
+                "tenki: account has multiple workspaces; using workspace %s "
+                "(pin with TENKI_WORKSPACE_ID in loopy.env)",
                 getattr(workspace, "id", "?"),
-                getattr(projects[0], "id", "?"),
             )
         self._workspace_id = getattr(workspace, "id", None)
-        self._project_id = getattr(projects[0], "id", None)
-        return self._project_id, self._workspace_id
+        return self._workspace_id
 
     async def acquire(self, spec: SandboxSpec, secrets: Mapping[str, str]) -> TenkiSandbox:
         client = self._ensure_client()
@@ -193,13 +183,12 @@ class TenkiSandboxProvider:
                 f"for `provider: tenki`."
             )
 
-        project_id, workspace_id = await self._resolve_target(client)
-        logger.info("tenki: creating sandbox (default image, project %s)…", project_id)
+        workspace_id = await self._resolve_target(client)
+        logger.info("tenki: creating sandbox (default image, workspace %s)…", workspace_id)
         # Image env first, then injected secrets, so creds win on conflict (matches the
         # runtime's secrets-merge order). `create` waits for the sandbox to be ready.
         sandbox = await client.create(
             env={**plan.env, **dict(secrets)},
-            project_id=project_id,
             workspace_id=workspace_id,
             max_duration=_max_duration_s(),
         )
