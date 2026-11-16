@@ -27,7 +27,7 @@ dependencies = [
     "pyjwt[crypto]>=2.8",
     # Daytona is the default sandbox provider (agents run in remote cloud sandboxes,
     # never silently on the host), so its SDK is a core dependency — not an optional extra.
-    "daytona>=0.180",
+    "daytona>=0.180,<1",
     # `loopy deploy aws` provisions the engine's hosting stack via CloudFormation; boto3
     # is a core dependency (imported lazily so `loopy compile` stays runtime-free). The
     # `[crt]` extra pulls awscrt, which botocore's SSO / IAM Identity Center ("login")
